@@ -1,0 +1,30 @@
+import { identifier } from "@kit.AdsKit";
+import { hilog } from "@kit.PerformanceAnalysisKit";
+import { BusinessError } from "@kit.BasicServicesKit";
+
+
+export function RegisterOHADSHelper() {
+  const register: Record<string, Object> = {};
+  register["OHADSHelper"] = OHADSHelper;
+  return register;
+}
+
+class  OHADSHelper
+{
+  static GetOAID(callback: (...args: Array<ESObject>) => ESObject)
+  {
+    try {
+      identifier.getOAID().then((data) => {
+        hilog.info(0x0000, 'SDKKit', '%{public}s', ` Succeeded to get ads identifier info ，OAID : ${data} `);
+        let ret :ESObject = {oaid : data}
+        const args:Array<ESObject> = [ret];
+        callback(...args)
+      }).catch((error: BusinessError) => {
+        hilog.error(0x0000, 'SDKKit', '%{public}s',
+          `Failed to get ads identifier info, code: ${error.code}, message: ${error.message}`);
+      })
+    } catch (error) {
+      hilog.error(0x0000, 'SDKKit', '%{public}s', `Catch err, code: ${error.code}, message: ${error.message}`);
+    }
+  }
+}
