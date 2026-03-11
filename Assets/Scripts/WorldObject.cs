@@ -24,7 +24,7 @@ public class WorldObject : MonoBehaviour
     // ── Prompt text (shown in HUD) ───────────────────────────────────────────
     [Header("Prompt Text")]
     public string interactPrompt = "Interact";
-    public string carryPrompt    = "Pick up";
+    public string carryPrompt    = "Carry";
     public string dropPrompt     = "Put down";
     public string collectPrompt  = "Collect";
 
