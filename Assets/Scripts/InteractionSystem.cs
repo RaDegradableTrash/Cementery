@@ -1,4 +1,4 @@
-using System.Linq;
+using System.Collections;
 using TMPro;
 using UnityEngine;
 
@@ -28,16 +28,20 @@ public class InteractionSystem : MonoBehaviour
     [SerializeField] private LayerMask interactMask  = ~0;
 
     [Header("Carry Settings")]
-    [Tooltip("Distance in front of the camera where the carried object is held.")]
-    [SerializeField] private float holdDistance    = 2f;
-    [Tooltip("How quickly the carried object lerps toward the hold point.")]
-    [SerializeField] private float holdLerpSpeed   = 15f;
-    [Tooltip("If the held object strays further than this, it is automatically dropped.")]
-    [SerializeField] private float maxHoldDistance = 4f;
+    [Tooltip("Distance in front of the camera where the object snaps on pickup.")]
+    [SerializeField] private float holdDistance       = 2f;
+    [Tooltip("Downward offset from camera-forward so the object sits below screen centre. Negative = lower.")]
+    [SerializeField] private float holdVerticalOffset = -0.5f;
 
-    [Header("UI")]
-    [Tooltip("Optional TextMeshProUGUI that shows context-sensitive action prompts.")]
-    [SerializeField] private TextMeshProUGUI promptLabel;
+    [Header("UI — assign the three TMP children of FacingNotificationEmpty")]
+    [SerializeField] private TextMeshProUGUI interactLabel;
+    [SerializeField] private TextMeshProUGUI carryLabel;
+    [SerializeField] private TextMeshProUGUI collectLabel;
+
+    [Header("UI — Info Label")]
+    [Tooltip("Shared TMP that shows per-object messages on interact and collect.")]
+    [SerializeField] private TextMeshProUGUI infoLabel;
+    [SerializeField] private float           infoDisplayDuration = 2.5f;
 
     // ── Runtime State ─────────────────────────────────────────────────────────
     private WorldObject _lookedAt;
@@ -45,6 +49,10 @@ public class InteractionSystem : MonoBehaviour
     private Rigidbody   _carriedRb;
     private bool        _rbWasKinematic;
     private bool        _rbHadGravity;
+    private float       _rbWasDrag;
+    private float       _rbWasAngularDrag;
+    private Transform   _carriedOriginalParent;
+    private Coroutine   _hideInfoCo;
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
     void Awake()
@@ -58,11 +66,6 @@ public class InteractionSystem : MonoBehaviour
         ScanForWorldObject();
         HandleInput();
         UpdatePrompt();
-    }
-
-    void FixedUpdate()
-    {
-        MoveCarriedObject();
     }
 
     // ── Scan (camera-forward raycast) ─────────────────────────────────────────
@@ -83,7 +86,11 @@ public class InteractionSystem : MonoBehaviour
     {
         // [F] — Interact
         if (Input.GetKeyDown(KeyCode.F) && _lookedAt != null && _lookedAt.interactable)
+        {
             _lookedAt.TriggerInteract(gameObject);
+            _lookedAt.PlayInteractAnim();
+            ShowInfo(_lookedAt.interactMessage);
+        }
 
         // [Hold LMB] — Start carrying on press
         if (Input.GetMouseButtonDown(0) && _carried == null
@@ -102,24 +109,35 @@ public class InteractionSystem : MonoBehaviour
     // ── Collect ───────────────────────────────────────────────────────────────
     void Collect(WorldObject obj)
     {
+        ShowInfo(obj.collectMessage);
         obj.TriggerCollect(gameObject);
         _lookedAt = null;
-        Destroy(obj.gameObject);
+        obj.PlayCollectAnim(() => Destroy(obj.gameObject));
     }
 
     // ── Carry ─────────────────────────────────────────────────────────────────
     void PickUp(WorldObject obj)
     {
-        _carried   = obj;
-        _carriedRb = obj.GetComponent<Rigidbody>();
+        _carried              = obj;
+        _carriedRb            = obj.GetComponent<Rigidbody>();
+        _carriedOriginalParent = obj.transform.parent;
 
         if (_carriedRb != null)
         {
-            _rbWasKinematic        = _carriedRb.isKinematic;
-            _rbHadGravity          = _carriedRb.useGravity;
-            _carriedRb.isKinematic = true;
-            _carriedRb.useGravity  = false;
+            _rbWasKinematic   = _carriedRb.isKinematic;
+            _rbHadGravity     = _carriedRb.useGravity;
+            _rbWasDrag        = _carriedRb.drag;
+            _rbWasAngularDrag = _carriedRb.angularDrag;
+
+            _carriedRb.isKinematic    = true;   // transform-driven while carried
+            _carriedRb.useGravity     = false;
+            _carriedRb.velocity       = Vector3.zero;
+            _carriedRb.angularVelocity = Vector3.zero;
         }
+
+        // Snap to hold point, then parent so the object follows the player
+        obj.transform.position = HoldPosition();
+        obj.transform.SetParent(transform, worldPositionStays: true);
 
         _carried.TriggerPickUp(gameObject);
     }
@@ -128,10 +146,15 @@ public class InteractionSystem : MonoBehaviour
     {
         if (_carried == null) return;
 
+        // Detach from player, restoring original parent
+        _carried.transform.SetParent(_carriedOriginalParent, worldPositionStays: true);
+
         if (_carriedRb != null)
         {
             _carriedRb.isKinematic = _rbWasKinematic;
             _carriedRb.useGravity  = _rbHadGravity;
+            _carriedRb.drag        = _rbWasDrag;
+            _carriedRb.angularDrag = _rbWasAngularDrag;
             _carriedRb = null;
         }
 
@@ -139,51 +162,54 @@ public class InteractionSystem : MonoBehaviour
         _carried = null;
     }
 
-    void MoveCarriedObject()
+    /// <summary>
+    /// Returns the world-space hold point: camera position + forward-down direction * holdDistance.
+    /// </summary>
+    Vector3 HoldPosition()
     {
-        if (_carried == null) return;
-
-        Vector3 holdPos = playerCamera.transform.position
-                        + playerCamera.transform.forward * holdDistance;
-
-        if (Vector3.Distance(_carried.transform.position, holdPos) > maxHoldDistance)
-        {
-            Drop();
-            return;
-        }
-
-        if (_carriedRb != null)
-            _carriedRb.MovePosition(Vector3.Lerp(
-                _carried.transform.position, holdPos, holdLerpSpeed * Time.fixedDeltaTime));
-        else
-            _carried.transform.position = Vector3.Lerp(
-                _carried.transform.position, holdPos, holdLerpSpeed * Time.fixedDeltaTime);
+        Vector3 camPos  = playerCamera.transform.position;
+        Vector3 camFwd  = playerCamera.transform.forward;
+        Vector3 holdDir = (camFwd + Vector3.up * holdVerticalOffset).normalized;
+        return camPos + holdDir * holdDistance;
     }
+
 
     // ── Prompt ────────────────────────────────────────────────────────────────
     void UpdatePrompt()
     {
-        if (promptLabel == null) return;
-        string text    = BuildPromptText();
-        bool   hasText = !string.IsNullOrEmpty(text);
-        promptLabel.gameObject.SetActive(hasText);
-        if (hasText) promptLabel.text = text;
+        if (_carried != null)
+        {
+            SetActive(interactLabel,  false);
+            SetActive(carryLabel,     true);
+            SetActive(collectLabel,   false);
+            return;
+        }
+
+        SetActive(interactLabel, _lookedAt != null && _lookedAt.interactable);
+        SetActive(carryLabel,    _lookedAt != null && _lookedAt.carryable);
+        SetActive(collectLabel,  _lookedAt != null && _lookedAt.collectable);
     }
 
-    string BuildPromptText()
+    void SetActive(TextMeshProUGUI label, bool active)
     {
-        // Carrying: only show the drop hint
-        if (_carried != null)
-            return $"[ Release LMB ]  {_carried.dropPrompt}";
+        if (label != null) label.gameObject.SetActive(active);
+    }
 
-        if (_lookedAt == null) return null;
+    // ── Info Label ────────────────────────────────────────────────────────────
+    void ShowInfo(string message)
+    {
+        if (infoLabel == null || string.IsNullOrEmpty(message)) return;
+        if (_hideInfoCo != null) StopCoroutine(_hideInfoCo);
+        infoLabel.text = message;
+        infoLabel.gameObject.SetActive(true);
+        _hideInfoCo = StartCoroutine(HideInfoCo());
+    }
 
-        string fLine   = _lookedAt.interactable ? $"[ F ]  {_lookedAt.interactPrompt}"   : null;
-        string lmbLine = _lookedAt.carryable    ? $"[ Hold LMB ]  {_lookedAt.carryPrompt}" : null;
-        string rmbLine = _lookedAt.collectable  ? $"[ RMB ]  {_lookedAt.collectPrompt}"   : null;
-
-        // Stack all applicable hints, one per line
-        return string.Join("\n", new[] { fLine, lmbLine, rmbLine }
-            .Where(s => s != null));
+    IEnumerator HideInfoCo()
+    {
+        yield return new WaitForSeconds(infoDisplayDuration);
+        if (infoLabel != null)
+            infoLabel.gameObject.SetActive(false);
+        _hideInfoCo = null;
     }
 }
