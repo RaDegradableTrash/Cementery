@@ -19,28 +19,28 @@ public class PlayerController : MonoBehaviour
     public LayerMask groundMask = ~0;
 
     [Header("Head Bob")]
-    [Tooltip("The transform that holds the camera (child of Player). Leave empty to disable bob.")]
-    public Transform cameraHolder;
-    public float bobFrequency = 1.8f;   // cycles per second
-    public float bobAmplitude = 0.06f;  // metres of vertical travel
+    [SerializeField] private float bobFrequency = 1.8f;
+    [SerializeField] private float bobAmplitude = 0.06f;
+
+    /// <summary>
+    /// Additive eye-space offset produced by head bobbing.
+    /// MouseLook reads this each LateUpdate to nudge the camera.
+    /// </summary>
+    public Vector3 BobOffset { get; private set; }
 
     // ── Internal State ──────────────────────────────────────────────────────
     private CharacterController _cc;
     private PlayerStamina _stamina;
 
-    private Vector3 _yVelocity;       // only Y is used; separated for clarity
+    private Vector3 _yVelocity;
     private float _bobTimer;
-    private Vector3 _camDefaultPos;
     private bool _isGrounded;
 
     // ── Lifecycle ────────────────────────────────────────────────────────────
     void Awake()
     {
-        _cc = GetComponent<CharacterController>();
+        _cc      = GetComponent<CharacterController>();
         _stamina = GetComponent<PlayerStamina>();
-
-        if (cameraHolder != null)
-            _camDefaultPos = cameraHolder.localPosition;
     }
 
     void Update()
@@ -103,22 +103,19 @@ public class PlayerController : MonoBehaviour
     // ── Head Bob ─────────────────────────────────────────────────────────────
     void HandleHeadBob()
     {
-        if (cameraHolder == null) return;
-
         bool isMoving = new Vector3(_cc.velocity.x, 0f, _cc.velocity.z).sqrMagnitude > 0.04f && _isGrounded;
 
         if (isMoving)
         {
             _bobTimer += Time.deltaTime * bobFrequency * 2f * Mathf.PI;
-            float bobY = Mathf.Sin(_bobTimer) * bobAmplitude;
+            float bobY = Mathf.Sin(_bobTimer)        * bobAmplitude;
             float bobX = Mathf.Sin(_bobTimer * 0.5f) * bobAmplitude * 0.5f;
-            cameraHolder.localPosition = _camDefaultPos + new Vector3(bobX, bobY, 0f);
+            BobOffset  = new Vector3(bobX, bobY, 0f);
         }
         else
         {
             _bobTimer = 0f;
-            cameraHolder.localPosition = Vector3.Lerp(
-                cameraHolder.localPosition, _camDefaultPos, Time.deltaTime * 8f);
+            BobOffset = Vector3.Lerp(BobOffset, Vector3.zero, Time.deltaTime * 8f);
         }
     }
 }
