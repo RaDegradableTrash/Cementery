@@ -50,6 +50,36 @@ public class WorldObject : MonoBehaviour
 
     // ── Animations ───────────────────────────────────────────────────────────
     private Coroutine _interactAnim;
+    private Coroutine _collectAnim;
+    private Vector3   _baseScale;        // original scale, cached before any anim
+    private Rigidbody _animRb;           // rb being locked by current anim
+    private bool      _animPrevKinematic;
+    private Vector3   _posBeforeAnim;    // world position before animation started; restored on CancelAnims
+
+    void Awake() => _baseScale = transform.localScale;
+
+    /// <summary>
+    /// Immediately stops any running animation, restores scale and Rigidbody state.
+    /// Call this before externally moving the object (e.g. PickUp).
+    /// </summary>
+    public void CancelAnims()
+    {
+        bool hadInteract = _interactAnim != null;
+        bool had = hadInteract || _collectAnim != null;
+        if (_interactAnim != null) { StopCoroutine(_interactAnim); _interactAnim = null; }
+        if (_collectAnim  != null) { StopCoroutine(_collectAnim);  _collectAnim  = null; }
+        transform.localScale = _baseScale;
+        // Restore position: AnchorBottom may have locked XZ to wherever the object was when the
+        // animation started (e.g. carry position). Undo that so the object stays where physics left it.
+        if (hadInteract) transform.position = _posBeforeAnim;
+        if (had && _animRb != null)
+        {
+            _animRb.isKinematic    = _animPrevKinematic;
+            _animRb.velocity       = Vector3.zero;
+            _animRb.angularVelocity = Vector3.zero;
+            _animRb = null;
+        }
+    }
 
     /// <summary>Plays squash → restore → stretch → restore once. Re-entrant calls are ignored.</summary>
     public void PlayInteractAnim()
@@ -60,37 +90,78 @@ public class WorldObject : MonoBehaviour
 
     /// <summary>Plays the collect pop animation (grow + squash/stretch → shrink to zero), then calls onComplete.</summary>
     public void PlayCollectAnim(System.Action onComplete)
-        => StartCoroutine(CollectAnimCo(onComplete));
+        => _collectAnim = StartCoroutine(CollectAnimCo(onComplete));
 
     // ── Interact animation ────────────────────────────────────────────────────
+    /// Local-space Y of the collider bottom relative to this pivot.
+    /// Read directly from collider properties — never changes regardless of physics or carry history.
+    float LocalColliderBottomOffset()
+    {
+        BoxCollider     box = GetComponent<BoxCollider>();     if (box != null) return box.center.y - box.size.y * 0.5f;
+        SphereCollider  sph = GetComponent<SphereCollider>(); if (sph != null) return sph.center.y - sph.radius;
+        CapsuleCollider cap = GetComponent<CapsuleCollider>(); if (cap != null) return cap.center.y - cap.height * 0.5f;
+        return 0f;
+    }
+
     IEnumerator InteractAnimCo()
     {
-        Vector3 orig    = transform.localScale;
-        Vector3 squash  = new Vector3(orig.x * 1.35f, orig.y * 0.55f, orig.z * 1.35f);
-        Vector3 stretch = new Vector3(orig.x * 0.75f, orig.y * 1.45f, orig.z * 0.75f);
-        float   t       = animPhaseTime;
+        Vector3 origScale  = transform.localScale;
+        Vector3 origPos    = transform.position;
+        _posBeforeAnim     = origPos;   // snapshot BEFORE any scale/position change
+        // lco: how far below the pivot the collider bottom sits, in local units (constant).
+        // worldBottom = origPos.y + lco * scaleY  →  to keep worldBottom fixed, adjust pivotY each frame.
+        float lco            = LocalColliderBottomOffset();
+        float origWorldBottom = origPos.y + lco * origScale.y;
+        Vector3 squash    = new Vector3(origScale.x * 1.17f, origScale.y * 0.77f, origScale.z * 1.17f);
+        Vector3 stretch   = new Vector3(origScale.x * 0.87f, origScale.y * 1.22f, origScale.z * 0.87f);
+        float   t         = animPhaseTime;
         float   e;
+
+        // Make kinematic so growing/shrinking colliders can't be pushed by the ground
+        _animRb = GetComponent<Rigidbody>();
+        if (_animRb != null)
+        {
+            _animPrevKinematic      = _animRb.isKinematic;
+            _animRb.velocity        = Vector3.zero;   // clear before kinematic or stored velocity replays
+            _animRb.angularVelocity = Vector3.zero;
+            _animRb.isKinematic     = true;
+        }
+
+        // Helper: after each scale assignment, reposition pivot so the world bottom stays constant.
+        // pivotY = origWorldBottom - lco * currentScaleY
+        void AnchorBottom() => transform.position = new Vector3(
+            origPos.x,
+            origWorldBottom - lco * transform.localScale.y,
+            origPos.z);
 
         // Squash (fast out)
         e = 0f;
-        while (e < t) { e += Time.deltaTime; transform.localScale = Vector3.LerpUnclamped(orig,    squash,  EaseOut  (Mathf.Clamp01(e / t))); yield return null; }
-        transform.localScale = squash;
+        while (e < t) { e += Time.deltaTime; transform.localScale = Vector3.LerpUnclamped(origScale, squash,    EaseOut  (Mathf.Clamp01(e / t))); AnchorBottom(); yield return null; }
+        transform.localScale = squash;   AnchorBottom();
 
         // Restore (smooth)
         e = 0f;
-        while (e < t) { e += Time.deltaTime; transform.localScale = Vector3.LerpUnclamped(squash,  orig,    EaseInOut(Mathf.Clamp01(e / t))); yield return null; }
-        transform.localScale = orig;
+        while (e < t) { e += Time.deltaTime; transform.localScale = Vector3.LerpUnclamped(squash,    origScale, EaseInOut(Mathf.Clamp01(e / t))); AnchorBottom(); yield return null; }
+        transform.localScale = origScale; AnchorBottom();
 
         // Stretch (fast out)
         e = 0f;
-        while (e < t) { e += Time.deltaTime; transform.localScale = Vector3.LerpUnclamped(orig,    stretch, EaseOut  (Mathf.Clamp01(e / t))); yield return null; }
-        transform.localScale = stretch;
+        while (e < t) { e += Time.deltaTime; transform.localScale = Vector3.LerpUnclamped(origScale, stretch,   EaseOut  (Mathf.Clamp01(e / t))); AnchorBottom(); yield return null; }
+        transform.localScale = stretch;  AnchorBottom();
 
         // Restore (smooth)
         e = 0f;
-        while (e < t) { e += Time.deltaTime; transform.localScale = Vector3.LerpUnclamped(stretch, orig,    EaseInOut(Mathf.Clamp01(e / t))); yield return null; }
-        transform.localScale = orig;
+        while (e < t) { e += Time.deltaTime; transform.localScale = Vector3.LerpUnclamped(stretch,   origScale, EaseInOut(Mathf.Clamp01(e / t))); AnchorBottom(); yield return null; }
+        transform.localScale = origScale;
+        AnchorBottom();
 
+        if (_animRb != null)
+        {
+            _animRb.isKinematic    = _animPrevKinematic;
+            _animRb.velocity       = Vector3.zero;   // don't launch the object after animation ends
+            _animRb.angularVelocity = Vector3.zero;
+            _animRb = null;
+        }
         _interactAnim = null;
     }
 
@@ -98,10 +169,21 @@ public class WorldObject : MonoBehaviour
     IEnumerator CollectAnimCo(System.Action onComplete)
     {
         Vector3 orig         = transform.localScale;
-        float   totalGrow    = collectGrowTime * 2f;   // squash phase + stretch phase
+        Vector3 lockedPos    = transform.position;   // keep base anchored
+        float   totalGrow    = collectGrowTime * 2f;
         float   maxOverall   = 1.3f;
         Vector3 squashShape  = new Vector3(1.35f, 0.55f, 1.35f);
         Vector3 stretchShape = new Vector3(0.72f, 1.55f, 0.72f);
+
+        // Kinematic so scaled colliders don't interact with ground during anim
+        _animRb = GetComponent<Rigidbody>();
+        if (_animRb != null)
+        {
+            _animPrevKinematic      = _animRb.isKinematic;
+            _animRb.velocity        = Vector3.zero;
+            _animRb.angularVelocity = Vector3.zero;
+            _animRb.isKinematic     = true;
+        }
 
         // Grow + squash → peak stretch (EaseOut on overall size, EaseInOut on shape)
         float elapsed = 0f;
@@ -111,9 +193,10 @@ public class WorldObject : MonoBehaviour
             float   p       = Mathf.Clamp01(elapsed / totalGrow);
             float   overall = Mathf.Lerp(1f, maxOverall, EaseOut(p));
             Vector3 shape   = p <= 0.5f
-                ? Vector3.Lerp(Vector3.one,   squashShape,  EaseInOut(p * 2f))
-                : Vector3.Lerp(squashShape,   stretchShape, EaseInOut((p - 0.5f) * 2f));
+                ? Vector3.Lerp(Vector3.one,  squashShape,  EaseInOut(p * 2f))
+                : Vector3.Lerp(squashShape,  stretchShape, EaseInOut((p - 0.5f) * 2f));
             transform.localScale = Vector3.Scale(orig * overall, shape);
+            transform.position   = lockedPos;
             yield return null;
         }
 
@@ -125,6 +208,7 @@ public class WorldObject : MonoBehaviour
             elapsed += Time.deltaTime;
             transform.localScale = Vector3.Lerp(peak, Vector3.zero,
                 EaseIn(Mathf.Clamp01(elapsed / collectShrinkTime)));
+            transform.position = lockedPos;
             yield return null;
         }
 

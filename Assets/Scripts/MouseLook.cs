@@ -1,20 +1,24 @@
 using UnityEngine;
 
 /// <summary>
-/// First-person camera controller. Can be placed anywhere in the hierarchy —
-/// it follows the assigned Player transform by code rather than parenting.
+/// First-person camera controller. Attach to Main Camera.
 ///
-/// Setup:
-///   1. Attach this script to your Main Camera GameObject.
-///   2. Drag the Player root into the "Player" field in the Inspector.
-///   3. Adjust "Eye Offset" to position the lens at head height (default: 1.65 m).
+/// Hierarchy expected:
+///   PlayerEmpty
+///   └── CameraHolderEmpty      ← assign to "cameraHolder"
+///       └── Main Camera        ← this script lives here
+///
+/// PlayerEmpty handles horizontal rotation (yaw).
+/// Main Camera handles vertical rotation (pitch).
+/// CameraHolderEmpty localPosition is nudged for head bob.
 /// </summary>
 public class MouseLook : MonoBehaviour
 {
-    [Header("Target")]
+    [Header("References")]
+    [Tooltip("Root player transform (PlayerEmpty). Receives horizontal yaw.")]
     [SerializeField] private Transform player;
-    [Tooltip("Local offset from the player pivot to the eye position (metres).")]
-    [SerializeField] private Vector3 eyeOffset = new Vector3(0f, 1.65f, 0f);
+    [Tooltip("CameraHolderEmpty — its localPosition is animated for head bob.")]
+    [SerializeField] private Transform cameraHolder;
 
     [Header("Sensitivity")]
     [SerializeField] private float sensitivityX = 2f;
@@ -27,6 +31,7 @@ public class MouseLook : MonoBehaviour
     // ── State ─────────────────────────────────────────────────────────────────
     private float _pitch;
     private PlayerController _playerController;
+    private Vector3 _holderDefaultLocalPos;
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
     void Start()
@@ -38,6 +43,9 @@ public class MouseLook : MonoBehaviour
 
         if (player != null)
             _playerController = player.GetComponent<PlayerController>();
+
+        if (cameraHolder != null)
+            _holderDefaultLocalPos = cameraHolder.localPosition;
     }
 
     void Update()
@@ -47,19 +55,16 @@ public class MouseLook : MonoBehaviour
         ApplyMouseLook();
     }
 
-    /// LateUpdate runs after CharacterController.Move() — guarantees zero lag between
-    /// player body and camera position.
+    // LateUpdate: runs after CharacterController.Move() — apply bob to CameraHolderEmpty.
     void LateUpdate()
     {
-        if (player == null) return;
+        if (cameraHolder == null) return;
 
         Vector3 bob = _playerController != null
             ? _playerController.BobOffset
             : Vector3.zero;
 
-        transform.position = player.position
-            + player.TransformDirection(eyeOffset)
-            + player.TransformDirection(bob);
+        cameraHolder.localPosition = _holderDefaultLocalPos + bob;
     }
 
     // ── Look ──────────────────────────────────────────────────────────────────
