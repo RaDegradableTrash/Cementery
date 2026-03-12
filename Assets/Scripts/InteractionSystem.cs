@@ -58,6 +58,7 @@ public class InteractionSystem : MonoBehaviour
     private bool        _rbHadGravity;
     private RigidbodyInterpolation _rbInterpolation;
     private Transform   _carriedOrigParent;
+    private Quaternion  _carryRotOffset;   // object rotation expressed in camera-local space at pick-up
 
     private Coroutine   _hideInfoCo;
 
@@ -91,18 +92,30 @@ public class InteractionSystem : MonoBehaviour
     // with zero penetration.
     void DriveCarried()
     {
-        Transform cam    = playerCamera.transform;
-        Vector3   target = cam.position
-                         + cam.forward * holdDistance
-                         + cam.up      * holdHeightOffset;
+        Transform cam = playerCamera.transform;
+
+        // Project the camera's forward onto the horizontal plane so the hold target never
+        // sinks below ground when the player looks down. Fall back to the raw forward only
+        // if the player is looking nearly straight up or down (no meaningful horizontal component).
+        Vector3 holdFwd = Vector3.ProjectOnPlane(cam.forward, Vector3.up);
+        if (holdFwd.sqrMagnitude < 0.01f)
+            holdFwd = cam.forward;
+        else
+            holdFwd.Normalize();
+
+        Vector3 target = cam.position
+                       + holdFwd        * holdDistance
+                       + Vector3.up     * holdHeightOffset;
 
         float pt = 1f - Mathf.Exp(-holdLerpSpeed * Time.deltaTime);
         float rt = 1f - Mathf.Exp(-holdRotDamp   * Time.deltaTime);
 
         // ── 1. Lerp toward ideal target (unrestricted on all axes) ─────────────
+        // Target rotation: camera orientation × the offset recorded at pick-up time,
+        // so the face that was pointing at the player always points at the player.
+        Quaternion targetRot = playerCamera.transform.rotation * _carryRotOffset;
         _carried.transform.position = Vector3.Lerp(_carried.transform.position, target, pt);
-        _carried.transform.rotation = Quaternion.Slerp(_carried.transform.rotation,
-                                                        Quaternion.identity, rt);
+        _carried.transform.rotation = Quaternion.Slerp(_carried.transform.rotation, targetRot, rt);
 
         // ── 2. Depenetration: push the object out of any overlapping colliders ──
         // Collect all colliders on the carried object (cached; rebuilt if null).
@@ -235,13 +248,15 @@ public class InteractionSystem : MonoBehaviour
             _carriedRb.angularVelocity = Vector3.zero;
         }
 
-        // Ignore collisions between the player and the carried object so the player's
-        // body does not push it away. World geometry stays active — it will stop the object.
+        // Cache player colliders so the depenetration loop can skip them (avoiding
+        // a fight between ComputePenetration pushing the object away from the player
+        // and the Lerp pulling it back). The CharacterController still collides with
+        // the kinematic Rigidbody naturally — no IgnoreCollision needed.
         _playerCols  = GetComponentsInChildren<Collider>();
         _carriedCols = obj.GetComponentsInChildren<Collider>();
-        foreach (var pc in _playerCols)
-            foreach (var cc in _carriedCols)
-                Physics.IgnoreCollision(pc, cc, true);
+
+        // Record the object's rotation relative to the camera so we can restore it each frame.
+        _carryRotOffset = Quaternion.Inverse(playerCamera.transform.rotation) * obj.transform.rotation;
 
         _carried.TriggerPickUp(gameObject);
     }
@@ -251,12 +266,6 @@ public class InteractionSystem : MonoBehaviour
     {
         if (_carried == null) return;
 
-        // Restore collision between player and dropped object.
-        if (_playerCols != null && _carriedCols != null)
-            foreach (var pc in _playerCols)
-                foreach (var cc in _carriedCols)
-                    if (pc != null && cc != null)
-                        Physics.IgnoreCollision(pc, cc, false);
         _playerCols  = null;
         _carriedCols = null;
 

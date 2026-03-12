@@ -19,6 +19,13 @@ public class WorldObject : MonoBehaviour
     public bool carryable    = false;
     public bool collectable  = false;
 
+    // ── Physics ───────────────────────────────────────────────────────────────
+    [Header("Physics")]
+    [Tooltip("When true, other moving objects (player, carried objects, etc.) can push this object. " +
+             "Push response depends on the Rigidbody's mass and the collider's PhysicMaterial friction/bounciness. " +
+             "When false, the Rigidbody is kept kinematic and the object cannot be moved by external forces.")]
+    public bool canBePushed = false;
+
     // ── Messages ─────────────────────────────────────────────────────────────
     [Header("Messages")]
     [Tooltip("Shown in the shared info label when this object is interacted with.")]
@@ -56,7 +63,17 @@ public class WorldObject : MonoBehaviour
     private bool      _animPrevKinematic;
     private Vector3   _posBeforeAnim;    // world position before animation started; restored on CancelAnims
 
-    void Awake() => _baseScale = transform.localScale;
+    void Awake()
+    {
+        _baseScale = transform.localScale;
+
+        // Enforce push behaviour: if this object should not be moveable by external forces,
+        // make its Rigidbody kinematic so the physics engine never applies impulses to it.
+        // InteractionSystem saves/restores this when carrying, so carry still works normally.
+        Rigidbody rb = GetComponent<Rigidbody>();
+        if (rb != null && !canBePushed)
+            rb.isKinematic = true;
+    }
 
     /// <summary>
     /// Immediately stops any running animation, restores scale and Rigidbody state.
