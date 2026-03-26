@@ -3,41 +3,36 @@ using TMPro;
 using UnityEngine;
 
 /// <summary>
-/// Attach to the Player. Three interaction modes:
+/// Player interaction system:
+/// - [F] interact WorldObject
+/// - [Hold LMB] carry WorldObject (must be carryable + Rigidbody)
+/// - [RMB] collect WorldObject
 ///
-///   [F]        Interact  — fires WorldObject.onInteract
-///   [Hold LMB] Carry     — parents object to camera; LateUpdate lerps localPosition to holdLocalPos
-///   [RMB]      Collect   — fires onCollect, plays pop anim, destroys
-///
-/// Carry technique (Amnesia / Myst style):
-///   Object is made kinematic and parented to the camera. LateUpdate lerps localPosition every
-///   frame — no physics fight, no gravity, perfect position sync with player view.
+/// Simplified carry:
+/// - keeps collisions
+/// - keeps gravity enabled while carrying
+/// - drives object by velocity toward a camera target
+/// - yaw-only rotation follow to avoid pitching into ground
 /// </summary>
 public class InteractionSystem : MonoBehaviour
 {
-    // ── References ────────────────────────────────────────────────────────────
     [Header("References")]
     [SerializeField] private Camera playerCamera;
 
-    // ── Detection ─────────────────────────────────────────────────────────────
     [Header("Detection")]
-    [SerializeField] private float     interactRange = 3f;
-    [SerializeField] private LayerMask interactMask  = ~0;
+    [SerializeField] private float interactRange = 3f;
+    [SerializeField] private float carryPickUpRange = 2f;
+    [SerializeField] private LayerMask interactMask = ~0;
 
-    // ── Carry ─────────────────────────────────────────────────────────────────
     [Header("Carry")]
-    [Tooltip("How far in front of the player (horizontal) the object is held.")]
-    [SerializeField] private float holdDistance   = 1.6f;
-    [Tooltip("Height offset relative to the camera position (negative = lower).")]
-    [SerializeField] private float holdHeightOffset = -0.25f;
-    [Tooltip("How quickly the object glides to the hold position (higher = snappier).")]
-    [SerializeField] private float holdLerpSpeed  = 14f;
-    [Tooltip("How quickly the carried object's rotation is dampened to neutral.")]
-    [SerializeField] private float holdRotDamp       = 12f;
-    [Tooltip("SphereCast radius for wall detection when holding an object without a Rigidbody.")]
-    [SerializeField] private float holdCollisionRadius = 0.2f;
+    [SerializeField] private float carryFollowStrength = 18f;
+    [SerializeField] private float carryMaxSpeed = 10f;
+    [SerializeField] private float carryTurnStrength = 14f;
+    [SerializeField] private float carryDrag = 8f;
+    [SerializeField] private float carryAngularDrag = 10f;
+    [SerializeField] private float carryOffsetAdaptRate = 10f;
+    [SerializeField] private float carryOffsetFullAdaptError = 0.7f;
 
-    // ── UI ────────────────────────────────────────────────────────────────────
     [Header("UI Prompts")]
     [SerializeField] private TextMeshProUGUI interactLabel;
     [SerializeField] private TextMeshProUGUI carryLabel;
@@ -45,28 +40,89 @@ public class InteractionSystem : MonoBehaviour
 
     [Header("UI Info Label")]
     [SerializeField] private TextMeshProUGUI infoLabel;
-    [SerializeField] private float           infoDisplayDuration = 2.5f;
+    [SerializeField] private float infoDisplayDuration = 2.5f;
 
-    // ── State ─────────────────────────────────────────────────────────────────
     private WorldObject _lookedAt;
+    private Rigidbody _carryCandidateRb;
+    private WorldObject _carryCandidateWo;
 
-    private WorldObject _carried;
-    private Rigidbody   _carriedRb;
-    private Collider[]  _carriedCols;   // carried object's colliders (for IgnoreCollision restore)
-    private Collider[]  _playerCols;    // player's own colliders  (for IgnoreCollision restore)
-    private bool        _rbWasKinematic;
-    private bool        _rbHadGravity;
+    private Transform _carriedTransform;
+    private WorldObject _carriedWo;
+    private Rigidbody _carriedRb;
+
+    private Collider[] _carriedCols;
+    private Collider[] _playerCols;
+    private PhysicMaterial[] _carriedOriginalMaterials;
+    private PhysicMaterial _carryNoFrictionMaterial;
+    private CharacterController _playerCc;
+
+    private bool _rbWasKinematic;
+    private bool _rbHadGravity;
     private RigidbodyInterpolation _rbInterpolation;
-    private Transform   _carriedOrigParent;
-    private Quaternion  _carryRotOffset;   // object rotation expressed in camera-local space at pick-up
+    private CollisionDetectionMode _rbCollisionDetectionMode;
+    private float _rbOriginalDrag;
+    private float _rbOriginalAngularDrag;
+    private bool _carryPlayerCollisionIgnored;
 
-    private Coroutine   _hideInfoCo;
+    private float _carryYawOffset;
+    private Quaternion _carryPitchRollOffset = Quaternion.identity;
+    private Vector3 _carryRayLocalDir = Vector3.forward;
+    private float _carryRayDistance;
+    private float _carriedRadius;
 
-    // ── Lifecycle ─────────────────────────────────────────────────────────────
+    private Coroutine _hideInfoCo;
+
     void Awake()
     {
         if (playerCamera == null)
             playerCamera = Camera.main;
+
+        _carryNoFrictionMaterial = new PhysicMaterial("Carry_NoFriction_Runtime")
+        {
+            dynamicFriction = 0f,
+            staticFriction = 0f,
+            frictionCombine = PhysicMaterialCombine.Minimum,
+            bounciness = 0f,
+            bounceCombine = PhysicMaterialCombine.Minimum
+        };
+        _carryNoFrictionMaterial.hideFlags = HideFlags.HideAndDontSave;
+
+        _playerCc = GetComponent<CharacterController>();
+    }
+
+    void ApplyCarryNoFriction()
+    {
+        if (_carriedCols == null || _carryNoFrictionMaterial == null)
+            return;
+
+        _carriedOriginalMaterials = new PhysicMaterial[_carriedCols.Length];
+        for (int i = 0; i < _carriedCols.Length; i++)
+        {
+            Collider c = _carriedCols[i];
+            if (c == null || c.isTrigger)
+                continue;
+
+            _carriedOriginalMaterials[i] = c.sharedMaterial;
+            c.sharedMaterial = _carryNoFrictionMaterial;
+        }
+    }
+
+    void RestoreCarryFriction()
+    {
+        if (_carriedCols == null || _carriedOriginalMaterials == null)
+            return;
+
+        int count = Mathf.Min(_carriedCols.Length, _carriedOriginalMaterials.Length);
+        for (int i = 0; i < count; i++)
+        {
+            Collider c = _carriedCols[i];
+            if (c == null || c.isTrigger)
+                continue;
+
+            c.sharedMaterial = _carriedOriginalMaterials[i];
+        }
+
+        _carriedOriginalMaterials = null;
     }
 
     void Update()
@@ -74,125 +130,247 @@ public class InteractionSystem : MonoBehaviour
         Scan();
         HandleInput();
         UpdatePrompt();
-        if (_carried != null)
-            DriveCarried();
     }
 
-    // Carry driver — runs every Update for both Rigidbody and non-Rigidbody objects.
-    //
-    // Approach: direct transform.position assignment (so the object is always free to
-    // glide toward the ideal hold point on EVERY axis), followed by a depenetration loop
-    // using Physics.ComputePenetration.  This is the same technique Unity's CharacterController
-    // uses internally: move first, then push out of any overlaps.
-    //
-    // Why not MovePosition? MovePosition's sweep stops the object when the *sweep direction*
-    // hits a surface — meaning lateral / vertical recovery attempts are also blocked the
-    // moment the object touches anything. ComputePenetration solves a different problem:
-    // it resolves overlaps that have already occurred, so we get full freedom of movement
-    // with zero penetration.
-    void DriveCarried()
+    void FixedUpdate()
     {
-        Transform cam = playerCamera.transform;
+        if (_carriedRb == null)
+            return;
 
-        // Project the camera's forward onto the horizontal plane so the hold target never
-        // sinks below ground when the player looks down. Fall back to the raw forward only
-        // if the player is looking nearly straight up or down (no meaningful horizontal component).
-        Vector3 holdFwd = Vector3.ProjectOnPlane(cam.forward, Vector3.up);
-        if (holdFwd.sqrMagnitude < 0.01f)
-            holdFwd = cam.forward;
+        UpdateAdaptiveCarryOffset(Time.fixedDeltaTime);
+        DriveCarry();
+    }
+
+    void UpdateAdaptiveCarryOffset(float dt)
+    {
+        Transform cam = playerCamera != null ? playerCamera.transform : transform;
+        Vector3 rayDir = cam.TransformDirection(_carryRayLocalDir);
+        if (rayDir.sqrMagnitude < 0.0001f)
+            rayDir = cam.forward;
+        rayDir.Normalize();
+
+        Vector3 targetWorld = cam.position + rayDir * _carryRayDistance;
+        float targetError = Vector3.Distance(_carriedRb.position, targetWorld);
+
+        // If physics/obstacles make target hard to maintain, relax offset toward actual pose.
+        float pressure = Mathf.Clamp01(targetError / Mathf.Max(0.01f, carryOffsetFullAdaptError));
+        float adaptRate = carryOffsetAdaptRate * (0.25f + pressure * 0.75f);
+        float t = 1f - Mathf.Exp(-adaptRate * Mathf.Max(0.0001f, dt));
+
+        float actualDistanceOnRay = Vector3.Dot(_carriedRb.position - cam.position, rayDir);
+        actualDistanceOnRay = Mathf.Max(0.05f, actualDistanceOnRay);
+        _carryRayDistance = Mathf.Lerp(_carryRayDistance, actualDistanceOnRay, t);
+    }
+
+    void DriveCarry()
+    {
+        Vector3 targetPos = GetCarryTargetPosition();
+        Vector3 toTarget = targetPos - _carriedRb.position;
+
+        Vector3 desiredVel = toTarget * carryFollowStrength + GetPlayerVelocity();
+        if (desiredVel.magnitude > carryMaxSpeed)
+            desiredVel = desiredVel.normalized * carryMaxSpeed;
+        _carriedRb.velocity = desiredVel;
+
+        Quaternion targetRot = GetCarryTargetRotationYawOnly();
+        Quaternion delta = targetRot * Quaternion.Inverse(_carriedRb.rotation);
+        delta.ToAngleAxis(out float angleDeg, out Vector3 axis);
+        if (angleDeg > 180f)
+            angleDeg -= 360f;
+
+        if (axis.sqrMagnitude > 0.0001f)
+            _carriedRb.angularVelocity = axis.normalized * (angleDeg * Mathf.Deg2Rad) * carryTurnStrength;
         else
-            holdFwd.Normalize();
+            _carriedRb.angularVelocity = Vector3.zero;
+    }
 
-        Vector3 target = cam.position
-                       + holdFwd        * holdDistance
-                       + Vector3.up     * holdHeightOffset;
+    Vector3 GetCarryTargetPosition()
+    {
+        Transform cam = playerCamera != null ? playerCamera.transform : transform;
+        Vector3 origin = cam.position;
+        Vector3 rayDir = cam.TransformDirection(_carryRayLocalDir);
+        if (rayDir.sqrMagnitude < 0.0001f)
+            rayDir = cam.forward;
+        rayDir.Normalize();
 
-        float pt = 1f - Mathf.Exp(-holdLerpSpeed * Time.deltaTime);
-        float rt = 1f - Mathf.Exp(-holdRotDamp   * Time.deltaTime);
+        Vector3 desired = origin + rayDir * _carryRayDistance;
 
-        // ── 1. Lerp toward ideal target (unrestricted on all axes) ─────────────
-        // Target rotation: camera orientation × the offset recorded at pick-up time,
-        // so the face that was pointing at the player always points at the player.
-        Quaternion targetRot = playerCamera.transform.rotation * _carryRotOffset;
-        _carried.transform.position = Vector3.Lerp(_carried.transform.position, target, pt);
-        _carried.transform.rotation = Quaternion.Slerp(_carried.transform.rotation, targetRot, rt);
+        Vector3 cast = desired - origin;
+        float castDist = cast.magnitude;
+        if (castDist <= 0.001f)
+            return desired;
 
-        // ── 2. Depenetration: push the object out of any overlapping colliders ──
-        // Collect all colliders on the carried object (cached; rebuilt if null).
-        if (_carriedCols == null || _carriedCols.Length == 0)
-            _carriedCols = _carried.GetComponentsInChildren<Collider>();
+        Vector3 dir = cast / castDist;
+        float castRadius = Mathf.Max(0.05f, _carriedRadius * 0.85f);
 
-        const int maxIter = 5;
-        for (int iter = 0; iter < maxIter; iter++)
+        if (Physics.SphereCast(origin, castRadius, dir, out RaycastHit hit, castDist, interactMask, QueryTriggerInteraction.Ignore))
         {
-            bool anyOverlap = false;
-            foreach (Collider cc in _carriedCols)
+            if (!IsIgnoredCarryHitCollider(hit.collider))
             {
-                if (cc == null || !cc.enabled) continue;
+                float safeDist = Mathf.Max(0.15f, hit.distance - castRadius - 0.03f);
+                return origin + dir * safeDist;
+            }
+        }
 
-                // Find all colliders in the scene overlapping this one.
-                // Use a generous bounds check: OverlapBox around the collider's bounds.
-                Bounds   b           = cc.bounds;
-                Vector3  halfExtents = b.extents * 1.1f;          // slight margin
-                Collider[] neighbours = Physics.OverlapBox(
-                    b.center, halfExtents, Quaternion.identity,
-                    interactMask, QueryTriggerInteraction.Ignore);
+        return desired;
+    }
 
-                foreach (Collider nb in neighbours)
+    Quaternion GetCarryTargetRotationYawOnly()
+    {
+        Transform cam = playerCamera != null ? playerCamera.transform : transform;
+        Vector3 fwd = Vector3.ProjectOnPlane(cam.forward, Vector3.up);
+        if (fwd.sqrMagnitude < 0.0001f)
+            fwd = Vector3.ProjectOnPlane(transform.forward, Vector3.up);
+        if (fwd.sqrMagnitude < 0.0001f)
+            fwd = Vector3.forward;
+
+        float yaw = Mathf.Atan2(fwd.x, fwd.z) * Mathf.Rad2Deg;
+        Quaternion yawTarget = Quaternion.Euler(0f, yaw + _carryYawOffset, 0f);
+        return yawTarget * _carryPitchRollOffset;
+    }
+
+    bool IsIgnoredCarryHitCollider(Collider c)
+    {
+        if (c == null)
+            return false;
+
+        if (IsPlayerCollider(c))
+            return true;
+
+        if (_carriedCols == null)
+            return false;
+
+        for (int i = 0; i < _carriedCols.Length; i++)
+            if (_carriedCols[i] == c)
+                return true;
+
+        return false;
+    }
+
+    float ComputeCarriedRadius()
+    {
+        if (_carriedCols == null || _carriedCols.Length == 0)
+            return 0.2f;
+
+        float radius = 0.2f;
+        for (int i = 0; i < _carriedCols.Length; i++)
+        {
+            Collider c = _carriedCols[i];
+            if (c == null || !c.enabled) continue;
+            Bounds b = c.bounds;
+            radius = Mathf.Max(radius, Mathf.Max(b.extents.x, b.extents.z));
+        }
+
+        return radius;
+    }
+
+    bool IsPlayerCollider(Collider c)
+    {
+        if (_playerCc != null && c == _playerCc)
+            return true;
+
+        if (_playerCols == null)
+            return false;
+
+        for (int i = 0; i < _playerCols.Length; i++)
+            if (_playerCols[i] == c)
+                return true;
+
+        return false;
+    }
+
+    void SetCarryPlayerCollisionIgnored(bool ignored)
+    {
+        if (_carriedCols == null)
+            return;
+
+        if (_playerCc != null)
+        {
+            for (int i = 0; i < _carriedCols.Length; i++)
+            {
+                Collider cc = _carriedCols[i];
+                if (cc == null) continue;
+                Physics.IgnoreCollision(_playerCc, cc, ignored);
+            }
+        }
+
+        if (_playerCols != null)
+        {
+            for (int p = 0; p < _playerCols.Length; p++)
+            {
+                Collider pc = _playerCols[p];
+                if (pc == null || pc == _playerCc) continue;
+                for (int c = 0; c < _carriedCols.Length; c++)
                 {
-                    if (nb == null || nb == cc) continue;
-                    // Skip the player's own colliders.
-                    bool isPlayerCol = false;
-                    if (_playerCols != null)
-                        foreach (var pc in _playerCols)
-                            if (pc == nb) { isPlayerCol = true; break; }
-                    if (isPlayerCol) continue;
-                    // Skip other colliders belonging to the carried object itself.
-                    bool isSelf = false;
-                    foreach (var sc in _carriedCols)
-                        if (sc == nb) { isSelf = true; break; }
-                    if (isSelf) continue;
-
-                    if (Physics.ComputePenetration(
-                            cc,  cc.transform.position,  cc.transform.rotation,
-                            nb,  nb.transform.position,  nb.transform.rotation,
-                            out Vector3 dir, out float dist))
-                    {
-                        // Push the whole carried object out of the overlap.
-                        _carried.transform.position += dir * (dist + 0.001f);
-                        anyOverlap = true;
-                    }
+                    Collider cc = _carriedCols[c];
+                    if (cc == null) continue;
+                    Physics.IgnoreCollision(pc, cc, ignored);
                 }
             }
-            if (!anyOverlap) break;
         }
 
-        // Keep the Rigidbody in sync so it doesn't fight us next frame.
-        if (_carriedRb != null)
-        {
-            _carriedRb.position        = _carried.transform.position;
-            _carriedRb.rotation        = _carried.transform.rotation;
-            _carriedRb.velocity        = Vector3.zero;
-            _carriedRb.angularVelocity = Vector3.zero;
-        }
+        _carryPlayerCollisionIgnored = ignored;
     }
 
-    // ── Scan ──────────────────────────────────────────────────────────────────
     void Scan()
     {
-        if (_carried != null) { _lookedAt = null; return; }
+        if (_carriedRb != null)
+        {
+            _lookedAt = null;
+            _carryCandidateRb = null;
+            _carryCandidateWo = null;
+            return;
+        }
 
+        float rayRange = Mathf.Max(interactRange, carryPickUpRange);
         Ray ray = new Ray(playerCamera.transform.position, playerCamera.transform.forward);
-        _lookedAt = Physics.Raycast(ray, out RaycastHit hit, interactRange, interactMask,
-                        QueryTriggerInteraction.Ignore)
-            ? hit.collider.GetComponentInParent<WorldObject>()
-            : null;
+
+        if (!Physics.Raycast(ray, out RaycastHit hit, rayRange, interactMask, QueryTriggerInteraction.Ignore))
+        {
+            _lookedAt = null;
+            _carryCandidateRb = null;
+            _carryCandidateWo = null;
+            return;
+        }
+
+        _lookedAt = hit.collider.GetComponentInParent<WorldObject>();
+        _carryCandidateRb = ResolveCarryCandidate(hit, out _carryCandidateWo);
     }
 
-    // ── Input ─────────────────────────────────────────────────────────────────
+    Rigidbody ResolveCarryCandidate(RaycastHit hit, out WorldObject worldObject)
+    {
+        worldObject = null;
+
+        Collider c = hit.collider;
+        if (c == null)
+            return null;
+
+        Rigidbody rb = c.attachedRigidbody;
+        if (rb == null)
+            rb = c.GetComponentInParent<Rigidbody>();
+        if (rb == null)
+            return null;
+
+        if (hit.distance > carryPickUpRange)
+            return null;
+
+        worldObject = c.GetComponentInParent<WorldObject>();
+        if (worldObject == null)
+            worldObject = rb.GetComponentInParent<WorldObject>();
+
+        if (worldObject == null || !worldObject.carryable)
+            return null;
+
+        return rb;
+    }
+
+    bool HasCarryCandidate()
+    {
+        return _carryCandidateRb != null;
+    }
+
     void HandleInput()
     {
-        // [F] Interact
         if (Input.GetKeyDown(KeyCode.F) && _lookedAt != null && _lookedAt.interactable)
         {
             _lookedAt.TriggerInteract(gameObject);
@@ -200,21 +378,16 @@ public class InteractionSystem : MonoBehaviour
             ShowInfo(_lookedAt.interactMessage);
         }
 
-        // [LMB down] Start carry
-        if (Input.GetMouseButtonDown(0) && _carried == null
-            && _lookedAt != null && _lookedAt.carryable)
-            PickUp(_lookedAt);
+        if (Input.GetMouseButtonDown(0) && _carriedRb == null && HasCarryCandidate())
+            PickUp(_carryCandidateRb, _carryCandidateWo);
 
-        // [LMB up] Drop
-        if (Input.GetMouseButtonUp(0) && _carried != null)
+        if (Input.GetMouseButtonUp(0) && _carriedRb != null)
             Drop();
 
-        // [RMB] Collect
         if (Input.GetMouseButtonDown(1) && _lookedAt != null && _lookedAt.collectable)
             Collect(_lookedAt);
     }
 
-    // ── Collect ───────────────────────────────────────────────────────────────
     void Collect(WorldObject obj)
     {
         ShowInfo(obj.collectMessage);
@@ -223,92 +396,138 @@ public class InteractionSystem : MonoBehaviour
         obj.PlayCollectAnim(() => Destroy(obj.gameObject));
     }
 
-    // ── Carry: Pick Up ────────────────────────────────────────────────────────
-    void PickUp(WorldObject obj)
+    void PickUp(Rigidbody rb, WorldObject wo)
     {
-        obj.CancelAnims();
+        if (rb == null)
+            return;
 
-        _carried           = obj;
-        _carriedOrigParent = obj.transform.parent;
-        _carriedRb         = obj.GetComponent<Rigidbody>();
+        if (Vector3.Distance(playerCamera.transform.position, rb.worldCenterOfMass) > carryPickUpRange)
+            return;
 
-        if (_carriedRb != null)
+        wo?.CancelAnims();
+
+        _carriedRb = rb;
+        _carriedTransform = rb.transform;
+        _carriedWo = wo;
+
+        _rbWasKinematic = _carriedRb.isKinematic;
+        _rbHadGravity = _carriedRb.useGravity;
+        _rbInterpolation = _carriedRb.interpolation;
+        _rbCollisionDetectionMode = _carriedRb.collisionDetectionMode;
+        _rbOriginalDrag = _carriedRb.drag;
+        _rbOriginalAngularDrag = _carriedRb.angularDrag;
+
+        _playerCols = GetComponentsInChildren<Collider>();
+        _carriedCols = rb.GetComponentsInChildren<Collider>();
+        _carriedRadius = ComputeCarriedRadius();
+        ApplyCarryNoFriction();
+
+        Transform cam = playerCamera != null ? playerCamera.transform : transform;
+        Vector3 ray = _carriedTransform.position - cam.position;
+        float rayLen = ray.magnitude;
+        if (rayLen < 0.05f)
         {
-            _rbWasKinematic  = _carriedRb.isKinematic;
-            _rbHadGravity    = _carriedRb.useGravity;
-            _rbInterpolation = _carriedRb.interpolation;
-
-            // isKinematic = true enables MovePosition sweep-testing against world geometry.
-            // detectCollisions is deliberately left at its default (true) so the sweep
-            // actually stops at walls and floors — never touch detectCollisions.
-            _carriedRb.isKinematic   = true;
-            _carriedRb.useGravity    = false;
-            _carriedRb.interpolation = RigidbodyInterpolation.Interpolate;
-            _carriedRb.velocity        = Vector3.zero;
-            _carriedRb.angularVelocity = Vector3.zero;
+            ray = cam.forward * 0.05f;
+            rayLen = 0.05f;
         }
 
-        // Cache player colliders so the depenetration loop can skip them (avoiding
-        // a fight between ComputePenetration pushing the object away from the player
-        // and the Lerp pulling it back). The CharacterController still collides with
-        // the kinematic Rigidbody naturally — no IgnoreCollision needed.
-        _playerCols  = GetComponentsInChildren<Collider>();
-        _carriedCols = obj.GetComponentsInChildren<Collider>();
+        _carryRayLocalDir = cam.InverseTransformDirection(ray / rayLen).normalized;
+        _carryRayDistance = rayLen;
 
-        // Record the object's rotation relative to the camera so we can restore it each frame.
-        _carryRotOffset = Quaternion.Inverse(playerCamera.transform.rotation) * obj.transform.rotation;
+        Vector3 flatCamFwd = Vector3.ProjectOnPlane(cam.forward, Vector3.up);
+        if (flatCamFwd.sqrMagnitude < 0.0001f)
+            flatCamFwd = Vector3.forward;
+        float camYaw = Mathf.Atan2(flatCamFwd.x, flatCamFwd.z) * Mathf.Rad2Deg;
+        float objYaw = _carriedRb.rotation.eulerAngles.y;
+        _carryYawOffset = Mathf.DeltaAngle(camYaw, objYaw);
+        Quaternion objYawOnly = Quaternion.Euler(0f, objYaw, 0f);
+        _carryPitchRollOffset = Quaternion.Inverse(objYawOnly) * _carriedRb.rotation;
 
-        _carried.TriggerPickUp(gameObject);
+        SetCarryPlayerCollisionIgnored(true);
+
+        _carriedRb.isKinematic = false;
+        _carriedRb.useGravity = true;
+        _carriedRb.drag = carryDrag;
+        _carriedRb.angularDrag = carryAngularDrag;
+        _carriedRb.interpolation = RigidbodyInterpolation.Interpolate;
+        _carriedRb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+        _carriedRb.velocity = Vector3.zero;
+        _carriedRb.angularVelocity = Vector3.zero;
+
+        _carriedWo?.SetCarriedState(true);
+        _carriedWo?.TriggerPickUp(gameObject);
     }
 
-    // ── Carry: Drop ───────────────────────────────────────────────────────────
     void Drop()
     {
-        if (_carried == null) return;
+        if (_carriedRb == null)
+            return;
 
-        _playerCols  = null;
+        if (_carryPlayerCollisionIgnored)
+            SetCarryPlayerCollisionIgnored(false);
+
+        RestoreCarryFriction();
+
+        _carriedRb.isKinematic = _rbWasKinematic;
+        _carriedRb.useGravity = _rbHadGravity;
+        _carriedRb.interpolation = _rbInterpolation;
+        _carriedRb.collisionDetectionMode = _rbCollisionDetectionMode;
+        _carriedRb.drag = _rbOriginalDrag;
+        _carriedRb.angularDrag = _rbOriginalAngularDrag;
+
+        _carriedWo?.SetCarriedState(false);
+        _carriedWo?.TriggerDrop(gameObject);
+
+        _carriedTransform = null;
+        _carriedWo = null;
+        _carriedRb = null;
         _carriedCols = null;
-
-        if (_carriedRb != null)
-        {
-            _carriedRb.isKinematic   = _rbWasKinematic;
-            _carriedRb.useGravity    = _rbHadGravity;
-            _carriedRb.interpolation = _rbInterpolation;
-            _carriedRb.velocity        = Vector3.zero;
-            _carriedRb.angularVelocity = Vector3.zero;
-            _carriedRb = null;
-        }
-
-        _carried.TriggerDrop(gameObject);
-        _carried = null;
+        _playerCols = null;
+        _carriedOriginalMaterials = null;
+        _carryRayLocalDir = Vector3.forward;
+        _carryRayDistance = 0f;
+        _carryPitchRollOffset = Quaternion.identity;
+        _carriedRadius = 0f;
     }
 
-    // ── Prompt ────────────────────────────────────────────────────────────────
+    Vector3 GetPlayerVelocity()
+    {
+        if (_playerCc != null)
+            return _playerCc.velocity;
+
+        Rigidbody rb = GetComponent<Rigidbody>();
+        return rb != null ? rb.velocity : Vector3.zero;
+    }
+
     void UpdatePrompt()
     {
-        if (_carried != null)
+        if (_carriedRb != null)
         {
             SetLabel(interactLabel, false);
-            SetLabel(carryLabel,    true);
-            SetLabel(collectLabel,  false);
+            SetLabel(carryLabel, true);
+            SetLabel(collectLabel, false);
             return;
         }
 
         SetLabel(interactLabel, _lookedAt != null && _lookedAt.interactable);
-        SetLabel(carryLabel,    _lookedAt != null && _lookedAt.carryable);
-        SetLabel(collectLabel,  _lookedAt != null && _lookedAt.collectable);
+        SetLabel(carryLabel, HasCarryCandidate());
+        SetLabel(collectLabel, _lookedAt != null && _lookedAt.collectable);
     }
 
     void SetLabel(TextMeshProUGUI label, bool active)
     {
-        if (label != null) label.gameObject.SetActive(active);
+        if (label != null)
+            label.gameObject.SetActive(active);
     }
 
-    // ── Info ──────────────────────────────────────────────────────────────────
     void ShowInfo(string message)
     {
-        if (infoLabel == null || string.IsNullOrEmpty(message)) return;
-        if (_hideInfoCo != null) StopCoroutine(_hideInfoCo);
+        if (infoLabel == null || string.IsNullOrEmpty(message))
+            return;
+
+        if (_hideInfoCo != null)
+            StopCoroutine(_hideInfoCo);
+
         infoLabel.text = message;
         infoLabel.gameObject.SetActive(true);
         _hideInfoCo = StartCoroutine(HideInfoAfter(infoDisplayDuration));
@@ -317,7 +536,8 @@ public class InteractionSystem : MonoBehaviour
     IEnumerator HideInfoAfter(float delay)
     {
         yield return new WaitForSeconds(delay);
-        if (infoLabel != null) infoLabel.gameObject.SetActive(false);
+        if (infoLabel != null)
+            infoLabel.gameObject.SetActive(false);
         _hideInfoCo = null;
     }
 }
