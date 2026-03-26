@@ -32,6 +32,12 @@ public class InteractionSystem : MonoBehaviour
     [SerializeField] private float carryAngularDrag = 10f;
     [SerializeField] private float carryOffsetAdaptRate = 10f;
     [SerializeField] private float carryOffsetFullAdaptError = 0.7f;
+    [SerializeField] private float carryScrollStep = 0.2f;
+    [Min(0.05f)]
+    [SerializeField] private float carryMinDistance = 0.15f;
+    [Min(0.06f)]
+    [SerializeField] private float carryMaxDistance = 6f;
+    [SerializeField] private float carryScrollDirection = 1f;
 
     [Header("UI Prompts")]
     [SerializeField] private TextMeshProUGUI interactLabel;
@@ -41,6 +47,12 @@ public class InteractionSystem : MonoBehaviour
     [Header("UI Info Label")]
     [SerializeField] private TextMeshProUGUI infoLabel;
     [SerializeField] private float infoDisplayDuration = 2.5f;
+
+    [Header("UI Carry Distance Limit")]
+    [SerializeField] private TextMeshProUGUI carryDistanceLimitLabel;
+    [SerializeField] private float carryDistanceLimitDisplayDuration = 1.2f;
+    [SerializeField] private string carryTooNearMessage = "Can't pull closer";
+    [SerializeField] private string carryTooFarMessage = "Can't push farther";
 
     private WorldObject _lookedAt;
     private Rigidbody _carryCandidateRb;
@@ -71,6 +83,7 @@ public class InteractionSystem : MonoBehaviour
     private float _carriedRadius;
 
     private Coroutine _hideInfoCo;
+    private Coroutine _hideCarryDistanceLimitCo;
 
     void Awake()
     {
@@ -88,6 +101,28 @@ public class InteractionSystem : MonoBehaviour
         _carryNoFrictionMaterial.hideFlags = HideFlags.HideAndDontSave;
 
         _playerCc = GetComponent<CharacterController>();
+        SyncCarryDistanceLabelStyle();
+    }
+
+    void SyncCarryDistanceLabelStyle()
+    {
+        if (carryDistanceLimitLabel == null)
+            return;
+
+        TextMeshProUGUI styleSource = infoLabel != null ? infoLabel : carryLabel;
+        if (styleSource == null)
+            return;
+
+        carryDistanceLimitLabel.font = styleSource.font;
+        carryDistanceLimitLabel.fontSharedMaterial = styleSource.fontSharedMaterial;
+        carryDistanceLimitLabel.fontSize = styleSource.fontSize;
+        carryDistanceLimitLabel.enableAutoSizing = styleSource.enableAutoSizing;
+        carryDistanceLimitLabel.color = styleSource.color;
+        carryDistanceLimitLabel.alignment = styleSource.alignment;
+        carryDistanceLimitLabel.enableWordWrapping = styleSource.enableWordWrapping;
+        carryDistanceLimitLabel.overflowMode = styleSource.overflowMode;
+        carryDistanceLimitLabel.margin = styleSource.margin;
+        carryDistanceLimitLabel.raycastTarget = styleSource.raycastTarget;
     }
 
     void ApplyCarryNoFriction()
@@ -158,8 +193,15 @@ public class InteractionSystem : MonoBehaviour
         float t = 1f - Mathf.Exp(-adaptRate * Mathf.Max(0.0001f, dt));
 
         float actualDistanceOnRay = Vector3.Dot(_carriedRb.position - cam.position, rayDir);
-        actualDistanceOnRay = Mathf.Max(0.05f, actualDistanceOnRay);
-        _carryRayDistance = Mathf.Lerp(_carryRayDistance, actualDistanceOnRay, t);
+        actualDistanceOnRay = Mathf.Max(carryMinDistance, actualDistanceOnRay);
+        _carryRayDistance = ClampCarryDistance(Mathf.Lerp(_carryRayDistance, actualDistanceOnRay, t));
+    }
+
+    float ClampCarryDistance(float value)
+    {
+        float minDist = Mathf.Max(0.05f, carryMinDistance);
+        float maxDist = Mathf.Max(minDist + 0.01f, carryMaxDistance);
+        return Mathf.Clamp(value, minDist, maxDist);
     }
 
     void DriveCarry()
@@ -193,7 +235,9 @@ public class InteractionSystem : MonoBehaviour
             rayDir = cam.forward;
         rayDir.Normalize();
 
-        Vector3 desired = origin + rayDir * _carryRayDistance;
+        float dist = ClampCarryDistance(_carryRayDistance);
+        _carryRayDistance = dist;
+        Vector3 desired = origin + rayDir * dist;
 
         Vector3 cast = desired - origin;
         float castDist = cast.magnitude;
@@ -371,6 +415,8 @@ public class InteractionSystem : MonoBehaviour
 
     void HandleInput()
     {
+        HandleCarryScrollInput();
+
         if (Input.GetKeyDown(KeyCode.F) && _lookedAt != null && _lookedAt.interactable)
         {
             _lookedAt.TriggerInteract(gameObject);
@@ -386,6 +432,70 @@ public class InteractionSystem : MonoBehaviour
 
         if (Input.GetMouseButtonDown(1) && _lookedAt != null && _lookedAt.collectable)
             Collect(_lookedAt);
+    }
+
+    void HandleCarryScrollInput()
+    {
+        if (_carriedRb == null)
+            return;
+
+        float rawScroll = Input.mouseScrollDelta.y;
+        if (Mathf.Abs(rawScroll) < 0.01f)
+            return;
+
+        float signedScroll = rawScroll * Mathf.Sign(Mathf.Approximately(carryScrollDirection, 0f) ? 1f : carryScrollDirection);
+        bool pushFarther = signedScroll > 0f;
+        float wantedDistance = _carryRayDistance + signedScroll * carryScrollStep;
+        bool blocked = false;
+
+        float clampedByRange = ClampCarryDistance(wantedDistance);
+        if (!Mathf.Approximately(clampedByRange, wantedDistance))
+            blocked = true;
+
+        float obstacleMax = GetMaxReachableDistanceOnCarryRay();
+        float finalDistance = Mathf.Min(clampedByRange, obstacleMax);
+        if (pushFarther && finalDistance < clampedByRange - 0.0001f)
+            blocked = true;
+
+        if (!pushFarther && finalDistance <= carryMinDistance + 0.0001f && wantedDistance < _carryRayDistance)
+            blocked = true;
+
+        _carryRayDistance = ClampCarryDistance(finalDistance);
+
+        if (blocked)
+            ShowCarryDistanceLimit(pushFarther ? carryTooFarMessage : carryTooNearMessage);
+    }
+
+    float GetMaxReachableDistanceOnCarryRay()
+    {
+        Transform cam = playerCamera != null ? playerCamera.transform : transform;
+        Vector3 origin = cam.position;
+        Vector3 rayDir = cam.TransformDirection(_carryRayLocalDir);
+        if (rayDir.sqrMagnitude < 0.0001f)
+            rayDir = cam.forward;
+        rayDir.Normalize();
+
+        float minDist = Mathf.Max(0.05f, carryMinDistance);
+        float maxDist = Mathf.Max(minDist + 0.01f, carryMaxDistance);
+        float checkDistance = maxDist;
+        float castRadius = Mathf.Max(0.05f, _carriedRadius * 0.85f);
+
+        RaycastHit[] hits = Physics.SphereCastAll(origin, castRadius, rayDir, checkDistance, interactMask, QueryTriggerInteraction.Ignore);
+        float nearest = float.PositiveInfinity;
+        for (int i = 0; i < hits.Length; i++)
+        {
+            Collider c = hits[i].collider;
+            if (c == null) continue;
+            if (IsIgnoredCarryHitCollider(c)) continue;
+            if (hits[i].distance < nearest)
+                nearest = hits[i].distance;
+        }
+
+        if (nearest == float.PositiveInfinity)
+            return maxDist;
+
+        float safeDist = Mathf.Max(minDist, nearest - castRadius - 0.03f);
+        return Mathf.Min(maxDist, safeDist);
     }
 
     void Collect(WorldObject obj)
@@ -432,7 +542,7 @@ public class InteractionSystem : MonoBehaviour
         }
 
         _carryRayLocalDir = cam.InverseTransformDirection(ray / rayLen).normalized;
-        _carryRayDistance = rayLen;
+        _carryRayDistance = ClampCarryDistance(rayLen);
 
         Vector3 flatCamFwd = Vector3.ProjectOnPlane(cam.forward, Vector3.up);
         if (flatCamFwd.sqrMagnitude < 0.0001f)
@@ -533,11 +643,34 @@ public class InteractionSystem : MonoBehaviour
         _hideInfoCo = StartCoroutine(HideInfoAfter(infoDisplayDuration));
     }
 
+    void ShowCarryDistanceLimit(string message)
+    {
+        if (carryDistanceLimitLabel == null || string.IsNullOrEmpty(message))
+            return;
+
+        SyncCarryDistanceLabelStyle();
+
+        if (_hideCarryDistanceLimitCo != null)
+            StopCoroutine(_hideCarryDistanceLimitCo);
+
+        carryDistanceLimitLabel.text = message;
+        carryDistanceLimitLabel.gameObject.SetActive(true);
+        _hideCarryDistanceLimitCo = StartCoroutine(HideCarryDistanceLimitAfter(carryDistanceLimitDisplayDuration));
+    }
+
     IEnumerator HideInfoAfter(float delay)
     {
         yield return new WaitForSeconds(delay);
         if (infoLabel != null)
             infoLabel.gameObject.SetActive(false);
         _hideInfoCo = null;
+    }
+
+    IEnumerator HideCarryDistanceLimitAfter(float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        if (carryDistanceLimitLabel != null)
+            carryDistanceLimitLabel.gameObject.SetActive(false);
+        _hideCarryDistanceLimitCo = null;
     }
 }
