@@ -22,6 +22,11 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float bobFrequency = 1.8f;
     [SerializeField] private float bobAmplitude = 0.06f;
 
+    [Header("Pushing")]
+    [Tooltip("Maximum horizontal speed applied to pushable Rigidbodies when the player walks into them. " +
+             "The push is clamped and never adds torque or upward impulse.")]
+    [SerializeField] private float pushForce = 2f;
+
     /// <summary>
     /// Additive eye-space offset produced by head bobbing.
     /// MouseLook reads this each LateUpdate to nudge the camera.
@@ -117,5 +122,31 @@ public class PlayerController : MonoBehaviour
             _bobTimer = 0f;
             BobOffset = Vector3.Lerp(BobOffset, Vector3.zero, Time.deltaTime * 8f);
         }
+    }
+
+        // ── Pushing ───────────────────────────────────────────────────────────────
+    void OnControllerColliderHit(ControllerColliderHit hit)
+    {
+        Rigidbody rb = hit.collider.attachedRigidbody;
+        if (rb == null || rb.isKinematic) return;
+
+        WorldObject wo = hit.collider.GetComponentInParent<WorldObject>();
+        if (wo == null || !wo.canBePushed) return;
+
+        // Ignore downward hits — standing on top of an object should not push it down.
+        if (hit.moveDirection.y < -0.3f) return;
+
+        // Push horizontally in the direction we are moving into the object.
+        Vector3 pushDir = new Vector3(hit.moveDirection.x, 0f, hit.moveDirection.z);
+        if (pushDir.sqrMagnitude < 0.01f) return;
+        pushDir.Normalize();
+
+        float pushSpeed = pushForce / Mathf.Max(1f, rb.mass);
+        Vector3 currentHorizontal = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
+        Vector3 desiredHorizontal = pushDir * pushSpeed;
+        Vector3 nextHorizontal = Vector3.MoveTowards(currentHorizontal, desiredHorizontal, pushSpeed * 0.35f);
+
+        rb.velocity = new Vector3(nextHorizontal.x, rb.velocity.y, nextHorizontal.z);
+        rb.angularVelocity = Vector3.zero;
     }
 }

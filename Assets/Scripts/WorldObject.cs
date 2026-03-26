@@ -59,20 +59,57 @@ public class WorldObject : MonoBehaviour
     private Coroutine _interactAnim;
     private Coroutine _collectAnim;
     private Vector3   _baseScale;        // original scale, cached before any anim
+    private Rigidbody _rb;
+    private bool      _isCarried;
     private Rigidbody _animRb;           // rb being locked by current anim
     private bool      _animPrevKinematic;
     private Vector3   _posBeforeAnim;    // world position before animation started; restored on CancelAnims
 
+    /// <summary>True while this object is currently carried by the player.</summary>
+    public bool IsCarried => _isCarried;
+
     void Awake()
     {
         _baseScale = transform.localScale;
+        _rb = GetComponent<Rigidbody>();
+        ApplyPushabilityState();
+    }
 
-        // Enforce push behaviour: if this object should not be moveable by external forces,
-        // make its Rigidbody kinematic so the physics engine never applies impulses to it.
-        // InteractionSystem saves/restores this when carrying, so carry still works normally.
-        Rigidbody rb = GetComponent<Rigidbody>();
-        if (rb != null && !canBePushed)
-            rb.isKinematic = true;
+    void OnValidate() => ApplyPushabilityState();
+
+    void FixedUpdate()
+    {
+        // Re-assert each physics step so external forces/scripts cannot keep a
+        // non-pushable object dynamic by accident.
+        ApplyPushabilityState();
+    }
+
+    internal void SetCarriedState(bool carried)
+    {
+        _isCarried = carried;
+        ApplyPushabilityState();
+    }
+
+    void ApplyPushabilityState()
+    {
+        if (_rb == null) _rb = GetComponent<Rigidbody>();
+        if (_rb == null) return;
+
+        // While carried or during scale animations, InteractionSystem/animation logic owns RB mode.
+        if (_isCarried || _animRb != null) return;
+
+        if (canBePushed)
+        {
+            _rb.isKinematic = false;
+            return;
+        }
+
+        if (!canBePushed)
+        {
+            _rb.isKinematic = true;
+            _rb.velocity = Vector3.zero;
+            _rb.angularVelocity = Vector3.zero;
+        }
     }
 
     /// <summary>
