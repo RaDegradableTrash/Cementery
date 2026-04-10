@@ -58,6 +58,9 @@ public class InteractionSystem : MonoBehaviour
     [SerializeField] private InventoryCameraController inventoryCameraController;
     [SerializeField] private bool openInventoryOnCollect = true;
 
+    [Header("Inventory Restore")]
+    [SerializeField] private float inventoryCancelCarrySpawnDistance = 1.15f;
+
     private WorldObject _lookedAt;
     private Rigidbody _carryCandidateRb;
     private WorldObject _carryCandidateWo;
@@ -88,6 +91,9 @@ public class InteractionSystem : MonoBehaviour
 
     private Coroutine _hideInfoCo;
     private Coroutine _hideCarryDistanceLimitCo;
+
+    private GameObject _pendingCollectedRestoreObject;
+    private GameObject _pendingCollectedOriginalObject;
 
     void Awake()
     {
@@ -566,15 +572,115 @@ public class InteractionSystem : MonoBehaviour
 
         InventoryCameraController camCtrl = GetInventoryCameraController();
         if (openInventoryOnCollect && camCtrl != null)
+        {
+            CacheCollectedObjectForRestore(obj);
             camCtrl.EnterInventoryMode(obj.collectItemData);
+        }
 
         _lookedAt = null;
         obj.PlayCollectAnim(() => Destroy(obj.gameObject));
     }
 
+    void CacheCollectedObjectForRestore(WorldObject source)
+    {
+        ClearPendingCollectedRestoreObject();
+
+        if (source == null)
+            return;
+
+        _pendingCollectedOriginalObject = source.gameObject;
+        _pendingCollectedRestoreObject = Instantiate(source.gameObject);
+        _pendingCollectedRestoreObject.name = source.gameObject.name + "_RestoreCarry";
+        _pendingCollectedRestoreObject.SetActive(false);
+    }
+
+    public void CommitPendingCollectedObject()
+    {
+        ClearPendingCollectedRestoreObject();
+    }
+
+    public bool RestorePendingCollectedObjectToCarry()
+    {
+        if (_pendingCollectedRestoreObject == null)
+            return false;
+
+        if (_pendingCollectedOriginalObject != null)
+        {
+            Destroy(_pendingCollectedOriginalObject);
+            _pendingCollectedOriginalObject = null;
+        }
+
+        GameObject restoreObject = _pendingCollectedRestoreObject;
+        _pendingCollectedRestoreObject = null;
+
+        if (restoreObject == null)
+            return false;
+
+        restoreObject.SetActive(true);
+        EnableAllColliders(restoreObject, true);
+
+        WorldObject wo = restoreObject.GetComponentInChildren<WorldObject>(true);
+        if (wo != null)
+        {
+            wo.enabled = true;
+            wo.CancelAnims();
+            wo.SetCarriedState(false);
+        }
+
+        Rigidbody rb = restoreObject.GetComponentInChildren<Rigidbody>(true);
+        if (rb == null)
+            rb = restoreObject.AddComponent<Rigidbody>();
+
+        rb.detectCollisions = true;
+        rb.isKinematic = false;
+        rb.useGravity = true;
+        rb.velocity = Vector3.zero;
+        rb.angularVelocity = Vector3.zero;
+
+        Transform cam = playerCamera != null ? playerCamera.transform : transform;
+        float spawnDistance = Mathf.Clamp(inventoryCancelCarrySpawnDistance, 0.75f, Mathf.Max(0.75f, carryPickUpRange - 0.05f));
+        Vector3 spawnPos = cam.position + cam.forward * spawnDistance;
+        restoreObject.transform.position = spawnPos;
+
+        Vector3 flatForward = Vector3.ProjectOnPlane(cam.forward, Vector3.up);
+        if (flatForward.sqrMagnitude > 0.0001f)
+            restoreObject.transform.rotation = Quaternion.LookRotation(flatForward.normalized, Vector3.up);
+
+        PickUp(rb, wo);
+        return _carriedRb != null;
+    }
+
+    void ClearPendingCollectedRestoreObject()
+    {
+        if (_pendingCollectedRestoreObject != null)
+            Destroy(_pendingCollectedRestoreObject);
+
+        if (_pendingCollectedOriginalObject != null)
+            Destroy(_pendingCollectedOriginalObject);
+
+        _pendingCollectedRestoreObject = null;
+        _pendingCollectedOriginalObject = null;
+    }
+
+    void EnableAllColliders(GameObject go, bool enabled)
+    {
+        if (go == null)
+            return;
+
+        Collider[] cols = go.GetComponentsInChildren<Collider>(true);
+        for (int i = 0; i < cols.Length; i++)
+        {
+            if (cols[i] != null)
+                cols[i].enabled = enabled;
+        }
+    }
+
     InventoryCameraController GetInventoryCameraController()
     {
-        if (inventoryCameraController == null)
+        InventoryCameraController primary = InventoryCameraController.GetPrimaryController();
+        if (primary != null)
+            inventoryCameraController = primary;
+        else if (inventoryCameraController == null)
             inventoryCameraController = FindObjectOfType<InventoryCameraController>();
 
         return inventoryCameraController;
@@ -752,5 +858,10 @@ public class InteractionSystem : MonoBehaviour
         if (carryDistanceLimitLabel != null)
             carryDistanceLimitLabel.gameObject.SetActive(false);
         _hideCarryDistanceLimitCo = null;
+    }
+
+    void OnDestroy()
+    {
+        ClearPendingCollectedRestoreObject();
     }
 }

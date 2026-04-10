@@ -42,6 +42,8 @@ public class MouseLook : MonoBehaviour
         LockCursor();
 
         if (inventoryCameraController == null)
+            inventoryCameraController = InventoryCameraController.GetPrimaryController();
+        if (inventoryCameraController == null)
             inventoryCameraController = FindObjectOfType<InventoryCameraController>();
 
         _pitch = transform.eulerAngles.x;
@@ -115,7 +117,10 @@ public class MouseLook : MonoBehaviour
 
     bool IsInventoryModeActive()
     {
-        if (inventoryCameraController == null)
+        InventoryCameraController primary = InventoryCameraController.GetPrimaryController();
+        if (primary != null)
+            inventoryCameraController = primary;
+        else if (inventoryCameraController == null)
             inventoryCameraController = FindObjectOfType<InventoryCameraController>();
 
         return inventoryCameraController != null && inventoryCameraController.IsInventoryActive;

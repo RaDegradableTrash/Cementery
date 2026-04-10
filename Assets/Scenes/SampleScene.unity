@@ -445,6 +445,8 @@ MonoBehaviour:
   fallbackPreviewItem: {fileID: 0}
   allowToggleInventoryKey: 1
   toggleInventoryKey: 101
+  inventoryRaycastPlacer: {fileID: 0}
+  interactionSystem: {fileID: 0}
 --- !u!1 &512300540
 GameObject:
   m_ObjectHideFlags: 0
@@ -457,6 +459,7 @@ GameObject:
   - component: {fileID: 512300544}
   - component: {fileID: 512300543}
   - component: {fileID: 512300542}
+  - component: {fileID: 512300545}
   m_Layer: 9
   m_Name: PlayerBodyCapsule
   m_TagString: Untagged
@@ -552,6 +555,33 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 512300540}
   m_Mesh: {fileID: 10208, guid: 0000000000000000e000000000000000, type: 0}
+--- !u!54 &512300545
+Rigidbody:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 512300540}
+  serializedVersion: 4
+  m_Mass: 30
+  m_Drag: 0
+  m_AngularDrag: 0.05
+  m_CenterOfMass: {x: 0, y: 0, z: 0}
+  m_InertiaTensor: {x: 1, y: 1, z: 1}
+  m_InertiaRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ImplicitCom: 1
+  m_ImplicitTensor: 1
+  m_UseGravity: 1
+  m_IsKinematic: 0
+  m_Interpolate: 0
+  m_Constraints: 0
+  m_CollisionDetection: 0
 --- !u!1 &603837969
 GameObject:
   m_ObjectHideFlags: 0
@@ -817,11 +847,11 @@ MonoBehaviour:
   inventorySystem: {fileID: 748064221}
   gridPlane: {fileID: 57573276}
   layerStep: 1
-  inventoryCameraController: {fileID: 1130216196}
+  inventoryCameraController: {fileID: 436021012}
   planeInset: 0
   planeHeightOffset: 0.005
   planeMaterialOverride: {fileID: 2100000, guid: 62de6c2fbaaa74d12b3b313a7304aae9, type: 2}
-  showGridLines: 1
+  showGridLines: 0
   gridLineColor: {r: 0.72, g: 0.72, b: 0.72, a: 0.75}
   gridLineWidth: 0.02
   gridLineHeightOffset: 0.012
@@ -876,6 +906,7 @@ MonoBehaviour:
   gridPlane: {fileID: 57573276}
   inventorySystem: {fileID: 748064221}
   inventoryCameraController: {fileID: 436021012}
+  interactionSystem: {fileID: 0}
   previewRotation: {x: 0, y: 0, z: 0, w: 1}
   validPreviewColor: {r: 0.2, g: 0.9, b: 0.35, a: 0.68}
   invalidPreviewColor: {r: 0.92, g: 0.2, b: 0.2, a: 0.78}
@@ -885,15 +916,20 @@ MonoBehaviour:
   hideBasePlaneRenderer: 1
   cellFill: 0.92
   cellHeightOffset: 0.01
+  cellFrameLineWidth: 0.05
   cellValidColor: {r: 0.2, g: 0.9, b: 0.35, a: 0.52}
   cellInvalidColor: {r: 0.9, g: 0.2, b: 0.2, a: 0.58}
   cellHoverValidColor: {r: 0.26, g: 1, b: 0.45, a: 0.7}
   cellHoverInvalidColor: {r: 1, g: 0.3, b: 0.25, a: 0.72}
-  cellNeutralColor: {r: 0.6, g: 0.6, b: 0.6, a: 0.1}
+  cellNeutralColor: {r: 0.6, g: 0.6, b: 0.6, a: 0.3}
   cellOccupiedTransparentColor: {r: 0, g: 0, b: 0, a: 0}
   cellOverlayMaterial: {fileID: 0}
   keepPlacedItemsInInventory: 1
   closeInventoryOnPlace: 0
+  flashOccupiedCellsOnPlaceFail: 1
+  occupiedFailFlashDuration: 0.45
+  occupiedFailFlashFrequency: 7.5
+  occupiedFailFlashColor: {r: 1, g: 0.18, b: 0.18, a: 0.92}
 --- !u!1 &844257577
 GameObject:
   m_ObjectHideFlags: 0
@@ -1074,6 +1110,7 @@ MonoBehaviour:
   carryTooFarMessage: Can't push farther
   inventoryCameraController: {fileID: 0}
   openInventoryOnCollect: 1
+  inventoryCancelCarrySpawnDistance: 1.15
 --- !u!114 &889552835
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1416,7 +1453,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1130216194}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 0effef758fa2d47229d4eee987325993, type: 3}
   m_Name: 
@@ -1432,8 +1469,10 @@ MonoBehaviour:
   framingDistanceMultiplier: 1.8
   minFramingDistance: 3
   fallbackPreviewItem: {fileID: 0}
-  allowToggleInventoryKey: 1
+  allowToggleInventoryKey: 0
   toggleInventoryKey: 101
+  inventoryRaycastPlacer: {fileID: 0}
+  interactionSystem: {fileID: 0}
 --- !u!1 &1183760789
 GameObject:
   m_ObjectHideFlags: 0

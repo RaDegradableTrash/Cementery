@@ -11,7 +11,7 @@ public class InventoryRaycastPlacer : MonoBehaviour
         public int x;
         public int z;
         public Transform transform;
-        public Renderer renderer;
+        public LineRenderer lineRenderer;
     }
 
     [Header("背包摄像头")]
@@ -24,6 +24,7 @@ public class InventoryRaycastPlacer : MonoBehaviour
     public GridInventorySystem inventorySystem;
     [Header("背包控制器")]
     [SerializeField] private InventoryCameraController inventoryCameraController;
+    [SerializeField] private InteractionSystem interactionSystem;
     [Header("当前旋转")]
     public Quaternion previewRotation = Quaternion.identity;
 
@@ -39,17 +40,24 @@ public class InventoryRaycastPlacer : MonoBehaviour
     [Range(0.1f, 1f)]
     [SerializeField] private float cellFill = 0.92f;
     [SerializeField] private float cellHeightOffset = 0.01f;
+    [SerializeField] private float cellFrameLineWidth = 0.05f;
     [SerializeField] private Color cellValidColor = new Color(0.2f, 0.9f, 0.35f, 0.52f);
     [SerializeField] private Color cellInvalidColor = new Color(0.9f, 0.2f, 0.2f, 0.58f);
     [SerializeField] private Color cellHoverValidColor = new Color(0.26f, 1f, 0.45f, 0.7f);
     [SerializeField] private Color cellHoverInvalidColor = new Color(1f, 0.3f, 0.25f, 0.72f);
-    [SerializeField] private Color cellNeutralColor = new Color(0.6f, 0.6f, 0.6f, 0.1f);
+    [SerializeField] private Color cellNeutralColor = new Color(0.6f, 0.6f, 0.6f, 0.3f);
     [SerializeField] private Color cellOccupiedTransparentColor = new Color(0f, 0f, 0f, 0f);
     [SerializeField] private Material cellOverlayMaterial;
 
     [Header("已放置物品")]
     [SerializeField] private bool keepPlacedItemsInInventory = true;
     [SerializeField] private bool closeInventoryOnPlace = false;
+
+    [Header("放置失败反馈")]
+    [SerializeField] private bool flashOccupiedCellsOnPlaceFail = true;
+    [SerializeField] private float occupiedFailFlashDuration = 0.45f;
+    [SerializeField] private float occupiedFailFlashFrequency = 7.5f;
+    [SerializeField] private Color occupiedFailFlashColor = new Color(1f, 0.18f, 0.18f, 0.92f);
 
     private Transform previewObject;
     private ItemData previewItemData;
@@ -60,11 +68,15 @@ public class InventoryRaycastPlacer : MonoBehaviour
     private readonly List<CellTile> _cellTiles = new List<CellTile>();
     private readonly HashSet<Vector2Int> _previewFootprintCells = new HashSet<Vector2Int>();
     private readonly Dictionary<Vector2Int, bool> _previewFootprintBlocked = new Dictionary<Vector2Int, bool>();
+    private readonly HashSet<Vector2Int> _occupiedFailFlashCells = new HashSet<Vector2Int>();
     private Transform _cellRoot;
     private Transform _placedItemsRoot;
     private Material _runtimeCellMaterial;
     private int _cachedCellWidth = -1;
     private int _cachedCellDepth = -1;
+    private float _occupiedFailFlashStartTime = -1f;
+
+    public bool HasActivePreviewItem => previewItemData != null;
 
     void Awake()
     {
@@ -117,31 +129,67 @@ public class InventoryRaycastPlacer : MonoBehaviour
         bool canPlace = anchorInBounds && inventorySystem.CanPlace(previewItemData, gridPos, previewRotation);
         SetPreviewColor(canPlace ? validPreviewColor : invalidPreviewColor);
 
-        // 左键放置
-        if (Input.GetMouseButtonDown(0) && canPlace)
+        if (!Input.GetMouseButtonDown(0))
+            return;
+
+        if (!canPlace)
         {
-            if (!inventorySystem.Place(previewItemData, gridPos, previewRotation))
-                return;
-
-            CommitPlacedItemVisual(gridPos, previewRotation);
-
-            if (closeInventoryOnPlace)
-            {
-                // 放置后退出背包
-                InventoryCameraController camCtrl = GetInventoryCameraController();
-                if (camCtrl != null)
-                    camCtrl.SetInventoryActive(false);
-            }
-            else
-            {
-                // 保持背包开启，继续同类型物品放置
-                SetPreviewItem(previewItemData);
-            }
+            TryTriggerOccupiedFailFlash(gridPos, anchorInBounds);
+            return;
         }
+
+        // 左键放置
+        if (!inventorySystem.Place(previewItemData, gridPos, previewRotation))
+            return;
+
+        CommitPlacedItemVisual(gridPos, previewRotation);
+
+        InteractionSystem interaction = GetInteractionSystem();
+        if (interaction != null)
+            interaction.CommitPendingCollectedObject();
+
+        // 放置后停止当前物品的继续放置（不再跟随鼠标）。
+        ClearPreview();
+
+        if (closeInventoryOnPlace)
+        {
+            // 放置后退出背包
+            InventoryCameraController camCtrl = GetInventoryCameraController();
+            if (camCtrl != null)
+                camCtrl.SetInventoryActive(false);
+        }
+    }
+
+    void TryTriggerOccupiedFailFlash(Vector3Int anchor, bool anchorInBounds)
+    {
+        if (!flashOccupiedCellsOnPlaceFail || previewItemData == null || !anchorInBounds)
+            return;
+
+        _occupiedFailFlashCells.Clear();
+
+        int layer = inventorySystem.currentLayer;
+        foreach (Vector3Int offset in previewItemData.GetRotatedOffsets(previewRotation))
+        {
+            Vector3Int pos = anchor + offset;
+            if (!inventorySystem.InBounds(pos) || pos.y != layer)
+                continue;
+
+            if (!inventorySystem.IsOccupied(pos))
+                continue;
+
+            _occupiedFailFlashCells.Add(new Vector2Int(pos.x, pos.z));
+        }
+
+        if (_occupiedFailFlashCells.Count <= 0)
+            return;
+
+        _occupiedFailFlashStartTime = Time.unscaledTime;
     }
 
     public void SetPreviewItem(ItemData item)
     {
+        ClearOccupiedFailFlash();
+
         previewItemData = item;
         if (previewObject != null)
             Destroy(previewObject.gameObject);
@@ -169,6 +217,8 @@ public class InventoryRaycastPlacer : MonoBehaviour
 
     public void ClearPreview()
     {
+        ClearOccupiedFailFlash();
+
         previewItemData = null;
         if (previewObject != null)
             Destroy(previewObject.gameObject);
@@ -306,26 +356,31 @@ public class InventoryRaycastPlacer : MonoBehaviour
         {
             for (int z = 0; z < depth; z++)
             {
-                GameObject tile = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                GameObject tile = new GameObject($"Cell_{x}_{z}");
                 tile.name = $"Cell_{x}_{z}";
                 tile.transform.SetParent(_cellRoot, false);
-                tile.transform.localRotation = Quaternion.Euler(-90f, 0f, 0f);
+                tile.transform.localRotation = Quaternion.identity;
                 tile.layer = layer;
 
-                Collider c = tile.GetComponent<Collider>();
-                if (c != null)
-                    Destroy(c);
-
-                Renderer r = tile.GetComponent<Renderer>();
-                if (r != null && cellMat != null)
-                    r.sharedMaterial = cellMat;
+                LineRenderer lr = tile.AddComponent<LineRenderer>();
+                lr.useWorldSpace = false;
+                lr.loop = false;
+                lr.positionCount = 5;
+                lr.alignment = LineAlignment.View;
+                lr.numCornerVertices = 2;
+                lr.numCapVertices = 2;
+                lr.sortingOrder = 20;
+                lr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                lr.receiveShadows = false;
+                if (cellMat != null)
+                    lr.sharedMaterial = cellMat;
 
                 _cellTiles.Add(new CellTile
                 {
                     x = x,
                     z = z,
                     transform = tile.transform,
-                    renderer = r
+                    lineRenderer = lr
                 });
             }
         }
@@ -480,7 +535,7 @@ public class InventoryRaycastPlacer : MonoBehaviour
                 continue;
 
             tile.transform.localPosition = new Vector3(tile.x, layer + cellHeightOffset, tile.z);
-            tile.transform.localScale = new Vector3(clampedFill, clampedFill, 1f);
+            ConfigureCellFrame(tile.lineRenderer, clampedFill);
 
             Vector3Int tileGridPos = new Vector3Int(tile.x, layer, tile.z);
             bool tileOccupied = inventorySystem.IsOccupied(tileGridPos);
@@ -495,8 +550,46 @@ public class InventoryRaycastPlacer : MonoBehaviour
                 }
             }
 
-            SetRendererColor(tile.renderer, color);
+            if (TryGetOccupiedFailFlashColor(tile.x, tile.z, color, out Color flashColor))
+                color = flashColor;
+
+            SetLineColor(tile.lineRenderer, color);
         }
+    }
+
+    bool TryGetOccupiedFailFlashColor(int x, int z, Color baseColor, out Color flashColor)
+    {
+        flashColor = baseColor;
+        if (!IsOccupiedFailFlashActive())
+            return false;
+
+        Vector2Int key = new Vector2Int(x, z);
+        if (!_occupiedFailFlashCells.Contains(key))
+            return false;
+
+        float elapsed = Time.unscaledTime - _occupiedFailFlashStartTime;
+        float wave = 0.5f + 0.5f * Mathf.Sin(elapsed * Mathf.PI * 2f * Mathf.Max(0.1f, occupiedFailFlashFrequency));
+        flashColor = Color.Lerp(baseColor, occupiedFailFlashColor, wave);
+        return true;
+    }
+
+    bool IsOccupiedFailFlashActive()
+    {
+        if (_occupiedFailFlashStartTime < 0f)
+            return false;
+
+        float duration = Mathf.Max(0.05f, occupiedFailFlashDuration);
+        if (Time.unscaledTime - _occupiedFailFlashStartTime <= duration)
+            return true;
+
+        ClearOccupiedFailFlash();
+        return false;
+    }
+
+    void ClearOccupiedFailFlash()
+    {
+        _occupiedFailFlashStartTime = -1f;
+        _occupiedFailFlashCells.Clear();
     }
 
     void SetCellOverlayVisible(bool visible)
@@ -530,12 +623,12 @@ public class InventoryRaycastPlacer : MonoBehaviour
         return _runtimeCellMaterial;
     }
 
-    void SetRendererColor(Renderer renderer, Color color)
+    void SetLineColor(LineRenderer lr, Color color)
     {
-        if (renderer == null)
+        if (lr == null)
             return;
 
-        Material shared = renderer.sharedMaterial;
+        Material shared = lr.sharedMaterial;
         if (shared == null)
             return;
 
@@ -555,7 +648,27 @@ public class InventoryRaycastPlacer : MonoBehaviour
         }
 
         if (wrote)
-            renderer.SetPropertyBlock(cellColorBlock);
+            lr.SetPropertyBlock(cellColorBlock);
+    }
+
+    void ConfigureCellFrame(LineRenderer lr, float fill)
+    {
+        if (lr == null)
+            return;
+
+        float half = Mathf.Clamp(fill, 0.1f, 1f) * 0.5f;
+        Vector3 p0 = new Vector3(-half, 0f, -half);
+        Vector3 p1 = new Vector3(-half, 0f, half);
+        Vector3 p2 = new Vector3(half, 0f, half);
+        Vector3 p3 = new Vector3(half, 0f, -half);
+
+        lr.startWidth = cellFrameLineWidth;
+        lr.endWidth = cellFrameLineWidth;
+        lr.SetPosition(0, p0);
+        lr.SetPosition(1, p1);
+        lr.SetPosition(2, p2);
+        lr.SetPosition(3, p3);
+        lr.SetPosition(4, p0);
     }
 
     void DisablePreviewPhysics(GameObject go)
@@ -630,10 +743,21 @@ public class InventoryRaycastPlacer : MonoBehaviour
 
     InventoryCameraController GetInventoryCameraController()
     {
-        if (inventoryCameraController == null)
+        InventoryCameraController primary = InventoryCameraController.GetPrimaryController();
+        if (primary != null)
+            inventoryCameraController = primary;
+        else if (inventoryCameraController == null)
             inventoryCameraController = FindObjectOfType<InventoryCameraController>();
 
         return inventoryCameraController;
+    }
+
+    InteractionSystem GetInteractionSystem()
+    {
+        if (interactionSystem == null)
+            interactionSystem = FindObjectOfType<InteractionSystem>();
+
+        return interactionSystem;
     }
 
     void OnDestroy()

@@ -21,7 +21,7 @@ public class InventoryContainerView : MonoBehaviour
     [SerializeField] private Material planeMaterialOverride;
 
     [Header("网格线显示")]
-    [SerializeField] private bool showGridLines = true;
+    [SerializeField] private bool showGridLines = false;
     [SerializeField] private Color gridLineColor = new Color(0.72f, 0.72f, 0.72f, 0.75f);
     [SerializeField] private float gridLineWidth = 0.02f;
     [SerializeField] private float gridLineHeightOffset = 0.012f;
@@ -174,25 +174,32 @@ public class InventoryContainerView : MonoBehaviour
         float minZ = -0.5f + inset;
         float maxZ = depth - 0.5f - inset;
 
-        for (int i = 0; i <= width; i++)
-        {
-            float t = width > 0 ? i / (float)width : 0f;
-            float x = Mathf.Lerp(minX, maxX, t);
-            CreateGridLine(new Vector3(x, 0f, minZ), new Vector3(x, 0f, maxZ), $"GridLine_X_{i}");
-        }
-
-        for (int i = 0; i <= depth; i++)
-        {
-            float t = depth > 0 ? i / (float)depth : 0f;
-            float z = Mathf.Lerp(minZ, maxZ, t);
-            CreateGridLine(new Vector3(minX, 0f, z), new Vector3(maxX, 0f, z), $"GridLine_Z_{i}");
-        }
+        CreateGridOutline(minX, maxX, minZ, maxZ, "GridOutline");
 
         _cachedWidth = width;
         _cachedDepth = depth;
         _cachedInset = inset;
 
         ApplyLineStyle();
+    }
+
+    void CreateGridOutline(float minX, float maxX, float minZ, float maxZ, string name)
+    {
+        GameObject go = new GameObject(name);
+        go.transform.SetParent(_gridLineRoot, false);
+
+        LineRenderer lr = go.AddComponent<LineRenderer>();
+        lr.useWorldSpace = false;
+        lr.loop = true;
+        lr.positionCount = 4;
+        lr.SetPosition(0, new Vector3(minX, 0f, minZ));
+        lr.SetPosition(1, new Vector3(minX, 0f, maxZ));
+        lr.SetPosition(2, new Vector3(maxX, 0f, maxZ));
+        lr.SetPosition(3, new Vector3(maxX, 0f, minZ));
+        lr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        lr.receiveShadows = false;
+
+        _gridLines.Add(lr);
     }
 
     void CreateGridLine(Vector3 a, Vector3 b, string name)
@@ -300,7 +307,10 @@ public class InventoryContainerView : MonoBehaviour
 
     bool IsInventoryActive()
     {
-        if (inventoryCameraController == null)
+        InventoryCameraController primary = InventoryCameraController.GetPrimaryController();
+        if (primary != null)
+            inventoryCameraController = primary;
+        else if (inventoryCameraController == null)
             inventoryCameraController = FindObjectOfType<InventoryCameraController>();
 
         return inventoryCameraController != null && inventoryCameraController.IsInventoryActive;
