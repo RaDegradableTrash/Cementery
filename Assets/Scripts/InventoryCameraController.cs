@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Rendering;
 
 /// <summary>
 /// 3D背包摄像头与容器切换控制器，实现背包场景的独立渲染、激活/关闭、摄像头切换等。
@@ -34,9 +35,21 @@ public class InventoryCameraController : MonoBehaviour
     [SerializeField] private InventoryRaycastPlacer inventoryRaycastPlacer;
     [SerializeField] private InteractionSystem interactionSystem;
 
+    [Header("Render Culling")]
+    [SerializeField] private bool aggressivelyCullOutOfViewRenderers = true;
+    [SerializeField] private bool preserveFrameInfluencingRenderers = true;
+    [SerializeField] private bool preserveShadowCastingRenderers = true;
+    [Min(0.01f)]
+    [SerializeField] private float cullingUpdateInterval = 0.08f;
+    [Min(0.2f)]
+    [SerializeField] private float cullingCacheRefreshInterval = 1.2f;
+
     private static InventoryCameraController _primaryController;
     private bool inventoryActive = false;
     private ItemData lastPreviewItem;
+    private Renderer[] _cachedRenderers;
+    private float _nextCullingTickTime;
+    private float _nextCullingCacheRefreshTime;
     public bool IsInventoryActive
     {
         get
@@ -62,6 +75,7 @@ public class InventoryCameraController : MonoBehaviour
             return;
 
         SetInventoryActive(false);
+        RebuildRendererCache();
     }
 
     void Update()
@@ -84,21 +98,36 @@ public class InventoryCameraController : MonoBehaviour
         {
             CloseInventoryFromKey();
         }
+
+        UpdateAggressiveFrustumCulling();
     }
 
     void CloseInventoryFromKey()
     {
         InventoryRaycastPlacer placer = GetInventoryPlacer();
         bool hadPreviewInHand = placer != null && placer.HasActivePreviewItem;
+        InteractionSystem interaction = GetInteractionSystem();
+        bool shouldRestoreCarry = hadPreviewInHand && interaction != null && interaction.HasPendingCollectedObject();
 
         SetInventoryActive(false);
 
-        if (!hadPreviewInHand)
+        if (interaction == null)
             return;
 
-        InteractionSystem interaction = GetInteractionSystem();
-        if (interaction != null)
-            interaction.RestorePendingCollectedObjectToCarry();
+        if (shouldRestoreCarry)
+        {
+            bool restored = interaction.RestorePendingCollectedObjectToCarry();
+            if (!restored)
+            {
+                interaction.CommitPendingCollectedObject();
+                interaction.DropCarriedObjectIfAny();
+            }
+            return;
+        }
+
+        // Successful placement / normal close path: clear pending restore cache and any stray carry state.
+        interaction.CommitPendingCollectedObject();
+        interaction.DropCarriedObjectIfAny();
     }
 
     /// <summary>
@@ -113,17 +142,20 @@ public class InventoryCameraController : MonoBehaviour
             return;
         }
 
-        if (item == null)
-            item = lastPreviewItem != null ? lastPreviewItem : fallbackPreviewItem;
-
-        if (item != null)
+        bool hasExplicitItem = item != null;
+        if (hasExplicitItem)
             lastPreviewItem = item;
 
         SetInventoryActive(true);
         // 通知背包预览系统
         InventoryRaycastPlacer placer = GetInventoryPlacer();
-        if (placer != null)
+        if (placer == null)
+            return;
+
+        if (hasExplicitItem)
             placer.SetPreviewItem(item);
+        else
+            placer.ClearPreview();
     }
 
     /// <summary>
@@ -217,7 +249,7 @@ public class InventoryCameraController : MonoBehaviour
     InventoryRaycastPlacer GetInventoryPlacer()
     {
         if (inventoryRaycastPlacer == null)
-            inventoryRaycastPlacer = FindObjectOfType<InventoryRaycastPlacer>();
+            inventoryRaycastPlacer = InventoryRaycastPlacer.GetPrimaryPlacer();
 
         return inventoryRaycastPlacer;
     }
@@ -232,21 +264,9 @@ public class InventoryCameraController : MonoBehaviour
 
     void ApplyCursorState(bool inventoryOpen)
     {
-        if (inventoryOpen)
-        {
-            if (!unlockCursorWhenInventoryOpen)
-                return;
-
-            Cursor.lockState = CursorLockMode.None;
-            Cursor.visible = true;
-            return;
-        }
-
-        if (!lockCursorWhenInventoryClosed)
-            return;
-
-        Cursor.lockState = CursorLockMode.Locked;
-        Cursor.visible = false;
+        // Hard requirement: inventory camera -> unlocked cursor; main camera -> locked cursor.
+        Cursor.lockState = inventoryOpen ? CursorLockMode.None : CursorLockMode.Locked;
+        Cursor.visible = inventoryOpen;
     }
 
     void AutoFrameInventoryCamera()
@@ -278,8 +298,95 @@ public class InventoryCameraController : MonoBehaviour
         inventoryCamera.transform.rotation = Quaternion.LookRotation(centerWorld - cameraPos, Vector3.up);
     }
 
+    void UpdateAggressiveFrustumCulling()
+    {
+        if (!aggressivelyCullOutOfViewRenderers)
+        {
+            RestoreForcedRendering();
+            return;
+        }
+
+        float now = Time.unscaledTime;
+        if (_cachedRenderers == null || _cachedRenderers.Length == 0 || now >= _nextCullingCacheRefreshTime)
+        {
+            RebuildRendererCache();
+            _nextCullingCacheRefreshTime = now + Mathf.Max(0.2f, cullingCacheRefreshInterval);
+        }
+
+        if (now < _nextCullingTickTime)
+            return;
+
+        _nextCullingTickTime = now + Mathf.Max(0.01f, cullingUpdateInterval);
+
+        Camera activeCamera = inventoryActive ? inventoryCamera : mainCamera;
+        if (activeCamera == null || !activeCamera.enabled)
+        {
+            RestoreForcedRendering();
+            return;
+        }
+
+        Plane[] planes = GeometryUtility.CalculateFrustumPlanes(activeCamera);
+        for (int i = 0; i < _cachedRenderers.Length; i++)
+        {
+            Renderer r = _cachedRenderers[i];
+            if (r == null)
+                continue;
+
+            if (!r.gameObject.activeInHierarchy || !r.enabled)
+            {
+                r.forceRenderingOff = false;
+                continue;
+            }
+
+            bool inView = GeometryUtility.TestPlanesAABB(planes, r.bounds);
+            if (!inView && !CanForceHideRenderer(r))
+            {
+                r.forceRenderingOff = false;
+                continue;
+            }
+
+            r.forceRenderingOff = !inView;
+        }
+    }
+
+    bool CanForceHideRenderer(Renderer renderer)
+    {
+        if (renderer == null || !preserveFrameInfluencingRenderers)
+            return true;
+
+        // If renderer can still affect the current frame (for example by casting shadows), keep it visible.
+        if (preserveShadowCastingRenderers && renderer.shadowCastingMode != ShadowCastingMode.Off)
+            return false;
+
+        // Visible by any camera/pass (reflection/portal/etc.) should not be force-hidden.
+        if (renderer.isVisible)
+            return false;
+
+        return true;
+    }
+
+    void RebuildRendererCache()
+    {
+        _cachedRenderers = FindObjectsOfType<Renderer>(true);
+    }
+
+    void RestoreForcedRendering()
+    {
+        if (_cachedRenderers == null)
+            return;
+
+        for (int i = 0; i < _cachedRenderers.Length; i++)
+        {
+            Renderer r = _cachedRenderers[i];
+            if (r != null)
+                r.forceRenderingOff = false;
+        }
+    }
+
     void OnDestroy()
     {
+        RestoreForcedRendering();
+
         if (_primaryController == this)
             _primaryController = null;
     }

@@ -2,7 +2,7 @@ using UnityEngine;
 
 /// <summary>
 /// First-person player controller. Requires a CharacterController component.
-/// Supports: WASD movement, sprinting (Left Shift), jumping (Space), gravity, head bobbing.
+/// Supports: WASD movement, sprinting (Left Shift), jump force, physics-gravity falling, head bobbing.
 /// </summary>
 [RequireComponent(typeof(CharacterController))]
 public class PlayerController : MonoBehaviour
@@ -10,13 +10,13 @@ public class PlayerController : MonoBehaviour
     [Header("Movement")]
     public float walkSpeed = 4f;
     public float sprintSpeed = 7f;
-    public float jumpHeight = 1.2f;
-    public float gravity = -20f;
 
-    [Header("Ground Check")]
-    [Tooltip("Extra distance below the capsule bottom to check for ground.")]
-    public float groundCheckDistance = 0.08f;
-    public LayerMask groundMask = ~0;
+    [Header("Inventory")]
+    [SerializeField] private InventoryCameraController inventoryCameraController;
+
+    [Header("Jump & Fall")]
+    [Tooltip("Initial upward velocity applied when jumping.")]
+    public float jumpForce = 7f;
 
     [Header("Head Bob")]
     [SerializeField] private float bobFrequency = 1.8f;
@@ -36,43 +36,81 @@ public class PlayerController : MonoBehaviour
     // ── Internal State ──────────────────────────────────────────────────────
     private CharacterController _cc;
     private PlayerStamina _stamina;
+    private Collider[] _selfColliders;
 
-    private Vector3 _yVelocity;
+    private const float JumpBufferTime = 0.12f;
+    private const float CoyoteTime = 0.08f;
+
+    private float _verticalVelocity;
     private float _bobTimer;
     private bool _isGrounded;
+    private float _jumpBufferedUntil;
+    private float _groundedUntil;
 
     // ── Lifecycle ────────────────────────────────────────────────────────────
     void Awake()
     {
         _cc      = GetComponent<CharacterController>();
         _stamina = GetComponent<PlayerStamina>();
+        _selfColliders = GetComponentsInChildren<Collider>(true);
+
+        // Avoid losing grounded flags on tiny frame displacements when standing still.
+        _cc.minMoveDistance = 0f;
+
+        // CharacterController should not collide with colliders in its own hierarchy.
+        for (int i = 0; i < _selfColliders.Length; i++)
+        {
+            Collider c = _selfColliders[i];
+            if (c == null || c == _cc)
+                continue;
+
+            Physics.IgnoreCollision(_cc, c, true);
+        }
+
+        if (inventoryCameraController == null)
+            inventoryCameraController = InventoryCameraController.GetPrimaryController();
+        if (inventoryCameraController == null)
+            inventoryCameraController = FindObjectOfType<InventoryCameraController>();
     }
 
     void Update()
     {
-        CheckGround();
-        HandleMovement();
-        ApplyGravity();
+        if (IsInventoryModeActive())
+        {
+            _verticalVelocity = 0f;
+            _jumpBufferedUntil = 0f;
+            _groundedUntil = 0f;
+            _stamina?.Recover();
+            BobOffset = Vector3.Lerp(BobOffset, Vector3.zero, Time.deltaTime * 12f);
+            return;
+        }
+
+        _isGrounded = _cc.isGrounded;
+        if (_isGrounded)
+            _groundedUntil = Time.time + CoyoteTime;
+
+        bool jumpPressed = Input.GetButtonDown("Jump") || Input.GetKeyDown(KeyCode.Space);
+        if (jumpPressed)
+            _jumpBufferedUntil = Time.time + JumpBufferTime;
+
+        Vector3 planarVelocity = HandleMovement();
+        ApplyGravity(planarVelocity);
         HandleHeadBob();
     }
 
-    // ── Ground Detection ─────────────────────────────────────────────────────
-    void CheckGround()
+    bool IsInventoryModeActive()
     {
-        // Sphere at the bottom of the capsule
-        Vector3 sphereCenter = transform.position + Vector3.down * (_cc.height * 0.5f - _cc.radius);
-        _isGrounded = Physics.CheckSphere(
-            sphereCenter,
-            _cc.radius + groundCheckDistance,
-            groundMask,
-            QueryTriggerInteraction.Ignore);
+        InventoryCameraController primary = InventoryCameraController.GetPrimaryController();
+        if (primary != null)
+            inventoryCameraController = primary;
+        else if (inventoryCameraController == null)
+            inventoryCameraController = FindObjectOfType<InventoryCameraController>();
 
-        if (_isGrounded && _yVelocity.y < 0f)
-            _yVelocity.y = -2f; // keeps grounded without fighting the floor
+        return inventoryCameraController != null && inventoryCameraController.IsInventoryActive;
     }
 
     // ── Movement ─────────────────────────────────────────────────────────────
-    void HandleMovement()
+    Vector3 HandleMovement()
     {
         float h = Input.GetAxis("Horizontal");
         float v = Input.GetAxis("Vertical");
@@ -89,20 +127,37 @@ public class PlayerController : MonoBehaviour
         float speed = isSprinting ? sprintSpeed : walkSpeed;
 
         Vector3 move = transform.right * h + transform.forward * v;
-        if (move.sqrMagnitude > 1f) move.Normalize();
+        if (move.sqrMagnitude > 1f)
+            move.Normalize();
 
-        _cc.Move(move * speed * Time.deltaTime);
-
-        // Jump
-        if (Input.GetButtonDown("Jump") && _isGrounded)
-            _yVelocity.y = Mathf.Sqrt(jumpHeight * -2f * gravity);
+        return move * speed;
     }
 
     // ── Gravity ───────────────────────────────────────────────────────────────
-    void ApplyGravity()
+    void ApplyGravity(Vector3 planarVelocity)
     {
-        _yVelocity.y += gravity * Time.deltaTime;
-        _cc.Move(_yVelocity * Time.deltaTime);
+        if (_isGrounded && _verticalVelocity < 0f)
+            _verticalVelocity = 0f;
+
+        bool hasBufferedJump = Time.time <= _jumpBufferedUntil;
+        bool canUseGroundedJump = Time.time <= _groundedUntil;
+        if (hasBufferedJump && canUseGroundedJump)
+        {
+            _verticalVelocity = jumpForce;
+            _isGrounded = false;
+            _jumpBufferedUntil = 0f;
+            _groundedUntil = 0f;
+        }
+
+        _verticalVelocity += Physics.gravity.y * Time.deltaTime;
+        Vector3 frameVelocity = planarVelocity + Vector3.up * _verticalVelocity;
+        CollisionFlags flags = _cc.Move(frameVelocity * Time.deltaTime);
+        _isGrounded = ((flags & CollisionFlags.Below) != 0) || _cc.isGrounded;
+        if (_isGrounded)
+            _groundedUntil = Time.time + CoyoteTime;
+
+        if (_isGrounded && _verticalVelocity < 0f)
+            _verticalVelocity = 0f;
     }
 
     // ── Head Bob ─────────────────────────────────────────────────────────────
@@ -141,7 +196,9 @@ public class PlayerController : MonoBehaviour
         if (pushDir.sqrMagnitude < 0.01f) return;
         pushDir.Normalize();
 
-        float pushSpeed = pushForce / Mathf.Max(1f, rb.mass);
+        if (rb.mass <= 0f) return;
+
+        float pushSpeed = pushForce / rb.mass;
         Vector3 currentHorizontal = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
         Vector3 desiredHorizontal = pushDir * pushSpeed;
         Vector3 nextHorizontal = Vector3.MoveTowards(currentHorizontal, desiredHorizontal, pushSpeed * 0.35f);

@@ -6,6 +6,14 @@ using UnityEngine;
 /// </summary>
 public class InventoryRaycastPlacer : MonoBehaviour
 {
+    private static InventoryRaycastPlacer _primaryInstance;
+    class PlacedItemMarker : MonoBehaviour
+    {
+        public ItemData itemData;
+        public Vector3Int anchor;
+        public Quaternion rotation;
+    }
+
     class CellTile
     {
         public int x;
@@ -80,6 +88,9 @@ public class InventoryRaycastPlacer : MonoBehaviour
 
     void Awake()
     {
+        if (_primaryInstance == null)
+            _primaryInstance = this;
+
         previewColorBlock = new MaterialPropertyBlock();
         cellColorBlock = new MaterialPropertyBlock();
         CacheGridRenderer();
@@ -89,6 +100,9 @@ public class InventoryRaycastPlacer : MonoBehaviour
 
     void Update()
     {
+        if (!IsPrimaryInstance())
+            return;
+
         if (inventoryCamera == null || inventoryRoot == null || gridPlane == null || inventorySystem == null)
             return;
 
@@ -101,10 +115,17 @@ public class InventoryRaycastPlacer : MonoBehaviour
         bool showBasePlane = showGridWhenInventoryActive && inventoryOpen && !(showPlacementCells && hideBasePlaneRenderer);
         SetGridVisible(showBasePlane);
 
-        if (!inventoryOpen || previewItemData == null)
+        if (!inventoryOpen)
         {
-            if (!inventoryOpen)
-                SetPreviewVisible(false);
+            SetPreviewVisible(false);
+            return;
+        }
+
+        if (previewItemData == null)
+        {
+            if (Input.GetMouseButtonDown(0))
+                TryPickPlacedItemUnderMouse();
+
             return;
         }
 
@@ -146,7 +167,10 @@ public class InventoryRaycastPlacer : MonoBehaviour
 
         InteractionSystem interaction = GetInteractionSystem();
         if (interaction != null)
+        {
             interaction.CommitPendingCollectedObject();
+            interaction.DropCarriedObjectIfAny();
+        }
 
         // 放置后停止当前物品的继续放置（不再跟随鼠标）。
         ClearPreview();
@@ -158,6 +182,94 @@ public class InventoryRaycastPlacer : MonoBehaviour
             if (camCtrl != null)
                 camCtrl.SetInventoryActive(false);
         }
+    }
+
+    void TryPickPlacedItemUnderMouse()
+    {
+        if (inventoryCamera == null || inventorySystem == null)
+            return;
+
+        EnsurePlacedItemsRoot();
+        if (_placedItemsRoot == null)
+            return;
+
+        Ray ray = inventoryCamera.ScreenPointToRay(Input.mousePosition);
+        PlacedItemMarker marker = FindNearestPlacedItemMarker(ray);
+        if (marker == null || marker.itemData == null)
+            return;
+
+        if (inventorySystem.InBounds(marker.anchor))
+            inventorySystem.Remove(marker.anchor);
+
+        previewItemData = marker.itemData;
+        previewRotation = marker.rotation;
+        previewObject = marker.transform;
+        previewRenderers = previewObject != null
+            ? previewObject.GetComponentsInChildren<Renderer>(true)
+            : null;
+
+        if (previewObject != null && previewObject.parent != inventoryRoot)
+            previewObject.SetParent(inventoryRoot, false);
+
+        if (marker != null)
+            Destroy(marker);
+
+        SetPreviewVisible(true);
+        SetPreviewColor(validPreviewColor);
+
+        InteractionSystem interaction = GetInteractionSystem();
+        if (interaction != null)
+            interaction.SetPendingInventoryCarryItem(previewItemData);
+    }
+
+    PlacedItemMarker FindNearestPlacedItemMarker(Ray ray)
+    {
+        if (_placedItemsRoot == null)
+            return null;
+
+        PlacedItemMarker[] markers = _placedItemsRoot.GetComponentsInChildren<PlacedItemMarker>(true);
+        if (markers == null || markers.Length == 0)
+            return null;
+
+        float nearestDistance = float.PositiveInfinity;
+        PlacedItemMarker nearest = null;
+
+        for (int i = 0; i < markers.Length; i++)
+        {
+            PlacedItemMarker marker = markers[i];
+            if (marker == null || marker.itemData == null)
+                continue;
+
+            Renderer[] renderers = marker.GetComponentsInChildren<Renderer>(true);
+            if (renderers == null || renderers.Length == 0)
+                continue;
+
+            float markerNearest = float.PositiveInfinity;
+            bool hit = false;
+            for (int r = 0; r < renderers.Length; r++)
+            {
+                Renderer renderer = renderers[r];
+                if (renderer == null || !renderer.enabled)
+                    continue;
+
+                if (!renderer.bounds.IntersectRay(ray, out float hitDistance))
+                    continue;
+
+                if (hitDistance >= markerNearest)
+                    continue;
+
+                markerNearest = hitDistance;
+                hit = true;
+            }
+
+            if (!hit || markerNearest >= nearestDistance)
+                continue;
+
+            nearestDistance = markerNearest;
+            nearest = marker;
+        }
+
+        return nearest;
     }
 
     void TryTriggerOccupiedFailFlash(Vector3Int anchor, bool anchorInBounds)
@@ -429,6 +541,8 @@ public class InventoryRaycastPlacer : MonoBehaviour
             placed.localRotation = rotation;
             placed.name = $"Placed_{(previewItemData != null ? previewItemData.name : "Item")}";
 
+            AttachPlacedItemMarker(placed.gameObject, previewItemData, anchor, rotation);
+
             if (placedRenderers != null)
             {
                 for (int i = 0; i < placedRenderers.Length; i++)
@@ -460,6 +574,8 @@ public class InventoryRaycastPlacer : MonoBehaviour
         placedGo.transform.localPosition = anchor;
         placedGo.transform.localRotation = rotation;
         placedGo.name = $"Placed_{previewItemData.name}";
+
+        AttachPlacedItemMarker(placedGo, previewItemData, anchor, rotation);
 
         DisablePreviewPhysics(placedGo);
         SetLayerRecursively(placedGo, gridPlane.gameObject.layer);
@@ -739,6 +855,36 @@ public class InventoryRaycastPlacer : MonoBehaviour
         Transform[] all = go.GetComponentsInChildren<Transform>(true);
         for (int i = 0; i < all.Length; i++)
             all[i].gameObject.layer = layer;
+    }
+
+    void AttachPlacedItemMarker(GameObject go, ItemData itemData, Vector3Int anchor, Quaternion rotation)
+    {
+        if (go == null)
+            return;
+
+        PlacedItemMarker marker = go.GetComponent<PlacedItemMarker>();
+        if (marker == null)
+            marker = go.AddComponent<PlacedItemMarker>();
+
+        marker.itemData = itemData;
+        marker.anchor = anchor;
+        marker.rotation = rotation;
+    }
+
+    public static InventoryRaycastPlacer GetPrimaryPlacer()
+    {
+        if (_primaryInstance == null)
+            _primaryInstance = FindObjectOfType<InventoryRaycastPlacer>(true);
+
+        return _primaryInstance;
+    }
+
+    bool IsPrimaryInstance()
+    {
+        if (_primaryInstance == null)
+            _primaryInstance = this;
+
+        return _primaryInstance == this;
     }
 
     InventoryCameraController GetInventoryCameraController()

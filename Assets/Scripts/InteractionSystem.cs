@@ -18,10 +18,13 @@ public class InteractionSystem : MonoBehaviour
 {
     [Header("References")]
     [SerializeField] private Camera playerCamera;
+    [SerializeField] private Transform attractAimPoint;
 
     [Header("Detection")]
     [SerializeField] private float interactRange = 3f;
     [SerializeField] private float carryPickUpRange = 2f;
+    [Min(0f)]
+    [SerializeField] private float interactionRayRadius = 0.08f;
     [SerializeField] private LayerMask interactMask = ~0;
 
     [Header("Carry")]
@@ -32,12 +35,17 @@ public class InteractionSystem : MonoBehaviour
     [SerializeField] private float carryAngularDrag = 10f;
     [SerializeField] private float carryOffsetAdaptRate = 10f;
     [SerializeField] private float carryOffsetFullAdaptError = 0.7f;
+    [SerializeField] private bool autoAdaptCarryDistance = false;
     [SerializeField] private float carryScrollStep = 0.2f;
     [Min(0.05f)]
     [SerializeField] private float carryMinDistance = 0.15f;
     [Min(0.06f)]
     [SerializeField] private float carryMaxDistance = 6f;
     [SerializeField] private float carryScrollDirection = 1f;
+
+    [Header("Carry Hold Anchor")]
+    [SerializeField] private bool useUnifiedCarryAnchor = true;
+    [SerializeField] private Vector3 unifiedCarryAnchorLocalOffset = new Vector3(0.32f, -0.2f, 1.15f);
 
     [Header("UI Prompts")]
     [SerializeField] private TextMeshProUGUI interactLabel;
@@ -60,6 +68,10 @@ public class InteractionSystem : MonoBehaviour
 
     [Header("Inventory Restore")]
     [SerializeField] private float inventoryCancelCarrySpawnDistance = 1.15f;
+
+    [Header("Debug")]
+    [SerializeField] private bool visualizeInteractionRay = true;
+    [SerializeField] private Color interactionRayColor = new Color(1f, 0.85f, 0.1f, 1f);
 
     private WorldObject _lookedAt;
     private Rigidbody _carryCandidateRb;
@@ -94,6 +106,8 @@ public class InteractionSystem : MonoBehaviour
 
     private GameObject _pendingCollectedRestoreObject;
     private GameObject _pendingCollectedOriginalObject;
+    private ItemData _pendingInventoryCarryItemData;
+    private bool _attractAimSearched;
 
     void Awake()
     {
@@ -114,6 +128,7 @@ public class InteractionSystem : MonoBehaviour
         _carryNoFrictionMaterial.hideFlags = HideFlags.HideAndDontSave;
 
         _playerCc = GetComponent<CharacterController>();
+        ResolveAttractAimPointIfNeeded();
         SyncCarryDistanceLabelStyle();
     }
 
@@ -197,19 +212,21 @@ public class InteractionSystem : MonoBehaviour
         if (_carriedRb == null)
             return;
 
-        UpdateAdaptiveCarryOffset(Time.fixedDeltaTime);
+        if (autoAdaptCarryDistance)
+            UpdateAdaptiveCarryOffset(Time.fixedDeltaTime);
         DriveCarry();
     }
 
     void UpdateAdaptiveCarryOffset(float dt)
     {
-        Transform cam = playerCamera != null ? playerCamera.transform : transform;
-        Vector3 rayDir = cam.TransformDirection(_carryRayLocalDir);
+        Transform carryRef = GetCarryReferenceTransform();
+        Vector3 origin = GetCarryReferenceOrigin();
+        Vector3 rayDir = carryRef.TransformDirection(_carryRayLocalDir);
         if (rayDir.sqrMagnitude < 0.0001f)
-            rayDir = cam.forward;
+            rayDir = GetCarryReferenceForward();
         rayDir.Normalize();
 
-        Vector3 targetWorld = cam.position + rayDir * _carryRayDistance;
+        Vector3 targetWorld = origin + rayDir * _carryRayDistance;
         float targetError = Vector3.Distance(_carriedRb.position, targetWorld);
 
         // If physics/obstacles make target hard to maintain, relax offset toward actual pose.
@@ -217,7 +234,7 @@ public class InteractionSystem : MonoBehaviour
         float adaptRate = carryOffsetAdaptRate * (0.25f + pressure * 0.75f);
         float t = 1f - Mathf.Exp(-adaptRate * Mathf.Max(0.0001f, dt));
 
-        float actualDistanceOnRay = Vector3.Dot(_carriedRb.position - cam.position, rayDir);
+        float actualDistanceOnRay = Vector3.Dot(_carriedRb.position - origin, rayDir);
         actualDistanceOnRay = Mathf.Max(carryMinDistance, actualDistanceOnRay);
         _carryRayDistance = ClampCarryDistance(Mathf.Lerp(_carryRayDistance, actualDistanceOnRay, t));
     }
@@ -227,6 +244,16 @@ public class InteractionSystem : MonoBehaviour
         float minDist = Mathf.Max(0.05f, carryMinDistance);
         float maxDist = Mathf.Max(minDist + 0.01f, carryMaxDistance);
         return Mathf.Clamp(value, minDist, maxDist);
+    }
+
+    Vector3 GetUnifiedCarryAnchorLocalOffset()
+    {
+        Vector3 local = unifiedCarryAnchorLocalOffset;
+        if (local.sqrMagnitude < 0.0001f)
+            local = new Vector3(0f, -0.15f, Mathf.Max(0.7f, carryMinDistance + 0.4f));
+
+        float dist = ClampCarryDistance(local.magnitude);
+        return local.normalized * dist;
     }
 
     void DriveCarry()
@@ -253,11 +280,11 @@ public class InteractionSystem : MonoBehaviour
 
     Vector3 GetCarryTargetPosition()
     {
-        Transform cam = playerCamera != null ? playerCamera.transform : transform;
-        Vector3 origin = cam.position;
-        Vector3 rayDir = cam.TransformDirection(_carryRayLocalDir);
+        Transform carryRef = GetCarryReferenceTransform();
+        Vector3 origin = GetCarryReferenceOrigin();
+        Vector3 rayDir = carryRef.TransformDirection(_carryRayLocalDir);
         if (rayDir.sqrMagnitude < 0.0001f)
-            rayDir = cam.forward;
+            rayDir = GetCarryReferenceForward();
         rayDir.Normalize();
 
         float dist = ClampCarryDistance(_carryRayDistance);
@@ -286,12 +313,7 @@ public class InteractionSystem : MonoBehaviour
 
     Quaternion GetCarryTargetRotationYawOnly()
     {
-        Transform cam = playerCamera != null ? playerCamera.transform : transform;
-        Vector3 fwd = Vector3.ProjectOnPlane(cam.forward, Vector3.up);
-        if (fwd.sqrMagnitude < 0.0001f)
-            fwd = Vector3.ProjectOnPlane(transform.forward, Vector3.up);
-        if (fwd.sqrMagnitude < 0.0001f)
-            fwd = Vector3.forward;
+        Vector3 fwd = GetCarryReferenceForward();
 
         float yaw = Mathf.Atan2(fwd.x, fwd.z) * Mathf.Rad2Deg;
         Quaternion yawTarget = Quaternion.Euler(0f, yaw + _carryYawOffset, 0f);
@@ -333,8 +355,124 @@ public class InteractionSystem : MonoBehaviour
         return radius;
     }
 
+    void EnsurePlayerCollidersCached()
+    {
+        if (_playerCc == null)
+            _playerCc = GetComponent<CharacterController>();
+
+        if (_playerCols == null || _playerCols.Length == 0)
+            _playerCols = GetComponentsInChildren<Collider>(true);
+    }
+
+    float GetCameraCarryRangeCompensation()
+    {
+        if (playerCamera == null)
+            return 0f;
+
+        EnsurePlayerCollidersCached();
+        Vector3 bodyPivot = _playerCc != null ? _playerCc.bounds.center : transform.position;
+
+        // Shoulder/third-person cameras are offset from the player pivot in multiple axes.
+        // Use the full pivot offset so pickup reach matches apparent on-screen distance.
+        float cameraOffset = Vector3.Distance(playerCamera.transform.position, bodyPivot);
+        return Mathf.Max(0f, cameraOffset);
+    }
+
+    float GetEffectiveCarryRangeFromCamera()
+    {
+        // Keep for compatibility but use the same range as general interaction.
+        return Mathf.Max(0.01f, interactRange + GetCameraCarryRangeCompensation());
+    }
+
+    void ResolveAttractAimPointIfNeeded()
+    {
+        if (_attractAimSearched)
+            return;
+
+        _attractAimSearched = true;
+
+        if (attractAimPoint != null)
+            return;
+
+        Transform root = transform;
+        if (_playerCc != null)
+            root = _playerCc.transform.root;
+
+        attractAimPoint = FindChildByName(root, "Attract");
+        if (attractAimPoint == null && playerCamera != null)
+            attractAimPoint = FindChildByName(playerCamera.transform.root, "Attract");
+    }
+
+    static Transform FindChildByName(Transform root, string childName)
+    {
+        if (root == null || string.IsNullOrEmpty(childName))
+            return null;
+
+        Transform[] all = root.GetComponentsInChildren<Transform>(true);
+        for (int i = 0; i < all.Length; i++)
+        {
+            Transform t = all[i];
+            if (t != null && t.name == childName)
+                return t;
+        }
+
+        return null;
+    }
+
+    Vector3 GetInteractionRayOrigin()
+    {
+        if (playerCamera != null)
+            return playerCamera.transform.position;
+
+        return transform.position;
+    }
+
+    Vector3 GetInteractionRayDirection(Vector3 origin)
+    {
+        ResolveAttractAimPointIfNeeded();
+        if (attractAimPoint != null)
+        {
+            Vector3 towardAttract = attractAimPoint.position - origin;
+            if (towardAttract.sqrMagnitude > 0.0001f)
+                return towardAttract.normalized;
+        }
+
+        if (playerCamera != null)
+            return playerCamera.transform.forward;
+
+        return transform.forward;
+    }
+
+    Transform GetCarryReferenceTransform()
+    {
+        EnsurePlayerCollidersCached();
+        return _playerCc != null ? _playerCc.transform : transform;
+    }
+
+    Vector3 GetCarryReferenceOrigin()
+    {
+        EnsurePlayerCollidersCached();
+        if (_playerCc != null)
+            return _playerCc.bounds.center;
+
+        return transform.position;
+    }
+
+    Vector3 GetCarryReferenceForward()
+    {
+        Vector3 fwd = Vector3.ProjectOnPlane(GetCarryReferenceTransform().forward, Vector3.up);
+        if (fwd.sqrMagnitude < 0.0001f)
+            fwd = Vector3.ProjectOnPlane(transform.forward, Vector3.up);
+        if (fwd.sqrMagnitude < 0.0001f)
+            fwd = Vector3.forward;
+
+        return fwd.normalized;
+    }
+
     bool IsPlayerCollider(Collider c)
     {
+        EnsurePlayerCollidersCached();
+
         if (_playerCc != null && c == _playerCc)
             return true;
 
@@ -381,6 +519,72 @@ public class InteractionSystem : MonoBehaviour
         _carryPlayerCollisionIgnored = ignored;
     }
 
+    bool TryRaycastIgnoringPlayer(Ray ray, float range, out RaycastHit bestHit)
+    {
+        bestHit = default;
+        float sphereRadius = interactionRayRadius > 0.0001f ? interactionRayRadius * 5f : 0f; // 500% thicker cast
+
+        RaycastHit[] hits = sphereRadius > 0.0001f
+            ? Physics.SphereCastAll(ray, sphereRadius, range, interactMask, QueryTriggerInteraction.Ignore)
+            : Physics.RaycastAll(ray, range, interactMask, QueryTriggerInteraction.Ignore);
+        if (hits == null || hits.Length == 0)
+            return false;
+
+        float nearest = float.PositiveInfinity;
+        for (int i = 0; i < hits.Length; i++)
+        {
+            RaycastHit hit = hits[i];
+            Collider c = hit.collider;
+            if (c == null)
+                continue;
+
+            if (IsPlayerCollider(c))
+                continue;
+
+            if (hit.distance >= nearest)
+                continue;
+
+            nearest = hit.distance;
+            bestHit = hit;
+        }
+
+        return nearest < float.PositiveInfinity;
+    }
+
+    void DebugDrawInteractionRay(Ray ray, float range)
+    {
+        Color color = interactionRayColor;
+        Debug.DrawRay(ray.origin, ray.direction * range, color);
+
+        float radius = Mathf.Max(0f, interactionRayRadius) * 5f;
+        if (radius <= 0.0001f)
+            return;
+
+        Vector3 dir = ray.direction.normalized;
+        if (dir.sqrMagnitude < 0.0001f)
+            return;
+
+        Vector3 up = Vector3.up;
+        if (Mathf.Abs(Vector3.Dot(up, dir)) > 0.99f)
+            up = Vector3.right;
+
+        Vector3 ortho1 = Vector3.Cross(dir, up).normalized * radius;
+        Vector3 ortho2 = Vector3.Cross(dir, ortho1).normalized * radius;
+
+        const int segments = 16;
+        float step = Mathf.PI * 2f / segments;
+        Vector3 center = ray.origin + dir * Mathf.Min(range, 1.5f);
+        Vector3 prev = center + ortho1;
+        for (int i = 1; i <= segments; i++)
+        {
+            float angle = i * step;
+            Vector3 offset = Mathf.Cos(angle) * ortho1 + Mathf.Sin(angle) * ortho2;
+            Vector3 next = center + offset;
+            Debug.DrawLine(prev, next, color);
+            prev = next;
+        }
+    }
+
     void Scan()
     {
         if (_carriedRb != null)
@@ -391,10 +595,15 @@ public class InteractionSystem : MonoBehaviour
             return;
         }
 
-        float rayRange = Mathf.Max(interactRange, carryPickUpRange);
-        Ray ray = new Ray(playerCamera.transform.position, playerCamera.transform.forward);
+        float rayRange = GetEffectiveCarryRangeFromCamera();
+        Vector3 rayOrigin = GetInteractionRayOrigin();
+        Vector3 rayDirection = GetInteractionRayDirection(rayOrigin);
+        Ray ray = new Ray(rayOrigin, rayDirection);
 
-        if (!Physics.Raycast(ray, out RaycastHit hit, rayRange, interactMask, QueryTriggerInteraction.Ignore))
+        if (visualizeInteractionRay)
+            DebugDrawInteractionRay(ray, rayRange);
+
+        if (!TryRaycastIgnoringPlayer(ray, rayRange, out RaycastHit hit))
         {
             _lookedAt = null;
             _carryCandidateRb = null;
@@ -420,8 +629,7 @@ public class InteractionSystem : MonoBehaviour
         if (rb == null)
             return null;
 
-        if (hit.distance > carryPickUpRange)
-            return null;
+        // Candidate is already constrained by the SphereCast range; no extra distance gate.
 
         worldObject = c.GetComponentInParent<WorldObject>();
         if (worldObject == null)
@@ -490,11 +698,11 @@ public class InteractionSystem : MonoBehaviour
         bool pushTried = false;
         if (blocked) {
             // 重新做一次SphereCast，找到最近的阻挡物体
-            Transform cam = playerCamera != null ? playerCamera.transform : transform;
-            Vector3 origin = cam.position;
-            Vector3 rayDir = cam.TransformDirection(_carryRayLocalDir);
+            Transform carryRef = GetCarryReferenceTransform();
+            Vector3 origin = GetCarryReferenceOrigin();
+            Vector3 rayDir = carryRef.TransformDirection(_carryRayLocalDir);
             if (rayDir.sqrMagnitude < 0.0001f)
-                rayDir = cam.forward;
+                rayDir = GetCarryReferenceForward();
             rayDir.Normalize();
             float castRadius = Mathf.Max(0.05f, _carriedRadius * 0.85f);
             float checkDistance = Mathf.Max(0.05f, carryMaxDistance);
@@ -535,11 +743,11 @@ public class InteractionSystem : MonoBehaviour
 
     float GetMaxReachableDistanceOnCarryRay()
     {
-        Transform cam = playerCamera != null ? playerCamera.transform : transform;
-        Vector3 origin = cam.position;
-        Vector3 rayDir = cam.TransformDirection(_carryRayLocalDir);
+        Transform carryRef = GetCarryReferenceTransform();
+        Vector3 origin = GetCarryReferenceOrigin();
+        Vector3 rayDir = carryRef.TransformDirection(_carryRayLocalDir);
         if (rayDir.sqrMagnitude < 0.0001f)
-            rayDir = cam.forward;
+            rayDir = GetCarryReferenceForward();
         rayDir.Normalize();
 
         float minDist = Mathf.Max(0.05f, carryMinDistance);
@@ -599,19 +807,49 @@ public class InteractionSystem : MonoBehaviour
         ClearPendingCollectedRestoreObject();
     }
 
+    public void SetPendingInventoryCarryItem(ItemData itemData)
+    {
+        _pendingInventoryCarryItemData = itemData;
+    }
+
+    public bool HasPendingCollectedObject()
+    {
+        return _pendingCollectedRestoreObject != null || _pendingInventoryCarryItemData != null;
+    }
+
+    public bool HasCarriedObject()
+    {
+        return _carriedRb != null;
+    }
+
+    public void DropCarriedObjectIfAny()
+    {
+        if (_carriedRb != null)
+            Drop();
+    }
+
     public bool RestorePendingCollectedObjectToCarry()
     {
-        if (_pendingCollectedRestoreObject == null)
+        if (_pendingCollectedRestoreObject == null && _pendingInventoryCarryItemData == null)
             return false;
 
-        if (_pendingCollectedOriginalObject != null)
+        GameObject restoreObject = null;
+        if (_pendingCollectedRestoreObject != null)
         {
-            Destroy(_pendingCollectedOriginalObject);
-            _pendingCollectedOriginalObject = null;
-        }
+            if (_pendingCollectedOriginalObject != null)
+            {
+                Destroy(_pendingCollectedOriginalObject);
+                _pendingCollectedOriginalObject = null;
+            }
 
-        GameObject restoreObject = _pendingCollectedRestoreObject;
-        _pendingCollectedRestoreObject = null;
+            restoreObject = _pendingCollectedRestoreObject;
+            _pendingCollectedRestoreObject = null;
+        }
+        else
+        {
+            restoreObject = CreateCarryObjectFromItemData(_pendingInventoryCarryItemData);
+            _pendingInventoryCarryItemData = null;
+        }
 
         if (restoreObject == null)
             return false;
@@ -626,10 +864,22 @@ public class InteractionSystem : MonoBehaviour
             wo.CancelAnims();
             wo.SetCarriedState(false);
         }
+        else
+        {
+            wo = restoreObject.AddComponent<WorldObject>();
+            wo.carryable = true;
+        }
+
+        if (!wo.carryable)
+            wo.carryable = true;
 
         Rigidbody rb = restoreObject.GetComponentInChildren<Rigidbody>(true);
         if (rb == null)
             rb = restoreObject.AddComponent<Rigidbody>();
+
+        Collider[] existingColliders = restoreObject.GetComponentsInChildren<Collider>(true);
+        if (existingColliders == null || existingColliders.Length == 0)
+            restoreObject.AddComponent<BoxCollider>();
 
         rb.detectCollisions = true;
         rb.isKinematic = false;
@@ -637,17 +887,31 @@ public class InteractionSystem : MonoBehaviour
         rb.velocity = Vector3.zero;
         rb.angularVelocity = Vector3.zero;
 
-        Transform cam = playerCamera != null ? playerCamera.transform : transform;
-        float spawnDistance = Mathf.Clamp(inventoryCancelCarrySpawnDistance, 0.75f, Mathf.Max(0.75f, carryPickUpRange - 0.05f));
-        Vector3 spawnPos = cam.position + cam.forward * spawnDistance;
+        Transform carryRef = GetCarryReferenceTransform();
+        Vector3 localSpawnOffset;
+        if (useUnifiedCarryAnchor)
+        {
+            localSpawnOffset = GetUnifiedCarryAnchorLocalOffset();
+        }
+        else
+        {
+            float spawnDistance = Mathf.Clamp(inventoryCancelCarrySpawnDistance, 0.75f, Mathf.Max(0.75f, carryPickUpRange - 0.05f));
+            localSpawnOffset = Vector3.forward * spawnDistance;
+        }
+
+        Vector3 spawnPos = GetCarryReferenceOrigin() + carryRef.TransformDirection(localSpawnOffset);
         restoreObject.transform.position = spawnPos;
 
-        Vector3 flatForward = Vector3.ProjectOnPlane(cam.forward, Vector3.up);
+        Vector3 flatForward = GetCarryReferenceForward();
         if (flatForward.sqrMagnitude > 0.0001f)
             restoreObject.transform.rotation = Quaternion.LookRotation(flatForward.normalized, Vector3.up);
 
         PickUp(rb, wo);
-        return _carriedRb != null;
+        bool restored = _carriedRb != null;
+        if (!restored && restoreObject != null)
+            Destroy(restoreObject);
+
+        return restored;
     }
 
     void ClearPendingCollectedRestoreObject()
@@ -660,6 +924,26 @@ public class InteractionSystem : MonoBehaviour
 
         _pendingCollectedRestoreObject = null;
         _pendingCollectedOriginalObject = null;
+        _pendingInventoryCarryItemData = null;
+    }
+
+    GameObject CreateCarryObjectFromItemData(ItemData itemData)
+    {
+        if (itemData == null)
+            return null;
+
+        GameObject go = itemData.previewPrefab != null
+            ? Instantiate(itemData.previewPrefab)
+            : GameObject.CreatePrimitive(PrimitiveType.Cube);
+
+        if (go == null)
+            return null;
+
+        go.name = string.IsNullOrEmpty(itemData.itemName)
+            ? itemData.name + "_Carry"
+            : itemData.itemName + "_Carry";
+
+        return go;
     }
 
     void EnableAllColliders(GameObject go, bool enabled)
@@ -697,9 +981,6 @@ public class InteractionSystem : MonoBehaviour
         if (rb == null)
             return;
 
-        if (Vector3.Distance(playerCamera.transform.position, rb.worldCenterOfMass) > carryPickUpRange)
-            return;
-
         wo?.CancelAnims();
 
         _carriedRb = rb;
@@ -718,24 +999,32 @@ public class InteractionSystem : MonoBehaviour
         _carriedRadius = ComputeCarriedRadius();
         ApplyCarryNoFriction();
 
-        Transform cam = playerCamera != null ? playerCamera.transform : transform;
-        Vector3 ray = _carriedTransform.position - cam.position;
-        float rayLen = ray.magnitude;
-        if (rayLen < 0.05f)
+        Transform carryRef = GetCarryReferenceTransform();
+        Vector3 carryOrigin = GetCarryReferenceOrigin();
+        if (useUnifiedCarryAnchor)
         {
-            ray = cam.forward * 0.05f;
-            rayLen = 0.05f;
+            Vector3 localAnchor = GetUnifiedCarryAnchorLocalOffset();
+            _carryRayLocalDir = localAnchor.normalized;
+            _carryRayDistance = localAnchor.magnitude;
+        }
+        else
+        {
+            Vector3 ray = _carriedTransform.position - carryOrigin;
+            float rayLen = ray.magnitude;
+            if (rayLen < 0.05f)
+            {
+                ray = GetCarryReferenceForward() * 0.05f;
+                rayLen = 0.05f;
+            }
+
+            _carryRayLocalDir = carryRef.InverseTransformDirection(ray / rayLen).normalized;
+            _carryRayDistance = ClampCarryDistance(rayLen);
         }
 
-        _carryRayLocalDir = cam.InverseTransformDirection(ray / rayLen).normalized;
-        _carryRayDistance = ClampCarryDistance(rayLen);
-
-        Vector3 flatCamFwd = Vector3.ProjectOnPlane(cam.forward, Vector3.up);
-        if (flatCamFwd.sqrMagnitude < 0.0001f)
-            flatCamFwd = Vector3.forward;
-        float camYaw = Mathf.Atan2(flatCamFwd.x, flatCamFwd.z) * Mathf.Rad2Deg;
+        Vector3 flatCarryFwd = GetCarryReferenceForward();
+        float carryYaw = Mathf.Atan2(flatCarryFwd.x, flatCarryFwd.z) * Mathf.Rad2Deg;
         float objYaw = _carriedRb.rotation.eulerAngles.y;
-        _carryYawOffset = Mathf.DeltaAngle(camYaw, objYaw);
+        _carryYawOffset = Mathf.DeltaAngle(carryYaw, objYaw);
         Quaternion objYawOnly = Quaternion.Euler(0f, objYaw, 0f);
         _carryPitchRollOffset = Quaternion.Inverse(objYawOnly) * _carriedRb.rotation;
 

@@ -21,9 +21,8 @@ public class WorldObject : MonoBehaviour
 
     // ── Physics ───────────────────────────────────────────────────────────────
     [Header("Physics")]
-    [Tooltip("When true, other moving objects (player, carried objects, etc.) can push this object. " +
-             "Push response depends on the Rigidbody's mass and the collider's PhysicMaterial friction/bounciness. " +
-             "When false, the Rigidbody is kept kinematic and the object cannot be moved by external forces.")]
+    [Tooltip("When true, player/carry scripts can actively push this object. " +
+             "When false, script-driven push is disabled; Rigidbody gravity/physics still follow its own inspector settings.")]
     public bool canBePushed = false;
 
     // ── Messages ─────────────────────────────────────────────────────────────
@@ -108,12 +107,10 @@ public class WorldObject : MonoBehaviour
             return;
         }
 
-        if (!canBePushed)
-        {
-            _rb.isKinematic = true;
-            _rb.velocity = Vector3.zero;
-            _rb.angularVelocity = Vector3.zero;
-        }
+        // Non-pushable objects now preserve their own Rigidbody settings.
+        // If gravity is enabled and the body was kinematic, release it so falling looks natural.
+        if (_rb.useGravity && _rb.isKinematic)
+            _rb.isKinematic = false;
     }
 
     /// <summary>
