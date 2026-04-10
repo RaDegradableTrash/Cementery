@@ -54,6 +54,10 @@ public class InteractionSystem : MonoBehaviour
     [SerializeField] private string carryTooNearMessage = "Can't pull closer";
     [SerializeField] private string carryTooFarMessage = "Can't push farther";
 
+    [Header("Inventory")]
+    [SerializeField] private InventoryCameraController inventoryCameraController;
+    [SerializeField] private bool openInventoryOnCollect = true;
+
     private WorldObject _lookedAt;
     private Rigidbody _carryCandidateRb;
     private WorldObject _carryCandidateWo;
@@ -89,6 +93,9 @@ public class InteractionSystem : MonoBehaviour
     {
         if (playerCamera == null)
             playerCamera = Camera.main;
+
+        if (inventoryCameraController == null)
+            inventoryCameraController = FindObjectOfType<InventoryCameraController>();
 
         _carryNoFrictionMaterial = new PhysicMaterial("Carry_NoFriction_Runtime")
         {
@@ -162,6 +169,18 @@ public class InteractionSystem : MonoBehaviour
 
     void Update()
     {
+        if (IsInventoryModeActive())
+        {
+            if (_carriedRb != null)
+                Drop();
+
+            _lookedAt = null;
+            _carryCandidateRb = null;
+            _carryCandidateWo = null;
+            UpdatePrompt();
+            return;
+        }
+
         Scan();
         HandleInput();
         UpdatePrompt();
@@ -452,6 +471,7 @@ public class InteractionSystem : MonoBehaviour
         if (!Mathf.Approximately(clampedByRange, wantedDistance))
             blocked = true;
 
+        // 检查物理阻挡
         float obstacleMax = GetMaxReachableDistanceOnCarryRay();
         float finalDistance = Mathf.Min(clampedByRange, obstacleMax);
         if (pushFarther && finalDistance < clampedByRange - 0.0001f)
@@ -460,9 +480,50 @@ public class InteractionSystem : MonoBehaviour
         if (!pushFarther && finalDistance <= carryMinDistance + 0.0001f && wantedDistance < _carryRayDistance)
             blocked = true;
 
+        // 新增：如果被阻挡，尝试推动阻挡物体
+        bool pushTried = false;
+        if (blocked) {
+            // 重新做一次SphereCast，找到最近的阻挡物体
+            Transform cam = playerCamera != null ? playerCamera.transform : transform;
+            Vector3 origin = cam.position;
+            Vector3 rayDir = cam.TransformDirection(_carryRayLocalDir);
+            if (rayDir.sqrMagnitude < 0.0001f)
+                rayDir = cam.forward;
+            rayDir.Normalize();
+            float castRadius = Mathf.Max(0.05f, _carriedRadius * 0.85f);
+            float checkDistance = Mathf.Max(0.05f, carryMaxDistance);
+            RaycastHit[] hits = Physics.SphereCastAll(origin, castRadius, rayDir, checkDistance, interactMask, QueryTriggerInteraction.Ignore);
+            float nearest = float.PositiveInfinity;
+            Collider nearestCol = null;
+            RaycastHit nearestHit = default;
+            for (int i = 0; i < hits.Length; i++) {
+                Collider c = hits[i].collider;
+                if (c == null) continue;
+                if (IsIgnoredCarryHitCollider(c)) continue;
+                if (hits[i].distance < nearest) {
+                    nearest = hits[i].distance;
+                    nearestCol = c;
+                    nearestHit = hits[i];
+                }
+            }
+            if (nearestCol != null) {
+                WorldObject wo = nearestCol.GetComponentInParent<WorldObject>();
+                Rigidbody rb = nearestCol.attachedRigidbody;
+                if (rb == null && wo != null) rb = wo.GetComponent<Rigidbody>();
+                if (wo != null && wo.canBePushed && rb != null) {
+                    // 施加一个沿carry方向的力，尝试推动
+                    float pushForce = 8f; // 可调参数
+                    rb.AddForce(rayDir * pushForce, ForceMode.Impulse);
+                    pushTried = true;
+                    blocked = false; // 允许scroll继续
+                }
+            }
+        }
+
         _carryRayDistance = ClampCarryDistance(finalDistance);
 
-        if (blocked)
+        // 只有完全推不动才反馈TMP
+        if (blocked && !pushTried)
             ShowCarryDistanceLimit(pushFarther ? carryTooFarMessage : carryTooNearMessage);
     }
 
@@ -502,8 +563,27 @@ public class InteractionSystem : MonoBehaviour
     {
         ShowInfo(obj.collectMessage);
         obj.TriggerCollect(gameObject);
+
+        InventoryCameraController camCtrl = GetInventoryCameraController();
+        if (openInventoryOnCollect && camCtrl != null)
+            camCtrl.EnterInventoryMode(obj.collectItemData);
+
         _lookedAt = null;
         obj.PlayCollectAnim(() => Destroy(obj.gameObject));
+    }
+
+    InventoryCameraController GetInventoryCameraController()
+    {
+        if (inventoryCameraController == null)
+            inventoryCameraController = FindObjectOfType<InventoryCameraController>();
+
+        return inventoryCameraController;
+    }
+
+    bool IsInventoryModeActive()
+    {
+        InventoryCameraController camCtrl = GetInventoryCameraController();
+        return camCtrl != null && camCtrl.IsInventoryActive;
     }
 
     void PickUp(Rigidbody rb, WorldObject wo)

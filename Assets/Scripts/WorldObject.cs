@@ -33,6 +33,10 @@ public class WorldObject : MonoBehaviour
     [Tooltip("Shown in the shared info label when this object is collected.")]
     public string collectMessage  = "";
 
+    [Header("Inventory")]
+    [Tooltip("Optional item data passed to InventoryCameraController when this object is collected.")]
+    public ItemData collectItemData;
+
     // ── Animation tuning ─────────────────────────────────────────────────────
     [Header("Squash & Stretch")]
     [Tooltip("Duration of each animation phase (squash / restore / stretch / restore).")]

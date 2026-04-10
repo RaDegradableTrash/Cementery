@@ -28,6 +28,9 @@ public class MouseLook : MonoBehaviour
     [SerializeField] private float minVertical = -80f;
     [SerializeField] private float maxVertical =  80f;
 
+    [Header("Inventory")]
+    [SerializeField] private InventoryCameraController inventoryCameraController;
+
     // ── State ─────────────────────────────────────────────────────────────────
     private float _pitch;
     private PlayerController _playerController;
@@ -37,6 +40,9 @@ public class MouseLook : MonoBehaviour
     void Start()
     {
         LockCursor();
+
+        if (inventoryCameraController == null)
+            inventoryCameraController = FindObjectOfType<InventoryCameraController>();
 
         _pitch = transform.eulerAngles.x;
         if (_pitch > 180f) _pitch -= 360f;
@@ -50,6 +56,9 @@ public class MouseLook : MonoBehaviour
 
     void Update()
     {
+        if (IsInventoryModeActive())
+            return;
+
         HandleCursorToggle();
         if (Cursor.lockState != CursorLockMode.Locked) return;
         ApplyMouseLook();
@@ -102,5 +111,13 @@ public class MouseLook : MonoBehaviour
     {
         Cursor.lockState = CursorLockMode.None;
         Cursor.visible   = true;
+    }
+
+    bool IsInventoryModeActive()
+    {
+        if (inventoryCameraController == null)
+            inventoryCameraController = FindObjectOfType<InventoryCameraController>();
+
+        return inventoryCameraController != null && inventoryCameraController.IsInventoryActive;
     }
 }
