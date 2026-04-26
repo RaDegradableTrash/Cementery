@@ -19,6 +19,7 @@ public class PlayerDeathFlowController : MonoBehaviour
     [SerializeField] private Camera mainCamera;
     [SerializeField] private Transform lookTarget;
     [SerializeField] private bool lockCameraPositionOnDeath = true;
+    [SerializeField] private float cameraLookSpeed = 4f;
 
     [Header("UI References")]
     [SerializeField] private TextMeshProUGUI leftDeathTMP;
@@ -167,7 +168,11 @@ public class PlayerDeathFlowController : MonoBehaviour
 
         Vector3 dir = lookTarget.position - mainCamera.transform.position;
         if (dir.sqrMagnitude > 0.0001f)
-            mainCamera.transform.rotation = Quaternion.LookRotation(dir.normalized, Vector3.up);
+        {
+            Quaternion targetRot = Quaternion.LookRotation(dir.normalized, Vector3.up);
+            // 平滑变速度旋转，Time.deltaTime * speed 会产生非常平滑的先快后慢的阻尼效果
+            mainCamera.transform.rotation = Quaternion.Slerp(mainCamera.transform.rotation, targetRot, Time.deltaTime * cameraLookSpeed);
+        }
     }
 
     private void OnDestroy()
@@ -228,7 +233,19 @@ public class PlayerDeathFlowController : MonoBehaviour
 
     private void OnReviveClicked()
     {
-        RevivePlayer();
+        PhysicalGlassShatter physicalShatter = FindObjectOfType<PhysicalGlassShatter>();
+        if (physicalShatter != null)
+        {
+            // 点击复活时，触发真正的物理坠落。将 RevivePlayer 作为截屏定格后的回调执行
+            physicalShatter.TriggerFall(() => 
+            {
+                RevivePlayer();
+            });
+        }
+        else
+        {
+            RevivePlayer();
+        }
     }
 
     private void RevivePlayer()
@@ -245,9 +262,13 @@ public class PlayerDeathFlowController : MonoBehaviour
         if (cc != null)
             cc.enabled = true;
 
+        if (_playerController != null)
+            _playerController.ResetVelocity();
+
         _isDead = false;
         SetNonMovementSystemsEnabled(true);
         HideDeathUiImmediate();
+        
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
     }
@@ -264,6 +285,13 @@ public class PlayerDeathFlowController : MonoBehaviour
 
     private IEnumerator PlayDeathUi()
     {
+        // 1. 触发死亡瞬间的碎屏效果（此时碎片静止悬停，UI通过RenderTexture反射在碎片上）
+        PhysicalGlassShatter physicalShatter = FindObjectOfType<PhysicalGlassShatter>();
+        if (physicalShatter != null)
+        {
+            physicalShatter.TriggerShatter();
+        }
+
         if (_leftRt == null || _rightRt == null || _leftCg == null || _rightCg == null)
             yield break;
 

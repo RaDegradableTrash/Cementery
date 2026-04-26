@@ -7,6 +7,15 @@ using UnityEngine;
 public class InventoryRaycastPlacer : MonoBehaviour
 {
     private static InventoryRaycastPlacer _primaryInstance;
+    
+    public class TempItem
+    {
+        public ItemData itemData;
+        public Transform transform;
+        public Quaternion rotation;
+        public Coroutine shakeCoroutine;
+    }
+
     class PlacedItemMarker : MonoBehaviour
     {
         public ItemData itemData;
@@ -61,6 +70,9 @@ public class InventoryRaycastPlacer : MonoBehaviour
     [SerializeField] private bool keepPlacedItemsInInventory = true;
     [SerializeField] private bool closeInventoryOnPlace = false;
 
+    [Header("拖拽延迟效果")]
+    [SerializeField] private float dragSmoothTime = 0.05f;
+
     [Header("放置失败反馈")]
     [SerializeField] private bool flashOccupiedCellsOnPlaceFail = true;
     [SerializeField] private float occupiedFailFlashDuration = 0.45f;
@@ -84,8 +96,15 @@ public class InventoryRaycastPlacer : MonoBehaviour
     private int _cachedCellDepth = -1;
     private float _occupiedFailFlashStartTime = -1f;
     private bool _wasInventoryOpen;
+    
+    private readonly List<TempItem> _tempItems = new List<TempItem>();
+    private Vector3 _dragOffset = Vector3.zero;
+    private Vector3 _previewVelocity = Vector3.zero;
+    private bool _snapPreviewNextFrame;
 
     public bool HasActivePreviewItem => previewItemData != null;
+    public List<TempItem> GetTempItems() => _tempItems;
+    public void ClearTempItems() => _tempItems.Clear();
 
     void Awake()
     {
@@ -125,7 +144,22 @@ public class InventoryRaycastPlacer : MonoBehaviour
 
         EnsureCellTiles();
 
+        if (Input.GetKeyDown(KeyCode.W))
+            inventorySystem.currentLayer = Mathf.Min(inventorySystem.currentLayer + 1, inventorySystem.gridHeight - 1);
+        else if (Input.GetKeyDown(KeyCode.S))
+            inventorySystem.currentLayer = Mathf.Max(inventorySystem.currentLayer - 1, 0);
+
         bool hasPlaneHit = TryGetGridAnchorUnderMouse(out Vector3Int gridPos, out Vector3 localPlaneHit, out bool anchorInBounds);
+
+        if (previewItemData != null && previewObject != null)
+        {
+            Vector3 targetPos = localPlaneHit + _dragOffset;
+            int gX = Mathf.FloorToInt(targetPos.x + 0.5f);
+            int gZ = Mathf.FloorToInt(targetPos.z + 0.5f);
+            gridPos = new Vector3Int(gX, inventorySystem.currentLayer, gZ);
+            anchorInBounds = inventorySystem.InBounds(gridPos);
+        }
+
         UpdateCellOverlay(inventoryOpen, hasPlaneHit && anchorInBounds, gridPos);
 
         bool showBasePlane = showGridWhenInventoryActive && inventoryOpen && !(showPlacementCells && hideBasePlaneRenderer);
@@ -134,63 +168,111 @@ public class InventoryRaycastPlacer : MonoBehaviour
         if (previewItemData == null)
         {
             if (Input.GetMouseButtonDown(0))
-                TryPickPlacedItemUnderMouse();
+            {
+                TryPickTempItemUnderMouse();
+                if (previewItemData == null)
+                    TryPickPlacedItemUnderMouse();
 
+                if (previewItemData != null && hasPlaneHit)
+                {
+                    _dragOffset = previewObject.localPosition - localPlaneHit;
+                }
+            }
             return;
         }
 
-        if (previewObject != null)
-            previewObject.localRotation = previewRotation;
+        // Dragging mode requires holding left click
+        if (Input.GetMouseButton(0))
+        {
+            if (previewObject != null)
+                previewObject.localRotation = previewRotation;
 
+            if (!hasPlaneHit)
+            {
+                if (hidePreviewWhenNoHit)
+                    SetPreviewVisible(false);
+                SetPreviewColor(invalidPreviewColor);
+            }
+            else
+            {
+                SetPreviewVisible(true);
+                if (previewObject != null)
+                {
+                    Vector3 targetPos = anchorInBounds ? (Vector3)gridPos : (localPlaneHit + _dragOffset);
+                    
+                    if (_snapPreviewNextFrame)
+                    {
+                        previewObject.localPosition = targetPos;
+                        _snapPreviewNextFrame = false;
+                        _previewVelocity = Vector3.zero;
+                    }
+                    else
+                    {
+                        previewObject.localPosition = Vector3.SmoothDamp(previewObject.localPosition, targetPos, ref _previewVelocity, dragSmoothTime);
+                    }
+                }
+
+                bool canPlaceObj = anchorInBounds && inventorySystem.CanPlace(previewItemData, gridPos, previewRotation);
+                SetPreviewColor(canPlaceObj ? validPreviewColor : invalidPreviewColor);
+            }
+            return;
+        }
+
+        // Released left click (or wasn't holding it)
         if (!hasPlaneHit)
         {
-            if (hidePreviewWhenNoHit)
-                SetPreviewVisible(false);
-
-            SetPreviewColor(invalidPreviewColor);
+            // Drop to temp storage outside grid bounds
+            Vector3 dropPos = previewObject != null ? previewObject.localPosition : Vector3.zero;
+            ConvertToTempItem(previewObject, previewItemData, dropPos, previewRotation);
+            ClearPreviewReferenceOnly();
             return;
         }
-
-        SetPreviewVisible(true);
-
-        // 预览物体吸附
-        if (previewObject != null)
-            previewObject.localPosition = anchorInBounds ? (Vector3)gridPos : localPlaneHit;
 
         bool canPlace = anchorInBounds && inventorySystem.CanPlace(previewItemData, gridPos, previewRotation);
-        SetPreviewColor(canPlace ? validPreviewColor : invalidPreviewColor);
-
-        if (!Input.GetMouseButtonDown(0))
-            return;
-
+        
         if (!canPlace)
         {
-            TryTriggerOccupiedFailFlash(gridPos, anchorInBounds);
+            if (anchorInBounds)
+            {
+                // In bounds but blocked -> Shake
+                TryTriggerOccupiedFailFlash(gridPos, anchorInBounds);
+                if (previewObject != null)
+                {
+                    Coroutine c = StartCoroutine(ShakeAndReject(previewObject, previewItemData, (Vector3)gridPos, previewRotation));
+                    TempItem ti = ConvertToTempItem(previewObject, previewItemData, (Vector3)gridPos, previewRotation);
+                    if (ti != null) ti.shakeCoroutine = c;
+                }
+                ClearPreviewReferenceOnly();
+            }
+            else
+            {
+                // Out of bounds -> Temp Item
+                ConvertToTempItem(previewObject, previewItemData, localPlaneHit, previewRotation);
+                ClearPreviewReferenceOnly();
+            }
             return;
         }
 
-        // 左键放置
-        if (!inventorySystem.Place(previewItemData, gridPos, previewRotation))
-            return;
-
-        CommitPlacedItemVisual(gridPos, previewRotation);
-
-        InteractionSystem interaction = GetInteractionSystem();
-        if (interaction != null)
+        // Success Place
+        if (inventorySystem.Place(previewItemData, gridPos, previewRotation))
         {
-            interaction.CommitPendingCollectedObject();
-            interaction.DropCarriedObjectIfAny();
-        }
+            CommitPlacedItemVisual(gridPos, previewRotation);
 
-        // 放置后停止当前物品的继续放置（不再跟随鼠标）。
-        ClearPreview();
+            InteractionSystem interaction = GetInteractionSystem();
+            if (interaction != null)
+            {
+                interaction.CommitPendingCollectedObject();
+                interaction.DropCarriedObjectIfAny();
+            }
 
-        if (closeInventoryOnPlace)
-        {
-            // 放置后退出背包
-            InventoryCameraController camCtrl = GetInventoryCameraController();
-            if (camCtrl != null)
-                camCtrl.SetInventoryActive(false);
+            ClearPreview();
+
+            if (closeInventoryOnPlace)
+            {
+                InventoryCameraController camCtrl = GetInventoryCameraController();
+                if (camCtrl != null)
+                    camCtrl.SetInventoryActive(false);
+            }
         }
     }
 
@@ -311,6 +393,8 @@ public class InventoryRaycastPlacer : MonoBehaviour
     public void SetPreviewItem(ItemData item)
     {
         ClearOccupiedFailFlash();
+        _dragOffset = Vector3.zero;
+        _snapPreviewNextFrame = true;
 
         previewItemData = item;
         if (previewObject != null)
@@ -337,6 +421,109 @@ public class InventoryRaycastPlacer : MonoBehaviour
         }
     }
 
+    void TryPickTempItemUnderMouse()
+    {
+        if (inventoryCamera == null || _tempItems.Count == 0) return;
+
+        Ray ray = inventoryCamera.ScreenPointToRay(Input.mousePosition);
+        TempItem nearest = null;
+        float nearestDist = float.PositiveInfinity;
+
+        for (int i = 0; i < _tempItems.Count; i++)
+        {
+            TempItem ti = _tempItems[i];
+            if (ti == null || ti.transform == null) continue;
+            
+            Renderer[] renderers = ti.transform.GetComponentsInChildren<Renderer>(true);
+            foreach (Renderer r in renderers)
+            {
+                if (!r.enabled) continue;
+                if (r.bounds.IntersectRay(ray, out float hitDist))
+                {
+                    if (hitDist < nearestDist)
+                    {
+                        nearestDist = hitDist;
+                        nearest = ti;
+                    }
+                }
+            }
+        }
+
+        if (nearest != null)
+        {
+            if (nearest.shakeCoroutine != null)
+                StopCoroutine(nearest.shakeCoroutine);
+
+            _tempItems.Remove(nearest);
+            previewItemData = nearest.itemData;
+            previewObject = nearest.transform;
+            previewRotation = nearest.rotation;
+            previewRenderers = previewObject.GetComponentsInChildren<Renderer>(true);
+
+            SetPreviewVisible(true);
+            SetPreviewColor(validPreviewColor);
+        }
+    }
+
+    TempItem ConvertToTempItem(Transform obj, ItemData data, Vector3 pos, Quaternion rot)
+    {
+        if (obj == null) return null;
+
+        obj.localPosition = pos;
+        obj.localRotation = rot;
+        obj.name = "TempItem_" + (data != null ? data.name : "Unknown");
+
+        Renderer[] renderers = obj.GetComponentsInChildren<Renderer>(true);
+        foreach (Renderer r in renderers)
+        {
+            if (r == null) continue;
+            r.SetPropertyBlock(null);
+        }
+
+        TempItem ti = new TempItem { itemData = data, transform = obj, rotation = rot };
+        _tempItems.Add(ti);
+        return ti;
+    }
+
+    void ClearPreviewReferenceOnly()
+    {
+        _dragOffset = Vector3.zero;
+        previewItemData = null;
+        previewObject = null;
+        previewRenderers = null;
+    }
+
+    private System.Collections.IEnumerator ShakeAndReject(Transform obj, ItemData itemData, Vector3 startPos, Quaternion rotation)
+    {
+        if (obj == null) yield break;
+
+        float duration = 0.4f;
+        float elapsed = 0f;
+        float shakeAmount = 0.25f;
+        float speed = 50f;
+
+        while (elapsed < duration)
+        {
+            if (obj == null) yield break;
+            elapsed += Time.unscaledDeltaTime;
+
+            float xOffset = Mathf.Sin(elapsed * speed) * shakeAmount;
+            obj.localPosition = startPos + new Vector3(xOffset, 0, 0);
+
+            yield return null;
+        }
+
+        if (obj != null)
+            obj.localPosition = startPos;
+    }
+
+    public void ForceDropPreviewToTemp()
+    {
+        if (previewItemData == null || previewObject == null) return;
+        ConvertToTempItem(previewObject, previewItemData, previewObject.localPosition, previewRotation);
+        ClearPreviewReferenceOnly();
+    }
+
     public void ClearPreview()
     {
         ClearOccupiedFailFlash();
@@ -356,8 +543,9 @@ public class InventoryRaycastPlacer : MonoBehaviour
 
         Ray ray = inventoryCamera.ScreenPointToRay(Input.mousePosition);
 
-        Vector3 planePoint = gridPlane.position;
-        Vector3 planeNormal = gridPlane.up;
+        Vector3 layerOffset = new Vector3(0, inventorySystem.currentLayer, 0);
+        Vector3 planePoint = inventoryRoot.TransformPoint(layerOffset);
+        Vector3 planeNormal = inventoryRoot.up;
         Plane layerPlane = new Plane(planeNormal, planePoint);
 
         if (!layerPlane.Raycast(ray, out float enter) || enter < 0f)

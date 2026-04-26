@@ -13,10 +13,6 @@ public class InventoryCameraController : MonoBehaviour
     [Header("背包容器根节点 (Inventory Root)")]
     public GameObject inventoryRoot;
 
-    [Header("鼠标状态")]
-    [SerializeField] private bool unlockCursorWhenInventoryOpen = true;
-    [SerializeField] private bool lockCursorWhenInventoryClosed = true;
-
     [Header("背包取景")]
     [SerializeField] private bool autoFrameCameraOnOpen = true;
     [SerializeField] private GridInventorySystem inventorySystem;
@@ -91,6 +87,13 @@ public class InventoryCameraController : MonoBehaviour
 
         if (allowToggleInventoryKey && Input.GetKeyDown(toggleInventoryKey))
         {
+            InteractionSystem interaction = GetInteractionSystem();
+            if (interaction != null && interaction.HasCarriedObject() && !inventoryActive)
+            {
+                // 交给 InteractionSystem 去处理收集逻辑，这里不打开空背包
+                return;
+            }
+
             if (inventoryActive)
                 CloseInventoryFromKey();
             else
@@ -111,27 +114,28 @@ public class InventoryCameraController : MonoBehaviour
     void CloseInventoryFromKey()
     {
         InventoryRaycastPlacer placer = GetInventoryPlacer();
-        bool hadPreviewInHand = placer != null && placer.HasActivePreviewItem;
         InteractionSystem interaction = GetInteractionSystem();
-        bool shouldRestoreCarry = hadPreviewInHand && interaction != null && interaction.HasPendingCollectedObject();
+
+        if (placer != null && placer.HasActivePreviewItem)
+        {
+            placer.ForceDropPreviewToTemp();
+        }
 
         SetInventoryActive(false);
 
         if (interaction == null)
             return;
 
-        if (shouldRestoreCarry)
+        if (placer != null)
         {
-            bool restored = interaction.RestorePendingCollectedObjectToCarry();
-            if (!restored)
+            var tempItems = placer.GetTempItems();
+            if (tempItems.Count > 0)
             {
-                interaction.CommitPendingCollectedObject();
-                interaction.DropCarriedObjectIfAny();
+                interaction.EjectInventoryTempItems(tempItems);
+                placer.ClearTempItems();
             }
-            return;
         }
 
-        // Successful placement / normal close path: clear pending restore cache and any stray carry state.
         interaction.CommitPendingCollectedObject();
         interaction.DropCarriedObjectIfAny();
     }

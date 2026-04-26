@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 
@@ -74,6 +75,7 @@ public class InteractionSystem : MonoBehaviour
     [SerializeField] private Color interactionRayColor = new Color(1f, 0.85f, 0.1f, 1f);
 
     private WorldObject _lookedAt;
+    private Furniture_SlideDoor _lookedAtFurniture;
     private Rigidbody _carryCandidateRb;
     private WorldObject _carryCandidateWo;
 
@@ -109,6 +111,25 @@ public class InteractionSystem : MonoBehaviour
     private ItemData _pendingInventoryCarryItemData;
     private bool _attractAimSearched;
 
+    [Header("Placement Mode (Tab)")]
+    [SerializeField] private LayerMask placementMask = ~0;
+    [SerializeField] private float placementRayRange = 10f;
+    [SerializeField] private float placementOverlapShrink = 0.05f;
+    private bool _isPlacementMode;
+    private bool _isPlacementValid;
+    private GameObject _placementGhost;
+    private Material _placementValidMat;
+    private Material _placementInvalidMat;
+    private Vector3 _placementPosition;
+    private Quaternion _placementRotation;
+
+    [Header("Throw Mechanic (Q)")]
+    [SerializeField] private float minThrowForce = 5f;
+    [SerializeField] private float maxThrowForce = 25f;
+    [SerializeField] private float maxThrowChargeTime = 1.5f;
+    private bool _isThrowCharging;
+    private float _throwChargeTimer;
+
     void Awake()
     {
         if (playerCamera == null)
@@ -130,6 +151,8 @@ public class InteractionSystem : MonoBehaviour
         _playerCc = GetComponent<CharacterController>();
         ResolveAttractAimPointIfNeeded();
         SyncCarryDistanceLabelStyle();
+        
+        InitializePlacementMaterials();
     }
 
     void SyncCarryDistanceLabelStyle()
@@ -196,6 +219,7 @@ public class InteractionSystem : MonoBehaviour
                 Drop();
 
             _lookedAt = null;
+            _lookedAtFurniture = null;
             _carryCandidateRb = null;
             _carryCandidateWo = null;
             UpdatePrompt();
@@ -205,6 +229,9 @@ public class InteractionSystem : MonoBehaviour
         Scan();
         HandleInput();
         UpdatePrompt();
+        
+        if (_isPlacementMode && _carriedRb != null)
+            UpdatePlacementGhost();
     }
 
     void FixedUpdate()
@@ -429,14 +456,6 @@ public class InteractionSystem : MonoBehaviour
 
     Vector3 GetInteractionRayDirection(Vector3 origin)
     {
-        ResolveAttractAimPointIfNeeded();
-        if (attractAimPoint != null)
-        {
-            Vector3 towardAttract = attractAimPoint.position - origin;
-            if (towardAttract.sqrMagnitude > 0.0001f)
-                return towardAttract.normalized;
-        }
-
         if (playerCamera != null)
             return playerCamera.transform.forward;
 
@@ -538,7 +557,7 @@ public class InteractionSystem : MonoBehaviour
             if (c == null)
                 continue;
 
-            if (IsPlayerCollider(c))
+            if (IsIgnoredCarryHitCollider(c))
                 continue;
 
             if (hit.distance >= nearest)
@@ -587,14 +606,6 @@ public class InteractionSystem : MonoBehaviour
 
     void Scan()
     {
-        if (_carriedRb != null)
-        {
-            _lookedAt = null;
-            _carryCandidateRb = null;
-            _carryCandidateWo = null;
-            return;
-        }
-
         float rayRange = GetEffectiveCarryRangeFromCamera();
         Vector3 rayOrigin = GetInteractionRayOrigin();
         Vector3 rayDirection = GetInteractionRayDirection(rayOrigin);
@@ -606,13 +617,22 @@ public class InteractionSystem : MonoBehaviour
         if (!TryRaycastIgnoringPlayer(ray, rayRange, out RaycastHit hit))
         {
             _lookedAt = null;
+            _lookedAtFurniture = null;
             _carryCandidateRb = null;
             _carryCandidateWo = null;
             return;
         }
 
         _lookedAt = hit.collider.GetComponentInParent<WorldObject>();
-        _carryCandidateRb = ResolveCarryCandidate(hit, out _carryCandidateWo);
+        _lookedAtFurniture = hit.collider.GetComponentInParent<Furniture_SlideDoor>();
+        
+        if (_carriedRb == null)
+            _carryCandidateRb = ResolveCarryCandidate(hit, out _carryCandidateWo);
+        else
+        {
+            _carryCandidateRb = null;
+            _carryCandidateWo = null;
+        }
     }
 
     Rigidbody ResolveCarryCandidate(RaycastHit hit, out WorldObject worldObject)
@@ -650,21 +670,81 @@ public class InteractionSystem : MonoBehaviour
     {
         HandleCarryScrollInput();
 
-        if (Input.GetKeyDown(KeyCode.F) && _lookedAt != null && _lookedAt.interactable)
-        {
-            _lookedAt.TriggerInteract(gameObject);
-            _lookedAt.PlayInteractAnim();
-            ShowInfo(_lookedAt.interactMessage);
-        }
-
         if (Input.GetMouseButtonDown(0) && _carriedRb == null && HasCarryCandidate())
             PickUp(_carryCandidateRb, _carryCandidateWo);
 
-        if (Input.GetMouseButtonUp(0) && _carriedRb != null)
-            Drop();
+        if (_carriedRb != null && !_isPlacementMode)
+        {
+            if (Input.GetKeyDown(KeyCode.Q))
+            {
+                _isThrowCharging = true;
+                _throwChargeTimer = 0f;
+            }
+            if (_isThrowCharging)
+            {
+                _throwChargeTimer += Time.deltaTime;
+                if (Input.GetKeyUp(KeyCode.Q))
+                {
+                    ExecuteThrow();
+                }
+            }
+        }
+        else
+        {
+            _isThrowCharging = false;
+            _throwChargeTimer = 0f;
+        }
 
-        if (Input.GetMouseButtonDown(1) && _lookedAt != null && _lookedAt.collectable)
-            Collect(_lookedAt);
+        if (_carriedRb != null)
+        {
+            if (Input.GetKeyDown(KeyCode.Tab))
+                EnterPlacementMode();
+            else if (Input.GetKeyUp(KeyCode.Tab))
+                ExitPlacementMode();
+        }
+        else if (_isPlacementMode)
+        {
+            ExitPlacementMode();
+        }
+
+        if (Input.GetMouseButtonUp(0) && _carriedRb != null)
+        {
+            if (_isPlacementMode && _isPlacementValid)
+            {
+                ExecutePlacement();
+            }
+            else
+            {
+                Drop();
+            }
+        }
+
+        if (_carriedRb != null && !_isPlacementMode)
+        {
+            if (Input.GetKeyDown(KeyCode.E) && _carriedWo != null && _carriedWo.collectable)
+            {
+                WorldObject wo = _carriedWo;
+                Drop();
+                Collect(wo);
+            }
+        }
+
+        if (Input.GetMouseButtonDown(1))
+        {
+            if (_lookedAt != null)
+            {
+                if (_lookedAt.interactable)
+                {
+                    _lookedAt.TriggerInteract(gameObject);
+                    _lookedAt.PlayInteractAnim();
+                    ShowInfo(_lookedAt.interactMessage);
+                }
+            }
+            else if (_lookedAtFurniture != null)
+            {
+                _lookedAtFurniture.Interact();
+            }
+        }
     }
 
     void HandleCarryScrollInput()
@@ -826,6 +906,30 @@ public class InteractionSystem : MonoBehaviour
     {
         if (_carriedRb != null)
             Drop();
+    }
+
+    public void EjectInventoryTempItems(List<InventoryRaycastPlacer.TempItem> items)
+    {
+        if (playerCamera == null) return;
+
+        foreach (var ti in items)
+        {
+            if (ti.itemData != null && ti.itemData.worldPrefab != null)
+            {
+                Vector3 spawnPos = playerCamera.transform.position + playerCamera.transform.forward * 1.5f;
+                GameObject spawned = Instantiate(ti.itemData.worldPrefab, spawnPos, ti.rotation);
+                Rigidbody rb = spawned.GetComponent<Rigidbody>();
+                if (rb != null)
+                {
+                    Vector3 randomDir = (playerCamera.transform.forward + Random.insideUnitSphere * 0.5f).normalized;
+                    rb.AddForce(randomDir * 5f, ForceMode.Impulse);
+                }
+            }
+            if (ti.transform != null)
+            {
+                Destroy(ti.transform.gameObject);
+            }
+        }
     }
 
     public bool RestorePendingCollectedObjectToCarry()
@@ -1048,6 +1152,9 @@ public class InteractionSystem : MonoBehaviour
         if (_carriedRb == null)
             return;
 
+        if (_isPlacementMode)
+            ExitPlacementMode();
+
         if (_carryPlayerCollisionIgnored)
             SetCarryPlayerCollisionIgnored(false);
 
@@ -1086,17 +1193,9 @@ public class InteractionSystem : MonoBehaviour
 
     void UpdatePrompt()
     {
-        if (_carriedRb != null)
-        {
-            SetLabel(interactLabel, false);
-            SetLabel(carryLabel, true);
-            SetLabel(collectLabel, false);
-            return;
-        }
-
-        SetLabel(interactLabel, _lookedAt != null && _lookedAt.interactable);
-        SetLabel(carryLabel, HasCarryCandidate());
-        SetLabel(collectLabel, _lookedAt != null && _lookedAt.collectable);
+        SetLabel(interactLabel, (_lookedAt != null && _lookedAt.interactable) || _lookedAtFurniture != null);
+        SetLabel(carryLabel, HasCarryCandidate() || _carriedRb != null);
+        SetLabel(collectLabel, _carriedWo != null && _carriedWo.collectable);
     }
 
     void SetLabel(TextMeshProUGUI label, bool active)
@@ -1152,5 +1251,197 @@ public class InteractionSystem : MonoBehaviour
     void OnDestroy()
     {
         ClearPendingCollectedRestoreObject();
+    }
+
+    void InitializePlacementMaterials()
+    {
+        _placementValidMat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+        if (_placementValidMat.shader == null) _placementValidMat = new Material(Shader.Find("Standard"));
+        SetMaterialTransparentURP(_placementValidMat, new Color(0.2f, 1f, 0.2f, 0.4f));
+
+        _placementInvalidMat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+        if (_placementInvalidMat.shader == null) _placementInvalidMat = new Material(Shader.Find("Standard"));
+        SetMaterialTransparentURP(_placementInvalidMat, new Color(1f, 0.2f, 0.2f, 0.4f));
+    }
+
+    void SetMaterialTransparentURP(Material mat, Color color)
+    {
+        if (mat.shader != null && mat.shader.name.Contains("Universal"))
+        {
+            mat.SetColor("_BaseColor", color);
+            mat.SetFloat("_Surface", 1);
+            mat.SetFloat("_Blend", 0);
+            mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            mat.SetInt("_ZWrite", 0);
+            mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            mat.renderQueue = 3000;
+        }
+        else
+        {
+            mat.color = color;
+            mat.SetFloat("_Mode", 3);
+            mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            mat.SetInt("_ZWrite", 0);
+            mat.EnableKeyword("_ALPHABLEND_ON");
+            mat.renderQueue = 3000;
+        }
+    }
+
+    void EnterPlacementMode()
+    {
+        if (_carriedRb == null || _isPlacementMode) return;
+        _isPlacementMode = true;
+        _isThrowCharging = false;
+        
+        Renderer[] renderers = _carriedRb.GetComponentsInChildren<Renderer>();
+        foreach (Renderer r in renderers) r.enabled = false;
+            
+        _placementGhost = Instantiate(_carriedRb.gameObject);
+        _placementGhost.name = "PlacementGhost";
+        
+        Destroy(_placementGhost.GetComponent<Rigidbody>());
+        foreach(MonoBehaviour mb in _placementGhost.GetComponentsInChildren<MonoBehaviour>())
+            Destroy(mb);
+            
+        foreach(Collider c in _placementGhost.GetComponentsInChildren<Collider>())
+        {
+            c.isTrigger = true;
+            c.gameObject.layer = 2; // Ignore Raycast layer
+        }
+    }
+
+    void ExitPlacementMode()
+    {
+        if (!_isPlacementMode) return;
+        _isPlacementMode = false;
+        
+        if (_carriedRb != null)
+        {
+            Renderer[] renderers = _carriedRb.GetComponentsInChildren<Renderer>();
+            foreach (Renderer r in renderers) r.enabled = true;
+        }
+        
+        if (_placementGhost != null) Destroy(_placementGhost);
+    }
+    
+    void UpdatePlacementGhost()
+    {
+        if (_placementGhost == null || _carriedRb == null) return;
+        
+        Ray ray = new Ray(GetInteractionRayOrigin(), GetInteractionRayDirection(GetInteractionRayOrigin()));
+        EnsurePlayerCollidersCached();
+        
+        RaycastHit[] hits = Physics.RaycastAll(ray, placementRayRange, placementMask, QueryTriggerInteraction.Ignore);
+        float nearest = float.PositiveInfinity;
+        RaycastHit bestHit = default;
+        
+        for (int i = 0; i < hits.Length; i++)
+        {
+            if (IsIgnoredCarryHitCollider(hits[i].collider)) continue;
+            if (hits[i].distance < nearest)
+            {
+                nearest = hits[i].distance;
+                bestHit = hits[i];
+            }
+        }
+        
+        if (nearest < float.PositiveInfinity)
+        {
+            _placementGhost.SetActive(true);
+            _placementPosition = bestHit.point;
+            
+            Vector3 fwd = Vector3.ProjectOnPlane(GetCarryReferenceForward(), bestHit.normal);
+            if (fwd.sqrMagnitude < 0.001f) fwd = GetCarryReferenceForward();
+            _placementRotation = Quaternion.LookRotation(fwd, bestHit.normal);
+            
+            _placementGhost.transform.position = _placementPosition;
+            _placementGhost.transform.rotation = _placementRotation;
+            
+            CheckPlacementValidity();
+        }
+        else
+        {
+            _placementGhost.SetActive(false);
+            _isPlacementValid = false;
+        }
+    }
+    
+    void CheckPlacementValidity()
+    {
+        _isPlacementValid = true;
+        
+        Renderer[] ghostRenderers = _placementGhost.GetComponentsInChildren<Renderer>();
+        Bounds bounds = new Bounds(_placementGhost.transform.position, Vector3.zero);
+        bool hasBounds = false;
+        
+        foreach(Renderer r in ghostRenderers)
+        {
+            if (hasBounds) bounds.Encapsulate(r.bounds);
+            else { bounds = r.bounds; hasBounds = true; }
+        }
+        
+        if (hasBounds)
+        {
+            Vector3 extents = bounds.extents - Vector3.one * placementOverlapShrink;
+            extents.x = Mathf.Max(0.01f, extents.x);
+            extents.y = Mathf.Max(0.01f, extents.y);
+            extents.z = Mathf.Max(0.01f, extents.z);
+            
+            Collider[] hits = Physics.OverlapBox(bounds.center, extents, Quaternion.identity, interactMask, QueryTriggerInteraction.Ignore);
+            foreach(Collider c in hits)
+            {
+                if (IsIgnoredCarryHitCollider(c)) continue;
+                if (c.transform.IsChildOf(_placementGhost.transform)) continue;
+                
+                _isPlacementValid = false;
+                break;
+            }
+        }
+        
+        Material targetMat = _isPlacementValid ? _placementValidMat : _placementInvalidMat;
+        foreach(Renderer r in ghostRenderers)
+        {
+            Material[] mats = r.sharedMaterials;
+            for(int i=0; i<mats.Length; i++) mats[i] = targetMat;
+            r.sharedMaterials = mats;
+        }
+    }
+    
+    void ExecutePlacement()
+    {
+        Rigidbody rb = _carriedRb;
+        Vector3 finalPos = _placementPosition;
+        Quaternion finalRot = _placementRotation;
+        
+        ExitPlacementMode();
+        Drop();
+        
+        if (rb != null)
+        {
+            rb.position = finalPos;
+            rb.rotation = finalRot;
+            rb.velocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+            rb.isKinematic = true;
+        }
+    }
+
+    void ExecuteThrow()
+    {
+        float t = Mathf.Clamp01(_throwChargeTimer / maxThrowChargeTime);
+        float force = Mathf.Lerp(minThrowForce, maxThrowForce, t);
+        
+        Rigidbody rb = _carriedRb;
+        Vector3 dir = GetInteractionRayDirection(GetInteractionRayOrigin());
+        
+        if (_isPlacementMode) ExitPlacementMode();
+        Drop();
+        
+        if (rb != null)
+            rb.AddForce(dir * force, ForceMode.Impulse);
+            
+        _isThrowCharging = false;
     }
 }

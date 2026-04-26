@@ -14,7 +14,7 @@ public class DayNightSkyboxController : MonoBehaviour
     private const string DefaultSkyboxResourcePath = "Skybox/MinecraftDayNightSkybox";
 
     [Header("Cycle")]
-    [Min(10f)] public float dayLengthSeconds = 600f;
+    [Min(10f)] public float dayLengthSeconds = 200f;
     [Range(0f, 1f)] public float timeOfDay = 0.23f;
     public bool autoAdvance = true;
     public bool useUnscaledTime = false;
@@ -36,7 +36,7 @@ public class DayNightSkyboxController : MonoBehaviour
 
     [Header("Sun")]
     public Light sunLight;
-    [Min(0f)] public float daySunIntensity = 1.0f;
+    [Min(0f)] public float daySunIntensity = 0.07f;
     [Min(0f)] public float nightSunIntensity = 0.03f;
     public Color daySunColor = new Color(1f, 0.95f, 0.86f, 1f);
     public Color sunriseSunColor = new Color(0.98f, 0.72f, 0.52f, 1f);

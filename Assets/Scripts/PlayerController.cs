@@ -40,6 +40,15 @@ public class PlayerController : MonoBehaviour
     /// </summary>
     public Vector3 BobOffset { get; private set; }
 
+    [Header("Climbing")]
+    [SerializeField] private float climbMaxHeight = 5f;
+    [SerializeField] private LayerMask climbObstacleMask = ~0;
+    [SerializeField] private MouseLook mouseLook;
+
+    private Collider _climbCandidateCol;
+    private float _climbCandidateTime;
+    private bool _canClimbThisJump = true;
+
     // ── Internal State ──────────────────────────────────────────────────────
     private CharacterController _cc;
     private PlayerStamina _stamina;
@@ -78,6 +87,9 @@ public class PlayerController : MonoBehaviour
             inventoryCameraController = InventoryCameraController.GetPrimaryController();
         if (inventoryCameraController == null)
             inventoryCameraController = FindObjectOfType<InventoryCameraController>();
+
+        if (mouseLook == null && Camera.main != null)
+            mouseLook = Camera.main.GetComponent<MouseLook>();
     }
 
     void Update()
@@ -94,11 +106,21 @@ public class PlayerController : MonoBehaviour
 
         _isGrounded = _cc.isGrounded;
         if (_isGrounded)
+        {
             _groundedUntil = Time.time + CoyoteTime;
+            _canClimbThisJump = true;
+        }
 
         bool jumpPressed = Input.GetButtonDown("Jump") || Input.GetKeyDown(KeyCode.Space);
         if (jumpPressed)
+        {
+            if (!_isGrounded && Time.time - _climbCandidateTime < 0.2f && _climbCandidateCol != null)
+            {
+                if (TryStartClimb())
+                    return;
+            }
             _jumpBufferedUntil = Time.time + JumpBufferTime;
+        }
 
         Vector3 planarVelocity = HandleMovement();
         ApplyGravity(planarVelocity);
@@ -117,6 +139,11 @@ public class PlayerController : MonoBehaviour
     }
 
     // ── Movement ─────────────────────────────────────────────────────────────
+    public void ResetVelocity()
+    {
+        _verticalVelocity = 0f;
+    }
+
     Vector3 HandleMovement()
     {
         float h = useRawMovementInput ? Input.GetAxisRaw("Horizontal") : Input.GetAxis("Horizontal");
@@ -164,7 +191,10 @@ public class PlayerController : MonoBehaviour
         CollisionFlags flags = _cc.Move(frameVelocity * Time.deltaTime);
         _isGrounded = ((flags & CollisionFlags.Below) != 0) || _cc.isGrounded;
         if (_isGrounded)
+        {
             _groundedUntil = Time.time + CoyoteTime;
+            _canClimbThisJump = true;
+        }
 
         if (_isGrounded && _verticalVelocity < 0f)
             _verticalVelocity = 0f;
@@ -189,9 +219,73 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    // ── Climbing ─────────────────────────────────────────────────────────────
+    bool TryStartClimb()
+    {
+        if (!_canClimbThisJump) return false;
+
+        Vector3 headPos = new Vector3(transform.position.x, _cc.bounds.max.y - 0.2f, transform.position.z);
+        Vector3 castDir = transform.forward;
+        float castDist = _cc.radius + 0.8f;
+
+        bool isFacingWall = Physics.Raycast(headPos, castDir, out RaycastHit wallHit, castDist, climbObstacleMask, QueryTriggerInteraction.Ignore);
+
+        // If we are facing a wall or recently bumped into one
+        if (isFacingWall || (Time.time - _climbCandidateTime < 0.2f && _climbCandidateCol != null))
+        {
+            float targetHeightY = transform.position.y + climbMaxHeight * 0.5f; // Fallback height
+
+            // Determine which object we are climbing
+            Collider targetCol = isFacingWall ? wallHit.collider : _climbCandidateCol;
+            Vector3 hitPoint = isFacingWall ? wallHit.point : transform.position + castDir * _cc.radius;
+
+            // Try to find the exact top of the ledge by casting down from above
+            Vector3 topCastOrigin = hitPoint + castDir * 0.3f + Vector3.up * climbMaxHeight;
+            if (Physics.Raycast(topCastOrigin, Vector3.down, out RaycastHit topHit, climbMaxHeight * 2f, climbObstacleMask, QueryTriggerInteraction.Ignore))
+            {
+                targetHeightY = topHit.point.y;
+            }
+            // Fallback: use the bounding box's max Y if downward raycast misses (e.g. thin walls)
+            else if (targetCol != null)
+            {
+                targetHeightY = targetCol.bounds.max.y;
+            }
+
+            // Calculate how much height we need to clear the ledge with our feet
+            float neededHeight = (targetHeightY - _cc.bounds.min.y) + 0.2f; // 0.2f extra clearance
+            
+            // Clamp the needed height so we don't shoot into the stratosphere or do a tiny hop
+            neededHeight = Mathf.Clamp(neededHeight, 1.5f, climbMaxHeight);
+
+            // Calculate required vertical velocity (v = sqrt(2*g*h))
+            float requiredVelocity = Mathf.Sqrt(2f * Mathf.Abs(Physics.gravity.y) * neededHeight);
+            
+            // Ensure the climb boost is at least slightly stronger than a standard jump
+            _verticalVelocity = Mathf.Max(requiredVelocity, jumpForce * 1.1f);
+
+            _isGrounded = false;
+            _jumpBufferedUntil = 0f;
+            _groundedUntil = 0f;
+            _canClimbThisJump = false; // Only allow one climb boost per jump
+
+            if (mouseLook != null)
+                mouseLook.TriggerClimbShake();
+                
+            return true;
+        }
+        
+        return false;
+    }
+
         // ── Pushing ───────────────────────────────────────────────────────────────
     void OnControllerColliderHit(ControllerColliderHit hit)
     {
+        if (!_isGrounded && hit.normal.y < 0.1f)
+        {
+            _climbCandidateCol = hit.collider;
+            _climbCandidateTime = Time.time;
+        }
+
         Rigidbody rb = hit.collider.attachedRigidbody;
         if (rb == null || rb.isKinematic) return;
 
