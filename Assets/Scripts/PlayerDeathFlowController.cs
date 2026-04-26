@@ -61,6 +61,8 @@ public class PlayerDeathFlowController : MonoBehaviour
     private Quaternion _spawnRot;
     private Vector3 _frozenCameraPos;
     private bool _isDead;
+    private Vector3 _cameraOriginalLocalPos;
+    private Quaternion _cameraOriginalLocalRot;
     private Coroutine _uiCo;
 
     private PlayerController _playerController;
@@ -143,6 +145,26 @@ public class PlayerDeathFlowController : MonoBehaviour
         {
             _spawnPos = _playerRoot.position;
             _spawnRot = _playerRoot.rotation;
+
+            // 尝试通过射线找到真正的地面，防止初始位置在半空中（如果初始掉落距离超过100可能会失败）
+            CharacterController cc = _playerRoot.GetComponent<CharacterController>();
+            if (cc != null) cc.enabled = false; // 临时关闭碰撞体防止射线扫到自己
+
+            if (Physics.Raycast(_spawnPos + Vector3.up * 0.1f, Vector3.down, out RaycastHit hit, Mathf.Infinity, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+            {
+                if (cc != null)
+                {
+                    // 计算 Pivot 到胶囊体底部的距离
+                    float pivotToBottom = (cc.height / 2f) - cc.center.y;
+                    _spawnPos = hit.point + Vector3.up * (pivotToBottom + cc.skinWidth + 0.05f);
+                }
+                else
+                {
+                    _spawnPos = hit.point + Vector3.up * 0.05f;
+                }
+            }
+            
+            if (cc != null) cc.enabled = true;
         }
     }
 
@@ -220,7 +242,11 @@ public class PlayerDeathFlowController : MonoBehaviour
         _isDead = true;
 
         if (mainCamera != null)
+        {
             _frozenCameraPos = mainCamera.transform.position;
+            _cameraOriginalLocalPos = mainCamera.transform.localPosition;
+            _cameraOriginalLocalRot = mainCamera.transform.localRotation;
+        }
 
         SetNonMovementSystemsEnabled(false);
         Cursor.lockState = CursorLockMode.None;
@@ -258,6 +284,12 @@ public class PlayerDeathFlowController : MonoBehaviour
             cc.enabled = false;
 
         _playerRoot.SetPositionAndRotation(_spawnPos, _spawnRot);
+
+        if (mainCamera != null)
+        {
+            mainCamera.transform.localPosition = _cameraOriginalLocalPos;
+            mainCamera.transform.localRotation = _cameraOriginalLocalRot;
+        }
 
         if (cc != null)
             cc.enabled = true;
