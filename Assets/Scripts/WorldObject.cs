@@ -25,6 +25,14 @@ public class WorldObject : MonoBehaviour
              "When false, script-driven push is disabled; Rigidbody gravity/physics still follow its own inspector settings.")]
     public bool canBePushed = false;
 
+    [Header("Placement Options")]
+    [Tooltip("If true, the object can be placed on vertical surfaces ignoring gravity.")]
+    public bool canBePlacedOnWall = false;
+    [Tooltip("If true, the object can be placed on ceilings ignoring gravity.")]
+    public bool canBePlacedOnCeiling = false;
+    
+    internal bool isPlacedAndAttached = false;
+
     // ── Messages ─────────────────────────────────────────────────────────────
     [Header("Messages")]
     [Tooltip("Shown in the shared info label when this object is interacted with.")]
@@ -98,8 +106,8 @@ public class WorldObject : MonoBehaviour
         if (_rb == null) _rb = GetComponent<Rigidbody>();
         if (_rb == null) return;
 
-        // While carried or during scale animations, InteractionSystem/animation logic owns RB mode.
-        if (_isCarried || _animRb != null) return;
+        // While carried, placed on wall/ceiling, or during scale animations, logic owns RB mode.
+        if (_isCarried || _animRb != null || isPlacedAndAttached) return;
 
         if (canBePushed)
         {

@@ -422,6 +422,8 @@ MonoBehaviour:
   carryable: 1
   collectable: 1
   canBePushed: 1
+  canBePlacedOnWall: 0
+  canBePlacedOnCeiling: 0
   interactMessage: 
   collectMessage: 
   collectItemData: {fileID: 11400000, guid: 6d4bdaf1ca02c4986be9ed4bbaedfbcc, type: 2}
@@ -603,8 +605,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7085a31c303f94e6991c1a4399f7ea41, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  dayLengthSeconds: 200
-  timeOfDay: 0.23
+  dayLengthSeconds: 800
+  timeOfDay: 0.376
   autoAdvance: 1
   useUnscaledTime: 0
   sunAzimuth: 165
@@ -613,7 +615,7 @@ MonoBehaviour:
   createRuntimeHdrpSkyVolume: 1
   hdrpSkyVolume: {fileID: 0}
   hdrpSkyProfile: {fileID: 0}
-  sunLight: {fileID: 0}
+  sunLight: {fileID: 1838183524}
   daySunIntensity: 0.07
   nightSunIntensity: 0.03
   daySunColor: {r: 1, g: 0.95, b: 0.86, a: 1}
@@ -1142,8 +1144,6 @@ MonoBehaviour:
   mainCamera: {fileID: 963194227}
   inventoryCamera: {fileID: 436021010}
   inventoryRoot: {fileID: 748064219}
-  unlockCursorWhenInventoryOpen: 1
-  lockCursorWhenInventoryClosed: 1
   autoFrameCameraOnOpen: 1
   inventorySystem: {fileID: 748064221}
   cameraViewDirection: {x: 1, y: 0.75, z: -1}
@@ -1250,6 +1250,7 @@ MonoBehaviour:
   mainCamera: {fileID: 963194227}
   lookTarget: {fileID: 512300541}
   lockCameraPositionOnDeath: 1
+  cameraLookSpeed: 4
   leftDeathTMP: {fileID: 1593064620}
   rightDeathTMP: {fileID: 1419886226}
   deathHintTMP: {fileID: 1528826692}
@@ -1965,15 +1966,18 @@ MonoBehaviour:
   m_GameObject: {fileID: 819264056}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: f036a2bbf10d34ed6a3cb1cc418bd0d4, type: 3}
+  m_Script: {fileID: 11500000, guid: 1fbf4c8887cd24c4cb476b61089e72ba, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  shatterMaterial: {fileID: 2100000, guid: 6cf8b9b64a94e4f228bff611d3af00e6, type: 2}
-  animationDuration: 2
-  maxShatterAmount: 0.08
-  maxShrinkAmount: 0.08
-  deathUIPanel: {fileID: 1761105425}
-  uiPopDelayRatio: 0.3
+  numRays: 15
+  innerRadiusMin: 0.05
+  innerRadiusMax: 0.15
+  midRadiusMin: 0.3
+  midRadiusMax: 0.5
+  crackSeparation: 0.04
+  explosionForce: 15
+  explosionRadius: 5
+  mainCamera: {fileID: 963194227}
 --- !u!1 &841178980
 GameObject:
   m_ObjectHideFlags: 0
@@ -2894,6 +2898,7 @@ MonoBehaviour:
   autoLockCursorOnStart: 1
   climbShakePitch: 25
   climbShakeDuration: 0.5
+  suspendMouseLook: 0
 --- !u!114 &963194231
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3069,8 +3074,6 @@ MonoBehaviour:
   mainCamera: {fileID: 963194227}
   inventoryCamera: {fileID: 436021010}
   inventoryRoot: {fileID: 748064219}
-  unlockCursorWhenInventoryOpen: 1
-  lockCursorWhenInventoryClosed: 1
   autoFrameCameraOnOpen: 1
   inventorySystem: {fileID: 748064221}
   cameraViewDirection: {x: 1, y: 0.75, z: -1}
@@ -5815,6 +5818,8 @@ MonoBehaviour:
   carryable: 0
   collectable: 0
   canBePushed: 0
+  canBePlacedOnWall: 0
+  canBePlacedOnCeiling: 0
   interactMessage: 
   collectMessage: 
   collectItemData: {fileID: 11400000, guid: 6d4bdaf1ca02c4986be9ed4bbaedfbcc, type: 2}
@@ -7086,6 +7091,10 @@ PrefabInstance:
       propertyPath: collectItemData
       value: 
       objectReference: {fileID: 11400000, guid: 6d4bdaf1ca02c4986be9ed4bbaedfbcc, type: 2}
+    - target: {fileID: 3336568320298679629, guid: a2973e9f059bb406c98d07ef1a653da1, type: 3}
+      propertyPath: canBePlacedOnWall
+      value: 1
+      objectReference: {fileID: 0}
     - target: {fileID: 6823427904627073488, guid: a2973e9f059bb406c98d07ef1a653da1, type: 3}
       propertyPath: m_Name
       value: BoxEmpty

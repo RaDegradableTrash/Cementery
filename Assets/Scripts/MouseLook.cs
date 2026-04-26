@@ -47,6 +47,7 @@ public class MouseLook : MonoBehaviour
     private float _climbShakeTimer;
 
     // ── State ─────────────────────────────────────────────────────────────────
+    [HideInInspector] public bool suspendMouseLook = false;
     private float _pitch;
     private PlayerController _playerController;
     private Vector3 _holderDefaultLocalPos;
@@ -125,6 +126,8 @@ public class MouseLook : MonoBehaviour
     // ── Look ──────────────────────────────────────────────────────────────────
     void ApplyMouseLook()
     {
+        if (suspendMouseLook) return;
+
         float mouseX = (useRawMouseInput ? Input.GetAxisRaw("Mouse X") : Input.GetAxis("Mouse X")) * sensitivityX;
         float mouseY = (useRawMouseInput ? Input.GetAxisRaw("Mouse Y") : Input.GetAxis("Mouse Y")) * sensitivityY;
 

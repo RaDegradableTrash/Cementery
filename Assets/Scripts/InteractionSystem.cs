@@ -74,6 +74,8 @@ public class InteractionSystem : MonoBehaviour
     [SerializeField] private bool visualizeInteractionRay = true;
     [SerializeField] private Color interactionRayColor = new Color(1f, 0.85f, 0.1f, 1f);
 
+    private MouseLook _mouseLook;
+
     private WorldObject _lookedAt;
     private Furniture_SlideDoor _lookedAtFurniture;
     private Rigidbody _carryCandidateRb;
@@ -122,6 +124,7 @@ public class InteractionSystem : MonoBehaviour
     private Material _placementInvalidMat;
     private Vector3 _placementPosition;
     private Quaternion _placementRotation;
+    private Vector3 _placementSurfaceNormal = Vector3.up;
 
     [Header("Throw Mechanic (Q)")]
     [SerializeField] private float minThrowForce = 5f;
@@ -130,6 +133,9 @@ public class InteractionSystem : MonoBehaviour
     private bool _isThrowCharging;
     private float _throwChargeTimer;
 
+    private float _timeRButtonPressed;
+    private float _placementRotationOffset = 0f;
+
     void Awake()
     {
         if (playerCamera == null)
@@ -137,6 +143,9 @@ public class InteractionSystem : MonoBehaviour
 
         if (inventoryCameraController == null)
             inventoryCameraController = FindObjectOfType<InventoryCameraController>();
+
+        if (_mouseLook == null && playerCamera != null)
+            _mouseLook = playerCamera.GetComponent<MouseLook>();
 
         _carryNoFrictionMaterial = new PhysicMaterial("Carry_NoFriction_Runtime")
         {
@@ -238,6 +247,13 @@ public class InteractionSystem : MonoBehaviour
     {
         if (_carriedRb == null)
             return;
+
+        // 一般搬运时在偏右下方（避免挡视线），放置模式时更加靠右下方
+        Vector3 normalCarryDir = new Vector3(0.35f, -0.3f, 0.9f).normalized;
+        Vector3 placementDir = new Vector3(0.55f, -0.6f, 0.8f).normalized;
+        Vector3 targetDir = _isPlacementMode ? placementDir : normalCarryDir;
+        
+        _carryRayLocalDir = Vector3.Lerp(_carryRayLocalDir, targetDir, Time.fixedDeltaTime * 12f);
 
         if (autoAdaptCarryDistance)
             UpdateAdaptiveCarryOffset(Time.fixedDeltaTime);
@@ -701,6 +717,31 @@ public class InteractionSystem : MonoBehaviour
                 EnterPlacementMode();
             else if (Input.GetKeyUp(KeyCode.Tab))
                 ExitPlacementMode();
+
+            if (_isPlacementMode)
+            {
+                if (Input.GetKeyDown(KeyCode.R))
+                {
+                    _timeRButtonPressed = Time.time;
+                    if (_mouseLook != null) _mouseLook.suspendMouseLook = true;
+                }
+                if (Input.GetKey(KeyCode.R))
+                {
+                    if (Time.time - _timeRButtonPressed > 0.15f)
+                    {
+                        float mouseX = Input.GetAxis("Mouse X");
+                        _placementRotationOffset += mouseX * 300f * Time.deltaTime;
+                    }
+                }
+                if (Input.GetKeyUp(KeyCode.R))
+                {
+                    if (Time.time - _timeRButtonPressed <= 0.15f)
+                    {
+                        _placementRotationOffset += 90f;
+                    }
+                    if (_mouseLook != null) _mouseLook.suspendMouseLook = false;
+                }
+            }
         }
         else if (_isPlacementMode)
         {
@@ -1091,7 +1132,18 @@ public class InteractionSystem : MonoBehaviour
         _carriedTransform = rb.transform;
         _carriedWo = wo;
 
-        _rbWasKinematic = _carriedRb.isKinematic;
+        bool wasKinematic = _carriedRb.isKinematic;
+        if (_carriedWo != null && _carriedWo.isPlacedAndAttached)
+        {
+            _carriedWo.isPlacedAndAttached = false;
+            // If the object normally has gravity or is pushable, don't record the wall-attachment's forced kinematic state
+            if (_carriedWo.canBePushed || _carriedRb.useGravity)
+                wasKinematic = false;
+        }
+
+        _placementRotationOffset = 0f;
+
+        _rbWasKinematic = wasKinematic;
         _rbHadGravity = _carriedRb.useGravity;
         _rbInterpolation = _carriedRb.interpolation;
         _rbCollisionDetectionMode = _carriedRb.collisionDetectionMode;
@@ -1255,13 +1307,29 @@ public class InteractionSystem : MonoBehaviour
 
     void InitializePlacementMaterials()
     {
-        _placementValidMat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
-        if (_placementValidMat.shader == null) _placementValidMat = new Material(Shader.Find("Standard"));
-        SetMaterialTransparentURP(_placementValidMat, new Color(0.2f, 1f, 0.2f, 0.4f));
+        Shader customShader = Shader.Find("Custom/URPPlacementGhost");
+        if (customShader != null)
+        {
+            _placementValidMat = new Material(customShader);
+            _placementValidMat.SetColor("_BaseColor", new Color(0.1f, 1f, 0.1f, 0.2f));
+            _placementValidMat.SetColor("_ContactColor", new Color(0.1f, 1f, 0.1f, 0.8f));
+            _placementValidMat.SetFloat("_FadeDistance", 0.25f);
 
-        _placementInvalidMat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
-        if (_placementInvalidMat.shader == null) _placementInvalidMat = new Material(Shader.Find("Standard"));
-        SetMaterialTransparentURP(_placementInvalidMat, new Color(1f, 0.2f, 0.2f, 0.4f));
+            _placementInvalidMat = new Material(customShader);
+            _placementInvalidMat.SetColor("_BaseColor", new Color(1f, 0.1f, 0.1f, 0.2f));
+            _placementInvalidMat.SetColor("_ContactColor", new Color(1f, 0.1f, 0.1f, 0.8f));
+            _placementInvalidMat.SetFloat("_FadeDistance", 0.25f);
+        }
+        else
+        {
+            _placementValidMat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+            if (_placementValidMat.shader == null) _placementValidMat = new Material(Shader.Find("Standard"));
+            SetMaterialTransparentURP(_placementValidMat, new Color(0.2f, 1f, 0.2f, 0.4f));
+
+            _placementInvalidMat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+            if (_placementInvalidMat.shader == null) _placementInvalidMat = new Material(Shader.Find("Standard"));
+            SetMaterialTransparentURP(_placementInvalidMat, new Color(1f, 0.2f, 0.2f, 0.4f));
+        }
     }
 
     void SetMaterialTransparentURP(Material mat, Color color)
@@ -1295,33 +1363,39 @@ public class InteractionSystem : MonoBehaviour
         _isPlacementMode = true;
         _isThrowCharging = false;
         
-        Renderer[] renderers = _carriedRb.GetComponentsInChildren<Renderer>();
-        foreach (Renderer r in renderers) r.enabled = false;
-            
         _placementGhost = Instantiate(_carriedRb.gameObject);
         _placementGhost.name = "PlacementGhost";
+        
+        // 修复由于脱离原父级导致的缩放丢失问题
+        _placementGhost.transform.localScale = _carriedRb.transform.lossyScale;
         
         Destroy(_placementGhost.GetComponent<Rigidbody>());
         foreach(MonoBehaviour mb in _placementGhost.GetComponentsInChildren<MonoBehaviour>())
             Destroy(mb);
             
-        foreach(Collider c in _placementGhost.GetComponentsInChildren<Collider>())
+        Collider[] allCols = _placementGhost.GetComponentsInChildren<Collider>();
+        foreach(Collider c in allCols)
         {
-            c.isTrigger = true;
-            c.gameObject.layer = 2; // Ignore Raycast layer
+            if (c.isTrigger)
+            {
+                // 原本就是Trigger的碰撞体（如交互区域）不能用于物理防穿模计算，直接删除
+                Destroy(c);
+            }
+            else
+            {
+                c.isTrigger = true;
+                c.gameObject.layer = 2; // Ignore Raycast layer
+            }
         }
+        
+        _placementGhost.SetActive(false);
     }
 
     void ExitPlacementMode()
     {
         if (!_isPlacementMode) return;
         _isPlacementMode = false;
-        
-        if (_carriedRb != null)
-        {
-            Renderer[] renderers = _carriedRb.GetComponentsInChildren<Renderer>();
-            foreach (Renderer r in renderers) r.enabled = true;
-        }
+        if (_mouseLook != null) _mouseLook.suspendMouseLook = false;
         
         if (_placementGhost != null) Destroy(_placementGhost);
     }
@@ -1349,17 +1423,119 @@ public class InteractionSystem : MonoBehaviour
         
         if (nearest < float.PositiveInfinity)
         {
-            _placementGhost.SetActive(true);
-            _placementPosition = bestHit.point;
-            
-            Vector3 fwd = Vector3.ProjectOnPlane(GetCarryReferenceForward(), bestHit.normal);
-            if (fwd.sqrMagnitude < 0.001f) fwd = GetCarryReferenceForward();
-            _placementRotation = Quaternion.LookRotation(fwd, bestHit.normal);
-            
-            _placementGhost.transform.position = _placementPosition;
-            _placementGhost.transform.rotation = _placementRotation;
-            
-            CheckPlacementValidity();
+            float dotUp = Vector3.Dot(bestHit.normal, Vector3.up);
+            bool isFloor = dotUp > 0.7f;
+            bool isCeiling = dotUp < -0.7f;
+            bool isWall = !isFloor && !isCeiling;
+
+            bool canPlaceOnSurface = true;
+            if (isWall && (_carriedWo == null || !_carriedWo.canBePlacedOnWall))
+                canPlaceOnSurface = false;
+            if (isCeiling && (_carriedWo == null || !_carriedWo.canBePlacedOnCeiling))
+                canPlaceOnSurface = false;
+
+            if (canPlaceOnSurface)
+            {
+                _placementGhost.SetActive(true);
+                _placementPosition = bestHit.point;
+                _placementSurfaceNormal = bestHit.normal;
+
+                _placementValidMat.SetVector("_PlaneNormal", bestHit.normal);
+                _placementValidMat.SetVector("_PlanePoint", bestHit.point);
+                _placementInvalidMat.SetVector("_PlaneNormal", bestHit.normal);
+                _placementInvalidMat.SetVector("_PlanePoint", bestHit.point);
+                
+                Vector3 fwd = Vector3.ProjectOnPlane(GetCarryReferenceForward(), bestHit.normal);
+                if (fwd.sqrMagnitude < 0.001f) fwd = GetCarryReferenceForward();
+                _placementRotation = Quaternion.LookRotation(fwd, bestHit.normal) * Quaternion.Euler(0f, _placementRotationOffset, 0f);
+                
+                _placementGhost.transform.position = _placementPosition;
+                _placementGhost.transform.rotation = _placementRotation;
+                Physics.SyncTransforms(); // 强制刷新物理引擎状态，以便获取准确的包围盒
+                
+                // 通用精确防穿模：利用 ClosestPoint 找到每个碰撞体在法线反方向上的极点（无论旋转角度和墙面朝向）
+                float maxPenetration = 0f;
+                bool foundCollider = false;
+                
+                Plane plane = new Plane(bestHit.normal, bestHit.point);
+
+                foreach(Collider c in _placementGhost.GetComponentsInChildren<Collider>())
+                {
+                    MeshCollider mc = c as MeshCollider;
+                    if (mc != null && !mc.convex)
+                    {
+                        // 非凸 MeshCollider 的 ClosestPoint 会失效，降级使用它的 AABB 计算
+                        Vector3 center = c.bounds.center;
+                        Vector3 extents = c.bounds.extents;
+                        Vector3 lowestCorner = center;
+                        lowestCorner.x += bestHit.normal.x < 0 ? extents.x : -extents.x;
+                        lowestCorner.y += bestHit.normal.y < 0 ? extents.y : -extents.y;
+                        lowestCorner.z += bestHit.normal.z < 0 ? extents.z : -extents.z;
+
+                        float d = plane.GetDistanceToPoint(lowestCorner);
+                        if (d < 0 && -d > maxPenetration)
+                        {
+                            maxPenetration = -d;
+                            foundCollider = true;
+                        }
+                        continue;
+                    }
+
+                    // 取碰撞体中心向墙体内部延伸极远的点
+                    Vector3 farPoint = c.bounds.center - bestHit.normal * 1000f;
+                    // 获取碰撞体表面最接近该远点的点，即为最深入墙体的极点
+                    Vector3 extremePoint = c.ClosestPoint(farPoint);
+                    
+                    float dist = plane.GetDistanceToPoint(extremePoint);
+                    
+                    if (dist < 0 && -dist > maxPenetration)
+                    {
+                        maxPenetration = -dist;
+                        foundCollider = true;
+                    }
+                }
+
+                if (foundCollider && maxPenetration > 0f)
+                {
+                    _placementPosition += bestHit.normal * (maxPenetration + 0.01f);
+                    _placementGhost.transform.position = _placementPosition;
+                }
+                else if (!foundCollider)
+                {
+                    // 降级方案：如果没有 Collider，则使用 Renderer 的 bounds (AABB)
+                    Bounds bounds = new Bounds(_placementGhost.transform.position, Vector3.zero);
+                    bool hasRenderer = false;
+                    foreach(Renderer r in _placementGhost.GetComponentsInChildren<Renderer>())
+                    {
+                        if (hasRenderer) bounds.Encapsulate(r.bounds);
+                        else { bounds = r.bounds; hasRenderer = true; }
+                    }
+
+                    if (hasRenderer)
+                    {
+                        Vector3 center = bounds.center;
+                        Vector3 extents = bounds.extents;
+                        Vector3 lowestCorner = center;
+                        lowestCorner.x += bestHit.normal.x < 0 ? extents.x : -extents.x;
+                        lowestCorner.y += bestHit.normal.y < 0 ? extents.y : -extents.y;
+                        lowestCorner.z += bestHit.normal.z < 0 ? extents.z : -extents.z;
+
+                        float dist = plane.GetDistanceToPoint(lowestCorner);
+                        if (dist < 0)
+                        {
+                            _placementPosition += bestHit.normal * (-dist + 0.01f);
+                            _placementGhost.transform.position = _placementPosition;
+                        }
+                    }
+                }
+                
+                CheckPlacementValidity();
+            }
+            else
+            {
+                _placementGhost.SetActive(false);
+                _isPlacementValid = false;
+            }
         }
         else
         {
@@ -1412,19 +1588,39 @@ public class InteractionSystem : MonoBehaviour
     void ExecutePlacement()
     {
         Rigidbody rb = _carriedRb;
+        WorldObject wo = _carriedWo;
         Vector3 finalPos = _placementPosition;
         Quaternion finalRot = _placementRotation;
+        
+        bool attachToSurface = false;
+        if (wo != null)
+        {
+            float dotUp = Vector3.Dot(_placementSurfaceNormal, Vector3.up);
+            bool isFloor = dotUp > 0.7f;
+            if (!isFloor)
+                attachToSurface = true;
+        }
         
         ExitPlacementMode();
         Drop();
         
         if (rb != null)
         {
-            rb.position = finalPos;
-            rb.rotation = finalRot;
-            rb.velocity = Vector3.zero;
-            rb.angularVelocity = Vector3.zero;
-            rb.isKinematic = true;
+            rb.transform.position = finalPos;
+            rb.transform.rotation = finalRot;
+            Physics.SyncTransforms();
+            
+            if (!rb.isKinematic)
+            {
+                rb.velocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+            }
+
+            if (attachToSurface && wo != null)
+            {
+                wo.isPlacedAndAttached = true;
+                rb.isKinematic = true;
+            }
         }
     }
 
