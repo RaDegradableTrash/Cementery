@@ -40,6 +40,11 @@ public class PlayerController : MonoBehaviour
     /// </summary>
     public Vector3 BobOffset { get; private set; }
 
+    /// <summary>
+    /// Global multiplier for movement speed. Managed by external systems (e.g., InteractionSystem) when dragging heavy objects.
+    /// </summary>
+    public float SpeedMultiplier { get; set; } = 1f;
+
     [Header("Climbing")]
     [SerializeField] private float climbMaxHeight = 5f;
     [SerializeField] private LayerMask climbObstacleMask = ~0;
@@ -161,7 +166,7 @@ public class PlayerController : MonoBehaviour
         else
             _stamina?.Recover();
 
-        float speed = isSprinting ? sprintSpeed : walkSpeed;
+        float speed = (isSprinting ? sprintSpeed : walkSpeed) * SpeedMultiplier;
 
         Vector3 move = transform.right * h + transform.forward * v;
         if (move.sqrMagnitude > 1f)

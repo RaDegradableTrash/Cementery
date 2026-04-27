@@ -13,11 +13,19 @@ using UnityEngine.Events;
 /// </summary>
 public class WorldObject : MonoBehaviour
 {
+    /// <summary>
+    /// Design-time posture (pitch and roll) of this object. 
+    /// Used by InteractionSystem to correctly orient horizontal/tilted objects during placement.
+    /// </summary>
+    public Quaternion defaultPitchRoll { get; private set; } = Quaternion.identity;
+
     // ── Flags ────────────────────────────────────────────────────────────────
     [Header("Interaction Flags")]
     public bool interactable = false;
     public bool carryable    = false;
     public bool collectable  = false;
+    [Tooltip("If true, carrying this object defaults to a heavy dragging mode instead of floating in front of the camera.")]
+    public bool isHeavy      = false;
 
     // ── Physics ───────────────────────────────────────────────────────────────
     [Header("Physics")]
@@ -46,8 +54,6 @@ public class WorldObject : MonoBehaviour
 
     // ── Animation tuning ─────────────────────────────────────────────────────
     [Header("Squash & Stretch")]
-    [Tooltip("Duration of each animation phase (squash / restore / stretch / restore).")]
-    [SerializeField] private float animPhaseTime    = 0.12f;
     [Tooltip("Half-duration of the grow + squash/stretch phase during collect.")]
     [SerializeField] private float collectGrowTime  = 0.15f;
     [Tooltip("Duration of the shrink-to-zero phase during collect.")]
@@ -81,6 +87,32 @@ public class WorldObject : MonoBehaviour
 
     void Awake()
     {
+        // Extract design-time pitch and roll by stripping yaw
+        Vector3 fwd = transform.forward;
+        fwd.y = 0f;
+        if (fwd.sqrMagnitude > 0.001f)
+        {
+            Quaternion yawRot = Quaternion.LookRotation(fwd.normalized, Vector3.up);
+            defaultPitchRoll = Quaternion.Inverse(yawRot) * transform.rotation;
+        }
+        else
+        {
+            // Object is pointing straight up or down, yaw is ambiguous.
+            // In this case, just use its rotation directly or strip rotation around Y world axis.
+            Vector3 upDir = transform.up;
+            upDir.y = 0f;
+            if (upDir.sqrMagnitude > 0.001f)
+            {
+                // Align its 'up' to world forward to strip yaw
+                Quaternion yawRot = Quaternion.LookRotation(upDir.normalized, Vector3.up);
+                defaultPitchRoll = Quaternion.Inverse(yawRot) * transform.rotation;
+            }
+            else
+            {
+                defaultPitchRoll = transform.rotation;
+            }
+        }
+
         _baseScale = transform.localScale;
         _rb = GetComponent<Rigidbody>();
         ApplyPushabilityState();
@@ -101,13 +133,29 @@ public class WorldObject : MonoBehaviour
         ApplyPushabilityState();
     }
 
+    private int _animationLocks = 0;
+
+    public void AddAnimationLock()
+    {
+        _animationLocks++;
+        if (_rb != null && _animationLocks > 0)
+            _rb.isKinematic = true;
+    }
+
+    public void RemoveAnimationLock()
+    {
+        _animationLocks--;
+        if (_animationLocks < 0) _animationLocks = 0;
+        ApplyPushabilityState();
+    }
+
     void ApplyPushabilityState()
     {
         if (_rb == null) _rb = GetComponent<Rigidbody>();
         if (_rb == null) return;
 
-        // While carried, placed on wall/ceiling, or during scale animations, logic owns RB mode.
-        if (_isCarried || _animRb != null || isPlacedAndAttached) return;
+        // While carried, placed on wall/ceiling, or actively animating, logic owns RB mode.
+        if (_isCarried || _animationLocks > 0 || isPlacedAndAttached) return;
 
         if (canBePushed)
         {
@@ -147,101 +195,14 @@ public class WorldObject : MonoBehaviour
     /// <summary>Plays squash → restore → stretch → restore once. Re-entrant calls are ignored.</summary>
     public void PlayInteractAnim()
     {
-        if (_interactAnim != null) return;   // already animating — don't stack
-        _interactAnim = StartCoroutine(InteractAnimCo());
+        // Removed Q-bounce animation as requested.
     }
 
     /// <summary>Plays the collect pop animation (grow + squash/stretch → shrink to zero), then calls onComplete.</summary>
     public void PlayCollectAnim(System.Action onComplete)
         => _collectAnim = StartCoroutine(CollectAnimCo(onComplete));
 
-    // ── Interact animation ────────────────────────────────────────────────────
-    IEnumerator InteractAnimCo()
-    {
-        Vector3 origScale  = transform.localScale;
-        Vector3 origPos    = transform.position;
-        _posBeforeAnim     = origPos;   // snapshot BEFORE any scale/position change
-        Vector3 downDir      = Physics.gravity.sqrMagnitude > 0.0001f ? Physics.gravity.normalized : Vector3.down;
-        Collider[] colliders = GetComponentsInChildren<Collider>(true);
-        Vector3 squash    = new Vector3(origScale.x * 1.17f, origScale.y * 0.77f, origScale.z * 1.17f);
-        Vector3 stretch   = new Vector3(origScale.x * 0.87f, origScale.y * 1.22f, origScale.z * 0.87f);
-        float   t         = animPhaseTime;
-        float   e;
 
-        float BottomSupportDot()
-        {
-            bool found = false;
-            float support = float.NegativeInfinity;
-            for (int i = 0; i < colliders.Length; i++)
-            {
-                Collider c = colliders[i];
-                if (c == null || !c.enabled)
-                    continue;
-
-                Bounds b = c.bounds;
-                float d = Vector3.Dot(b.center, downDir)
-                        + Mathf.Abs(downDir.x) * b.extents.x
-                        + Mathf.Abs(downDir.y) * b.extents.y
-                        + Mathf.Abs(downDir.z) * b.extents.z;
-                if (!found || d > support)
-                {
-                    support = d;
-                    found = true;
-                }
-            }
-
-            return found ? support : Vector3.Dot(transform.position, downDir);
-        }
-
-        float origBottomSupport = BottomSupportDot();
-
-        // Make kinematic so growing/shrinking colliders can't be pushed by the ground
-        _animRb = GetComponent<Rigidbody>();
-        if (_animRb != null)
-        {
-            _animPrevKinematic      = _animRb.isKinematic;
-            _animRb.velocity        = Vector3.zero;   // clear before kinematic or stored velocity replays
-            _animRb.angularVelocity = Vector3.zero;
-            _animRb.isKinematic     = true;
-        }
-
-        // Keep the currently downward-facing bottom support point fixed while scaling.
-        void AnchorBottom()
-        {
-            float currentBottomSupport = BottomSupportDot();
-            transform.position += downDir * (origBottomSupport - currentBottomSupport);
-        }
-
-        // Squash (fast out)
-        e = 0f;
-        while (e < t) { e += Time.deltaTime; transform.localScale = Vector3.LerpUnclamped(origScale, squash,    EaseOut  (Mathf.Clamp01(e / t))); AnchorBottom(); yield return null; }
-        transform.localScale = squash;   AnchorBottom();
-
-        // Restore (smooth)
-        e = 0f;
-        while (e < t) { e += Time.deltaTime; transform.localScale = Vector3.LerpUnclamped(squash,    origScale, EaseInOut(Mathf.Clamp01(e / t))); AnchorBottom(); yield return null; }
-        transform.localScale = origScale; AnchorBottom();
-
-        // Stretch (fast out)
-        e = 0f;
-        while (e < t) { e += Time.deltaTime; transform.localScale = Vector3.LerpUnclamped(origScale, stretch,   EaseOut  (Mathf.Clamp01(e / t))); AnchorBottom(); yield return null; }
-        transform.localScale = stretch;  AnchorBottom();
-
-        // Restore (smooth)
-        e = 0f;
-        while (e < t) { e += Time.deltaTime; transform.localScale = Vector3.LerpUnclamped(stretch,   origScale, EaseInOut(Mathf.Clamp01(e / t))); AnchorBottom(); yield return null; }
-        transform.localScale = origScale;
-        AnchorBottom();
-
-        if (_animRb != null)
-        {
-            _animRb.isKinematic    = _animPrevKinematic;
-            _animRb.velocity       = Vector3.zero;   // don't launch the object after animation ends
-            _animRb.angularVelocity = Vector3.zero;
-            _animRb = null;
-        }
-        _interactAnim = null;
-    }
 
     // ── Collect animation ─────────────────────────────────────────────────────
     IEnumerator CollectAnimCo(System.Action onComplete)

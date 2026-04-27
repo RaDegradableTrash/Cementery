@@ -77,9 +77,9 @@ public class InteractionSystem : MonoBehaviour
     private MouseLook _mouseLook;
 
     private WorldObject _lookedAt;
-    private Furniture_SlideDoor _lookedAtFurniture;
     private Rigidbody _carryCandidateRb;
     private WorldObject _carryCandidateWo;
+    private Vector3 _dragAnchorLocal;
 
     private Transform _carriedTransform;
     private WorldObject _carriedWo;
@@ -136,8 +136,12 @@ public class InteractionSystem : MonoBehaviour
     private float _timeRButtonPressed;
     private float _placementRotationOffset = 0f;
 
+    public static InteractionSystem Instance { get; private set; }
+
     void Awake()
     {
+        Instance = this;
+
         if (playerCamera == null)
             playerCamera = Camera.main;
 
@@ -228,7 +232,6 @@ public class InteractionSystem : MonoBehaviour
                 Drop();
 
             _lookedAt = null;
-            _lookedAtFurniture = null;
             _carryCandidateRb = null;
             _carryCandidateWo = null;
             UpdatePrompt();
@@ -301,6 +304,32 @@ public class InteractionSystem : MonoBehaviour
 
     void DriveCarry()
     {
+        if (_carriedWo != null && _carriedWo.isHeavy)
+        {
+            Transform playerT = _playerCc != null ? _playerCc.transform : transform;
+            Vector3 pPos = playerT.position; pPos.y = 0;
+            Vector3 aPos = _carriedRb.transform.TransformPoint(_dragAnchorLocal); aPos.y = 0;
+            
+            float currentDist = Vector3.Distance(pPos, aPos);
+            if (currentDist > _carryRayDistance)
+            {
+                Vector3 pullForceDir = (pPos - aPos).normalized;
+                float stretch = currentDist - _carryRayDistance;
+                
+                // Spring force pulling the anchor point towards the player
+                Vector3 force = pullForceDir * (stretch * carryFollowStrength * 5f);
+                _carriedRb.AddForceAtPosition(force, _carriedRb.transform.TransformPoint(_dragAnchorLocal), ForceMode.Acceleration);
+            }
+            
+            // Apply slight horizontal damping to emulate heavy friction and prevent infinite sliding
+            Vector3 vel = _carriedRb.velocity;
+            vel.x *= 0.95f;
+            vel.z *= 0.95f;
+            _carriedRb.velocity = vel;
+            _carriedRb.angularVelocity *= 0.95f;
+            return; // Skip normal positional/rotational override
+        }
+
         Vector3 targetPos = GetCarryTargetPosition();
         Vector3 toTarget = targetPos - _carriedRb.position;
 
@@ -323,6 +352,21 @@ public class InteractionSystem : MonoBehaviour
 
     Vector3 GetCarryTargetPosition()
     {
+        if (_carriedWo != null && _carriedWo.isHeavy)
+        {
+            Transform playerT = _playerCc != null ? _playerCc.transform : transform;
+            Vector3 pPos = playerT.position;
+            Vector3 oPos = _carriedRb.position;
+            pPos.y = 0; oPos.y = 0; // 2D projection for pure horizontal trailing
+            
+            Vector3 dragDir = (oPos - pPos).normalized;
+            if (dragDir.sqrMagnitude < 0.001f) dragDir = -playerT.forward;
+            dragDir.y = 0;
+            
+            float targetDist = Mathf.Max(1.5f, _carryRayDistance);
+            return playerT.position + dragDir * targetDist;
+        }
+
         Transform carryRef = GetCarryReferenceTransform();
         Vector3 origin = GetCarryReferenceOrigin();
         Vector3 rayDir = carryRef.TransformDirection(_carryRayLocalDir);
@@ -356,6 +400,12 @@ public class InteractionSystem : MonoBehaviour
 
     Quaternion GetCarryTargetRotationYawOnly()
     {
+        if (_carriedWo != null && _carriedWo.isHeavy)
+        {
+            // Do not force rotation on heavy objects dragged on the ground
+            return _carriedRb.rotation;
+        }
+
         Vector3 fwd = GetCarryReferenceForward();
 
         float yaw = Mathf.Atan2(fwd.x, fwd.z) * Mathf.Rad2Deg;
@@ -633,14 +683,12 @@ public class InteractionSystem : MonoBehaviour
         if (!TryRaycastIgnoringPlayer(ray, rayRange, out RaycastHit hit))
         {
             _lookedAt = null;
-            _lookedAtFurniture = null;
             _carryCandidateRb = null;
             _carryCandidateWo = null;
             return;
         }
 
         _lookedAt = hit.collider.GetComponentInParent<WorldObject>();
-        _lookedAtFurniture = hit.collider.GetComponentInParent<Furniture_SlideDoor>();
         
         if (_carriedRb == null)
             _carryCandidateRb = ResolveCarryCandidate(hit, out _carryCandidateWo);
@@ -667,7 +715,8 @@ public class InteractionSystem : MonoBehaviour
 
         // Candidate is already constrained by the SphereCast range; no extra distance gate.
 
-        worldObject = c.GetComponentInParent<WorldObject>();
+        // Carry state is strictly bound to the Rigidbody being carried
+        worldObject = rb.GetComponent<WorldObject>();
         if (worldObject == null)
             worldObject = rb.GetComponentInParent<WorldObject>();
 
@@ -772,18 +821,11 @@ public class InteractionSystem : MonoBehaviour
 
         if (Input.GetMouseButtonDown(1))
         {
-            if (_lookedAt != null)
+            if (_lookedAt != null && _lookedAt.interactable)
             {
-                if (_lookedAt.interactable)
-                {
-                    _lookedAt.TriggerInteract(gameObject);
-                    _lookedAt.PlayInteractAnim();
-                    ShowInfo(_lookedAt.interactMessage);
-                }
-            }
-            else if (_lookedAtFurniture != null)
-            {
-                _lookedAtFurniture.Interact();
+                _lookedAt.TriggerInteract(gameObject);
+                _lookedAt.PlayInteractAnim();
+                ShowInfo(_lookedAt.interactMessage);
             }
         }
     }
@@ -1155,26 +1197,42 @@ public class InteractionSystem : MonoBehaviour
         _carriedRadius = ComputeCarriedRadius();
         ApplyCarryNoFriction();
 
-        Transform carryRef = GetCarryReferenceTransform();
-        Vector3 carryOrigin = GetCarryReferenceOrigin();
-        if (useUnifiedCarryAnchor)
+        Transform playerT = _playerCc != null ? _playerCc.transform : transform;
+        if (_carriedWo != null && _carriedWo.isHeavy)
         {
-            Vector3 localAnchor = GetUnifiedCarryAnchorLocalOffset();
-            _carryRayLocalDir = localAnchor.normalized;
-            _carryRayDistance = localAnchor.magnitude;
+            // Set drag anchor to the closest point on bounds and compute initial leash length
+            Collider c = rb.GetComponentInChildren<Collider>();
+            Vector3 anchorWorld = c != null ? c.ClosestPoint(playerT.position) : rb.position;
+            _dragAnchorLocal = rb.transform.InverseTransformPoint(anchorWorld);
+            
+            Vector3 pPos = playerT.position; pPos.y = 0;
+            Vector3 aPos = anchorWorld; aPos.y = 0;
+            // 缩短狗绳的初始长度，使得拖拽时物体离玩家更近
+            _carryRayDistance = Mathf.Max(0.5f, Vector3.Distance(pPos, aPos) - 0.5f);
         }
         else
         {
-            Vector3 ray = _carriedTransform.position - carryOrigin;
-            float rayLen = ray.magnitude;
-            if (rayLen < 0.05f)
+            Transform carryRef = GetCarryReferenceTransform();
+            Vector3 carryOrigin = GetCarryReferenceOrigin();
+            if (useUnifiedCarryAnchor)
             {
-                ray = GetCarryReferenceForward() * 0.05f;
-                rayLen = 0.05f;
+                Vector3 localAnchor = GetUnifiedCarryAnchorLocalOffset();
+                _carryRayLocalDir = localAnchor.normalized;
+                _carryRayDistance = localAnchor.magnitude;
             }
+            else
+            {
+                Vector3 ray = _carriedTransform.position - carryOrigin;
+                float rayLen = ray.magnitude;
+                if (rayLen < 0.05f)
+                {
+                    ray = GetCarryReferenceForward() * 0.05f;
+                    rayLen = 0.05f;
+                }
 
-            _carryRayLocalDir = carryRef.InverseTransformDirection(ray / rayLen).normalized;
-            _carryRayDistance = ClampCarryDistance(rayLen);
+                _carryRayLocalDir = carryRef.InverseTransformDirection(ray / rayLen).normalized;
+                _carryRayDistance = ClampCarryDistance(rayLen);
+            }
         }
 
         Vector3 flatCarryFwd = GetCarryReferenceForward();
@@ -1188,8 +1246,11 @@ public class InteractionSystem : MonoBehaviour
 
         _carriedRb.isKinematic = false;
         _carriedRb.useGravity = true;
-        _carriedRb.drag = carryDrag;
-        _carriedRb.angularDrag = carryAngularDrag;
+        
+        bool isHeavy = _carriedWo != null && _carriedWo.isHeavy;
+        _carriedRb.drag = isHeavy ? 0.5f : carryDrag;
+        _carriedRb.angularDrag = isHeavy ? 0.5f : carryAngularDrag;
+        
         _carriedRb.interpolation = RigidbodyInterpolation.Interpolate;
         _carriedRb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
         _carriedRb.velocity = Vector3.zero;
@@ -1197,6 +1258,10 @@ public class InteractionSystem : MonoBehaviour
 
         _carriedWo?.SetCarriedState(true);
         _carriedWo?.TriggerPickUp(gameObject);
+
+        PlayerController pc = GetComponent<PlayerController>();
+        if (pc != null && _carriedWo != null && _carriedWo.isHeavy)
+            pc.SpeedMultiplier = 0.4f;
     }
 
     void Drop()
@@ -1222,6 +1287,10 @@ public class InteractionSystem : MonoBehaviour
         _carriedWo?.SetCarriedState(false);
         _carriedWo?.TriggerDrop(gameObject);
 
+        PlayerController pc = GetComponent<PlayerController>();
+        if (pc != null)
+            pc.SpeedMultiplier = 1f;
+
         _carriedTransform = null;
         _carriedWo = null;
         _carriedRb = null;
@@ -1245,8 +1314,9 @@ public class InteractionSystem : MonoBehaviour
 
     void UpdatePrompt()
     {
-        SetLabel(interactLabel, (_lookedAt != null && _lookedAt.interactable) || _lookedAtFurniture != null);
-        SetLabel(carryLabel, HasCarryCandidate() || _carriedRb != null);
+        SetLabel(carryLabel, _carryCandidateRb != null);
+        SetLabel(interactLabel, _lookedAt != null && _lookedAt.interactable);
+        SetLabel(collectLabel, _carriedWo != null && _carriedWo.collectable);
         SetLabel(collectLabel, _carriedWo != null && _carriedWo.collectable);
     }
 
@@ -1254,6 +1324,22 @@ public class InteractionSystem : MonoBehaviour
     {
         if (label != null)
             label.gameObject.SetActive(active);
+    }
+
+    public GameObject GetLookedAtTarget()
+    {
+        if (_isPlacementMode) return null;
+        if (_lookedAt != null && _lookedAt.interactable)
+            return _lookedAt.gameObject;
+        return null;
+    }
+
+    public GameObject GetCarryTarget()
+    {
+        if (_isPlacementMode) return null;
+        if (_carryCandidateRb != null)
+            return _carryCandidateRb.gameObject;
+        return null;
     }
 
     void ShowInfo(string message)
@@ -1447,7 +1533,13 @@ public class InteractionSystem : MonoBehaviour
                 
                 Vector3 fwd = Vector3.ProjectOnPlane(GetCarryReferenceForward(), bestHit.normal);
                 if (fwd.sqrMagnitude < 0.001f) fwd = GetCarryReferenceForward();
-                _placementRotation = Quaternion.LookRotation(fwd, bestHit.normal) * Quaternion.Euler(0f, _placementRotationOffset, 0f);
+                
+                // Get the base frame from surface normal and forward vector
+                Quaternion surfaceFrame = Quaternion.LookRotation(fwd, bestHit.normal) * Quaternion.Euler(0f, _placementRotationOffset, 0f);
+                
+                // Apply the object's design-time posture (so horizontal cabinets stay horizontal!)
+                Quaternion basePosture = _carriedWo != null ? _carriedWo.defaultPitchRoll : Quaternion.identity;
+                _placementRotation = surfaceFrame * basePosture;
                 
                 _placementGhost.transform.position = _placementPosition;
                 _placementGhost.transform.rotation = _placementRotation;
