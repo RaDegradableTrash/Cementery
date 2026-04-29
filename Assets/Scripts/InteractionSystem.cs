@@ -23,7 +23,7 @@ public class InteractionSystem : MonoBehaviour
 
     [Header("Detection")]
     [SerializeField] private float interactRange = 3f;
-    [SerializeField] private float carryPickUpRange = 2f;
+
     [Min(0f)]
     [SerializeField] private float interactionRayRadius = 0.08f;
     [SerializeField] private LayerMask interactMask = ~0;
@@ -34,9 +34,7 @@ public class InteractionSystem : MonoBehaviour
     [SerializeField] private float carryTurnStrength = 14f;
     [SerializeField] private float carryDrag = 8f;
     [SerializeField] private float carryAngularDrag = 10f;
-    [SerializeField] private float carryOffsetAdaptRate = 10f;
-    [SerializeField] private float carryOffsetFullAdaptError = 0.7f;
-    [SerializeField] private bool autoAdaptCarryDistance = false;
+
     [SerializeField] private float carryScrollStep = 0.2f;
     [Min(0.05f)]
     [SerializeField] private float carryMinDistance = 0.15f;
@@ -68,7 +66,7 @@ public class InteractionSystem : MonoBehaviour
     [SerializeField] private bool openInventoryOnCollect = true;
 
     [Header("Inventory Restore")]
-    [SerializeField] private float inventoryCancelCarrySpawnDistance = 1.15f;
+
 
     [Header("Debug")]
     [SerializeField] private bool visualizeInteractionRay = true;
@@ -89,7 +87,7 @@ public class InteractionSystem : MonoBehaviour
     private Collider[] _playerCols;
     private PhysicMaterial[] _carriedOriginalMaterials;
     private PhysicMaterial _carryNoFrictionMaterial;
-    private CharacterController _playerCc;
+    private CapsuleCollider _playerCol;
 
     private bool _rbWasKinematic;
     private bool _rbHadGravity;
@@ -107,11 +105,6 @@ public class InteractionSystem : MonoBehaviour
 
     private Coroutine _hideInfoCo;
     private Coroutine _hideCarryDistanceLimitCo;
-
-    private GameObject _pendingCollectedRestoreObject;
-    private GameObject _pendingCollectedOriginalObject;
-    private ItemData _pendingInventoryCarryItemData;
-    private bool _attractAimSearched;
 
     [Header("Placement Mode (Tab)")]
     [SerializeField] private LayerMask placementMask = ~0;
@@ -161,32 +154,9 @@ public class InteractionSystem : MonoBehaviour
         };
         _carryNoFrictionMaterial.hideFlags = HideFlags.HideAndDontSave;
 
-        _playerCc = GetComponent<CharacterController>();
+        _playerCol = GetComponent<CapsuleCollider>();
         ResolveAttractAimPointIfNeeded();
-        SyncCarryDistanceLabelStyle();
-        
         InitializePlacementMaterials();
-    }
-
-    void SyncCarryDistanceLabelStyle()
-    {
-        if (carryDistanceLimitLabel == null)
-            return;
-
-        TextMeshProUGUI styleSource = infoLabel != null ? infoLabel : carryLabel;
-        if (styleSource == null)
-            return;
-
-        carryDistanceLimitLabel.font = styleSource.font;
-        carryDistanceLimitLabel.fontSharedMaterial = styleSource.fontSharedMaterial;
-        carryDistanceLimitLabel.fontSize = styleSource.fontSize;
-        carryDistanceLimitLabel.enableAutoSizing = styleSource.enableAutoSizing;
-        carryDistanceLimitLabel.color = styleSource.color;
-        carryDistanceLimitLabel.alignment = styleSource.alignment;
-        carryDistanceLimitLabel.enableWordWrapping = styleSource.enableWordWrapping;
-        carryDistanceLimitLabel.overflowMode = styleSource.overflowMode;
-        carryDistanceLimitLabel.margin = styleSource.margin;
-        carryDistanceLimitLabel.raycastTarget = styleSource.raycastTarget;
     }
 
     void ApplyCarryNoFriction()
@@ -258,31 +228,18 @@ public class InteractionSystem : MonoBehaviour
         
         _carryRayLocalDir = Vector3.Lerp(_carryRayLocalDir, targetDir, Time.fixedDeltaTime * 12f);
 
-        if (autoAdaptCarryDistance)
-            UpdateAdaptiveCarryOffset(Time.fixedDeltaTime);
-        DriveCarry();
+        // Heavy objects: drive via forces in FixedUpdate (physics-based dragging)
+        if (_carriedWo != null && _carriedWo.isHeavy)
+            DriveCarry();
     }
 
-    void UpdateAdaptiveCarryOffset(float dt)
+    void LateUpdate()
     {
-        Transform carryRef = GetCarryReferenceTransform();
-        Vector3 origin = GetCarryReferenceOrigin();
-        Vector3 rayDir = carryRef.TransformDirection(_carryRayLocalDir);
-        if (rayDir.sqrMagnitude < 0.0001f)
-            rayDir = GetCarryReferenceForward();
-        rayDir.Normalize();
-
-        Vector3 targetWorld = origin + rayDir * _carryRayDistance;
-        float targetError = Vector3.Distance(_carriedRb.position, targetWorld);
-
-        // If physics/obstacles make target hard to maintain, relax offset toward actual pose.
-        float pressure = Mathf.Clamp01(targetError / Mathf.Max(0.01f, carryOffsetFullAdaptError));
-        float adaptRate = carryOffsetAdaptRate * (0.25f + pressure * 0.75f);
-        float t = 1f - Mathf.Exp(-adaptRate * Mathf.Max(0.0001f, dt));
-
-        float actualDistanceOnRay = Vector3.Dot(_carriedRb.position - origin, rayDir);
-        actualDistanceOnRay = Mathf.Max(carryMinDistance, actualDistanceOnRay);
-        _carryRayDistance = ClampCarryDistance(Mathf.Lerp(_carryRayDistance, actualDistanceOnRay, t));
+        if (_carriedRb == null) return;
+        // Non-heavy (kinematic) objects: drive position in LateUpdate
+        // so it syncs with the camera transform every render frame.
+        if (_carriedWo == null || !_carriedWo.isHeavy)
+            DriveCarryKinematic();
     }
 
     float ClampCarryDistance(float value)
@@ -306,7 +263,7 @@ public class InteractionSystem : MonoBehaviour
     {
         if (_carriedWo != null && _carriedWo.isHeavy)
         {
-            Transform playerT = _playerCc != null ? _playerCc.transform : transform;
+            Transform playerT = _playerCol != null ? _playerCol.transform : transform;
             Vector3 pPos = playerT.position; pPos.y = 0;
             Vector3 aPos = _carriedRb.transform.TransformPoint(_dragAnchorLocal); aPos.y = 0;
             
@@ -316,45 +273,105 @@ public class InteractionSystem : MonoBehaviour
                 Vector3 pullForceDir = (pPos - aPos).normalized;
                 float stretch = currentDist - _carryRayDistance;
                 
-                // Spring force pulling the anchor point towards the player
-                Vector3 force = pullForceDir * (stretch * carryFollowStrength * 5f);
+                // Soft spring: low constant + clamped max force for gentle, PEAK-like interaction
+                float springForce = Mathf.Min(stretch * 15f, 20f);
+                Vector3 force = pullForceDir * springForce;
                 _carriedRb.AddForceAtPosition(force, _carriedRb.transform.TransformPoint(_dragAnchorLocal), ForceMode.Acceleration);
             }
             
-            // Apply slight horizontal damping to emulate heavy friction and prevent infinite sliding
+            // Strong damping to prevent bouncing and launching
             Vector3 vel = _carriedRb.velocity;
-            vel.x *= 0.95f;
-            vel.z *= 0.95f;
+            vel.x *= 0.85f;
+            vel.z *= 0.85f;
+            // Clamp max horizontal speed to prevent objects/player flying off
+            float hSpeed = new Vector2(vel.x, vel.z).magnitude;
+            if (hSpeed > 3f)
+            {
+                float scale = 3f / hSpeed;
+                vel.x *= scale;
+                vel.z *= scale;
+            }
             _carriedRb.velocity = vel;
-            _carriedRb.angularVelocity *= 0.95f;
-            return; // Skip normal positional/rotational override
+            // Strong angular damping to prevent wild spinning
+            _carriedRb.angularVelocity *= 0.8f;
+            if (_carriedRb.angularVelocity.magnitude > 2f)
+                _carriedRb.angularVelocity = _carriedRb.angularVelocity.normalized * 2f;
+
+            // Manual soft separation: since Unity collision is ignored between
+            // player and carried heavy object, manually prevent overlap.
+            // Uses horizontal-only push to avoid floor clipping.
+            if (_playerCol != null && _carriedCols != null)
+            {
+                Bounds pb = _playerCol.bounds;
+                for (int ci = 0; ci < _carriedCols.Length; ci++)
+                {
+                    Collider cc = _carriedCols[ci];
+                    if (cc == null || !cc.enabled) continue;
+                    if (!pb.Intersects(cc.bounds)) continue;
+
+                    // Horizontal separation direction from object center to player
+                    Vector3 sep = _playerCol.transform.position - cc.bounds.center;
+                    sep.y = 0f;
+                    if (sep.sqrMagnitude < 0.001f)
+                        sep = -_playerCol.transform.forward; // fallback
+                    sep.Normalize();
+
+                    // Apply gentle continuous push to player (acceleration = mass-independent)
+                    Rigidbody playerRb = _playerCol.attachedRigidbody;
+                    if (playerRb != null)
+                        playerRb.AddForce(sep * 25f, ForceMode.Acceleration);
+                }
+            }
+        }
+    }
+
+    void DriveCarryKinematic()
+    {
+        // Use camera as reference for carry target, not the player collider.
+        // playerCol.bounds.center is the physics-step position (50Hz) which causes
+        // visible 50Hz stepping. Camera transform is updated every render frame.
+        Vector3 origin = playerCamera != null ? playerCamera.transform.position : GetCarryReferenceOrigin();
+        Transform carryRef = playerCamera != null ? playerCamera.transform : GetCarryReferenceTransform();
+        
+        Vector3 rayDir = carryRef.TransformDirection(_carryRayLocalDir);
+        if (rayDir.sqrMagnitude < 0.0001f)
+            rayDir = GetCarryReferenceForward();
+        rayDir.Normalize();
+
+        float dist = ClampCarryDistance(_carryRayDistance);
+        Vector3 targetPos = origin + rayDir * dist;
+
+        // Wall avoidance: SphereCast from camera
+        float castRadius = Mathf.Max(0.05f, _carriedRadius * 0.85f);
+        Vector3 castVec = targetPos - origin;
+        float castDist = castVec.magnitude;
+        if (castDist > 0.001f)
+        {
+            Vector3 castDir = castVec / castDist;
+            if (Physics.SphereCast(origin, castRadius, castDir, out RaycastHit hit, castDist, interactMask, QueryTriggerInteraction.Ignore))
+            {
+                if (!IsIgnoredCarryHitCollider(hit.collider))
+                {
+                    float safeDist = Mathf.Max(0.15f, hit.distance - castRadius - 0.03f);
+                    targetPos = origin + castDir * safeDist;
+                }
+            }
         }
 
-        Vector3 targetPos = GetCarryTargetPosition();
-        Vector3 toTarget = targetPos - _carriedRb.position;
-
-        Vector3 desiredVel = toTarget * carryFollowStrength + GetPlayerVelocity();
-        if (desiredVel.magnitude > carryMaxSpeed)
-            desiredVel = desiredVel.normalized * carryMaxSpeed;
-        _carriedRb.velocity = desiredVel;
-
         Quaternion targetRot = GetCarryTargetRotationYawOnly();
-        Quaternion delta = targetRot * Quaternion.Inverse(_carriedRb.rotation);
-        delta.ToAngleAxis(out float angleDeg, out Vector3 axis);
-        if (angleDeg > 180f)
-            angleDeg -= 360f;
 
-        if (axis.sqrMagnitude > 0.0001f)
-            _carriedRb.angularVelocity = axis.normalized * (angleDeg * Mathf.Deg2Rad) * carryTurnStrength;
-        else
-            _carriedRb.angularVelocity = Vector3.zero;
+        // Set directly — zero lag. Camera-synced origin means no interpolation needed.
+        _carriedRb.transform.position = targetPos;
+        _carriedRb.transform.rotation = Quaternion.Slerp(
+            _carriedRb.transform.rotation, targetRot,
+            Mathf.Clamp01(Time.deltaTime * carryTurnStrength));
     }
 
     Vector3 GetCarryTargetPosition()
     {
         if (_carriedWo != null && _carriedWo.isHeavy)
         {
-            Transform playerT = _playerCc != null ? _playerCc.transform : transform;
+            Transform playerT = _playerCol != null ? _playerCol.transform : transform;
             Vector3 pPos = playerT.position;
             Vector3 oPos = _carriedRb.position;
             pPos.y = 0; oPos.y = 0; // 2D projection for pure horizontal trailing
@@ -391,7 +408,28 @@ public class InteractionSystem : MonoBehaviour
             if (!IsIgnoredCarryHitCollider(hit.collider))
             {
                 float safeDist = Mathf.Max(0.15f, hit.distance - castRadius - 0.03f);
-                return origin + dir * safeDist;
+                desired = origin + dir * safeDist;
+            }
+        }
+
+        // Second pass: Linecast from camera to target position.
+        // Only block on wall-like surfaces (not floors, which are naturally between camera and carried object).
+        Vector3 camPos = playerCamera != null ? playerCamera.transform.position : origin;
+        Vector3 toDesired = desired - camPos;
+        float toDesiredDist = toDesired.magnitude;
+        if (toDesiredDist > 0.01f)
+        {
+            if (Physics.Raycast(camPos, toDesired / toDesiredDist, out RaycastHit wallHit, toDesiredDist, interactMask, QueryTriggerInteraction.Ignore))
+            {
+                if (!IsIgnoredCarryHitCollider(wallHit.collider))
+                {
+                    // Only block on wall-like surfaces, not floors/ceilings
+                    float wallDot = Vector3.Dot(wallHit.normal, Vector3.up);
+                    if (Mathf.Abs(wallDot) < 0.5f)
+                    {
+                        desired = wallHit.point + wallHit.normal * (castRadius + 0.05f);
+                    }
+                }
             }
         }
 
@@ -411,6 +449,50 @@ public class InteractionSystem : MonoBehaviour
         float yaw = Mathf.Atan2(fwd.x, fwd.z) * Mathf.Rad2Deg;
         Quaternion yawTarget = Quaternion.Euler(0f, yaw + _carryYawOffset, 0f);
         return yawTarget * _carryPitchRollOffset;
+    }
+
+    /// <summary>
+    /// Compute placement rotation for the current carried object on the given surface.
+    /// Respects isFlippingRestricted_Wall/Ceiling: when true, the object keeps its
+    /// upright (ground) orientation instead of aligning to the surface normal.
+    /// </summary>
+    Quaternion ComputePlacementRotation(Vector3 projectedForward, Vector3 surfaceNormal)
+    {
+        Quaternion basePosture = _carriedWo != null ? _carriedWo.defaultPitchRoll : Quaternion.identity;
+        float upDot = Vector3.Dot(surfaceNormal, Vector3.up);
+
+        // Classify surface: floor (>0.7), ceiling (<-0.7), wall (between)
+        bool isWall = Mathf.Abs(upDot) <= 0.7f;
+        bool isCeiling = upDot < -0.7f;
+
+        bool keepUpright = false;
+        if (_carriedWo != null)
+        {
+            if (isWall && _carriedWo.isFlippingRestricted_Wall) keepUpright = true;
+            if (isCeiling && _carriedWo.isFlippingRestricted_Ceiling) keepUpright = true;
+        }
+
+        if (keepUpright)
+        {
+            // Keep the object's up = world up. Face the object away from the surface.
+            Vector3 outward = -surfaceNormal;
+            outward.y = 0f;
+            if (outward.sqrMagnitude < 0.001f)
+                outward = projectedForward; // pure ceiling/floor edge case
+            outward.Normalize();
+
+            // Apply user rotation offset around world up
+            Quaternion yawOffset = Quaternion.Euler(0f, _placementRotationOffset, 0f);
+            Quaternion uprightFrame = Quaternion.LookRotation(outward, Vector3.up) * yawOffset;
+            return uprightFrame * basePosture;
+        }
+        else
+        {
+            // Default: align object's up with surface normal (poster behavior)
+            Quaternion surfaceFrame = Quaternion.LookRotation(projectedForward, surfaceNormal) 
+                                    * Quaternion.Euler(0f, _placementRotationOffset, 0f);
+            return surfaceFrame * basePosture;
+        }
     }
 
     bool IsIgnoredCarryHitCollider(Collider c)
@@ -450,8 +532,8 @@ public class InteractionSystem : MonoBehaviour
 
     void EnsurePlayerCollidersCached()
     {
-        if (_playerCc == null)
-            _playerCc = GetComponent<CharacterController>();
+        if (_playerCol == null)
+            _playerCol = GetComponent<CapsuleCollider>();
 
         if (_playerCols == null || _playerCols.Length == 0)
             _playerCols = GetComponentsInChildren<Collider>(true);
@@ -463,7 +545,7 @@ public class InteractionSystem : MonoBehaviour
             return 0f;
 
         EnsurePlayerCollidersCached();
-        Vector3 bodyPivot = _playerCc != null ? _playerCc.bounds.center : transform.position;
+        Vector3 bodyPivot = _playerCol != null ? _playerCol.bounds.center : transform.position;
 
         // Shoulder/third-person cameras are offset from the player pivot in multiple axes.
         // Use the full pivot offset so pickup reach matches apparent on-screen distance.
@@ -479,17 +561,15 @@ public class InteractionSystem : MonoBehaviour
 
     void ResolveAttractAimPointIfNeeded()
     {
-        if (_attractAimSearched)
+        if (attractAimPoint != null)
             return;
-
-        _attractAimSearched = true;
 
         if (attractAimPoint != null)
             return;
 
         Transform root = transform;
-        if (_playerCc != null)
-            root = _playerCc.transform.root;
+        if (_playerCol != null)
+            root = _playerCol.transform.root;
 
         attractAimPoint = FindChildByName(root, "Attract");
         if (attractAimPoint == null && playerCamera != null)
@@ -531,14 +611,14 @@ public class InteractionSystem : MonoBehaviour
     Transform GetCarryReferenceTransform()
     {
         EnsurePlayerCollidersCached();
-        return _playerCc != null ? _playerCc.transform : transform;
+        return _playerCol != null ? _playerCol.transform : transform;
     }
 
     Vector3 GetCarryReferenceOrigin()
     {
         EnsurePlayerCollidersCached();
-        if (_playerCc != null)
-            return _playerCc.bounds.center;
+        if (_playerCol != null)
+            return _playerCol.bounds.center;
 
         return transform.position;
     }
@@ -558,7 +638,7 @@ public class InteractionSystem : MonoBehaviour
     {
         EnsurePlayerCollidersCached();
 
-        if (_playerCc != null && c == _playerCc)
+        if (_playerCol != null && c == _playerCol)
             return true;
 
         if (_playerCols == null)
@@ -576,13 +656,13 @@ public class InteractionSystem : MonoBehaviour
         if (_carriedCols == null)
             return;
 
-        if (_playerCc != null)
+        if (_playerCol != null)
         {
             for (int i = 0; i < _carriedCols.Length; i++)
             {
                 Collider cc = _carriedCols[i];
                 if (cc == null) continue;
-                Physics.IgnoreCollision(_playerCc, cc, ignored);
+                Physics.IgnoreCollision(_playerCol, cc, ignored);
             }
         }
 
@@ -591,7 +671,7 @@ public class InteractionSystem : MonoBehaviour
             for (int p = 0; p < _playerCols.Length; p++)
             {
                 Collider pc = _playerCols[p];
-                if (pc == null || pc == _playerCc) continue;
+                if (pc == null || pc == _playerCol) continue;
                 for (int c = 0; c < _carriedCols.Length; c++)
                 {
                     Collider cc = _carriedCols[c];
@@ -615,25 +695,35 @@ public class InteractionSystem : MonoBehaviour
         if (hits == null || hits.Length == 0)
             return false;
 
-        float nearest = float.PositiveInfinity;
+        // When multiple objects are hit, prefer the one most aligned with the exact
+        // screen-center ray (smallest angular deviation), with distance as tiebreaker.
+        float bestScore = float.PositiveInfinity;
         for (int i = 0; i < hits.Length; i++)
         {
             RaycastHit hit = hits[i];
             Collider c = hit.collider;
-            if (c == null)
-                continue;
+            if (c == null) continue;
+            if (IsIgnoredCarryHitCollider(c)) continue;
 
-            if (IsIgnoredCarryHitCollider(c))
-                continue;
+            // Angular deviation: how far the hit point is from the ray center line
+            Vector3 toHit = hit.point - ray.origin;
+            float alongRay = Vector3.Dot(toHit, ray.direction);
+            if (alongRay < 0.001f) alongRay = hit.distance; // Fallback for zero-distance hits
+            Vector3 projected = ray.origin + ray.direction * alongRay;
+            float lateralDist = Vector3.Distance(hit.point, projected);
+            
+            // Score: prioritize center alignment, use distance as secondary factor
+            // lateralDist weighted heavily so centered objects always win
+            float score = lateralDist * 10f + hit.distance * 0.1f;
 
-            if (hit.distance >= nearest)
-                continue;
-
-            nearest = hit.distance;
-            bestHit = hit;
+            if (score < bestScore)
+            {
+                bestScore = score;
+                bestHit = hit;
+            }
         }
 
-        return nearest < float.PositiveInfinity;
+        return bestScore < float.PositiveInfinity;
     }
 
     void DebugDrawInteractionRay(Ray ray, float range)
@@ -944,7 +1034,6 @@ public class InteractionSystem : MonoBehaviour
         InventoryCameraController camCtrl = GetInventoryCameraController();
         if (openInventoryOnCollect && camCtrl != null)
         {
-            CacheCollectedObjectForRestore(obj);
             camCtrl.EnterInventoryMode(obj.collectItemData);
         }
 
@@ -952,198 +1041,12 @@ public class InteractionSystem : MonoBehaviour
         obj.PlayCollectAnim(() => Destroy(obj.gameObject));
     }
 
-    void CacheCollectedObjectForRestore(WorldObject source)
-    {
-        ClearPendingCollectedRestoreObject();
-
-        if (source == null)
-            return;
-
-        _pendingCollectedOriginalObject = source.gameObject;
-        _pendingCollectedRestoreObject = Instantiate(source.gameObject);
-        _pendingCollectedRestoreObject.name = source.gameObject.name + "_RestoreCarry";
-        _pendingCollectedRestoreObject.SetActive(false);
-    }
-
-    public void CommitPendingCollectedObject()
-    {
-        ClearPendingCollectedRestoreObject();
-    }
-
-    public void SetPendingInventoryCarryItem(ItemData itemData)
-    {
-        _pendingInventoryCarryItemData = itemData;
-    }
-
-    public bool HasPendingCollectedObject()
-    {
-        return _pendingCollectedRestoreObject != null || _pendingInventoryCarryItemData != null;
-    }
-
-    public bool HasCarriedObject()
-    {
-        return _carriedRb != null;
-    }
+    public bool HasCarriedObject() => _carriedRb != null;
 
     public void DropCarriedObjectIfAny()
     {
         if (_carriedRb != null)
             Drop();
-    }
-
-    public void EjectInventoryTempItems(List<InventoryRaycastPlacer.TempItem> items)
-    {
-        if (playerCamera == null) return;
-
-        foreach (var ti in items)
-        {
-            if (ti.itemData != null && ti.itemData.worldPrefab != null)
-            {
-                Vector3 spawnPos = playerCamera.transform.position + playerCamera.transform.forward * 1.5f;
-                GameObject spawned = Instantiate(ti.itemData.worldPrefab, spawnPos, ti.rotation);
-                Rigidbody rb = spawned.GetComponent<Rigidbody>();
-                if (rb != null)
-                {
-                    Vector3 randomDir = (playerCamera.transform.forward + Random.insideUnitSphere * 0.5f).normalized;
-                    rb.AddForce(randomDir * 5f, ForceMode.Impulse);
-                }
-            }
-            if (ti.transform != null)
-            {
-                Destroy(ti.transform.gameObject);
-            }
-        }
-    }
-
-    public bool RestorePendingCollectedObjectToCarry()
-    {
-        if (_pendingCollectedRestoreObject == null && _pendingInventoryCarryItemData == null)
-            return false;
-
-        GameObject restoreObject = null;
-        if (_pendingCollectedRestoreObject != null)
-        {
-            if (_pendingCollectedOriginalObject != null)
-            {
-                Destroy(_pendingCollectedOriginalObject);
-                _pendingCollectedOriginalObject = null;
-            }
-
-            restoreObject = _pendingCollectedRestoreObject;
-            _pendingCollectedRestoreObject = null;
-        }
-        else
-        {
-            restoreObject = CreateCarryObjectFromItemData(_pendingInventoryCarryItemData);
-            _pendingInventoryCarryItemData = null;
-        }
-
-        if (restoreObject == null)
-            return false;
-
-        restoreObject.SetActive(true);
-        EnableAllColliders(restoreObject, true);
-
-        WorldObject wo = restoreObject.GetComponentInChildren<WorldObject>(true);
-        if (wo != null)
-        {
-            wo.enabled = true;
-            wo.CancelAnims();
-            wo.SetCarriedState(false);
-        }
-        else
-        {
-            wo = restoreObject.AddComponent<WorldObject>();
-            wo.carryable = true;
-        }
-
-        if (!wo.carryable)
-            wo.carryable = true;
-
-        Rigidbody rb = restoreObject.GetComponentInChildren<Rigidbody>(true);
-        if (rb == null)
-            rb = restoreObject.AddComponent<Rigidbody>();
-
-        Collider[] existingColliders = restoreObject.GetComponentsInChildren<Collider>(true);
-        if (existingColliders == null || existingColliders.Length == 0)
-            restoreObject.AddComponent<BoxCollider>();
-
-        rb.detectCollisions = true;
-        rb.isKinematic = false;
-        rb.useGravity = true;
-        rb.velocity = Vector3.zero;
-        rb.angularVelocity = Vector3.zero;
-
-        Transform carryRef = GetCarryReferenceTransform();
-        Vector3 localSpawnOffset;
-        if (useUnifiedCarryAnchor)
-        {
-            localSpawnOffset = GetUnifiedCarryAnchorLocalOffset();
-        }
-        else
-        {
-            float spawnDistance = Mathf.Clamp(inventoryCancelCarrySpawnDistance, 0.75f, Mathf.Max(0.75f, carryPickUpRange - 0.05f));
-            localSpawnOffset = Vector3.forward * spawnDistance;
-        }
-
-        Vector3 spawnPos = GetCarryReferenceOrigin() + carryRef.TransformDirection(localSpawnOffset);
-        restoreObject.transform.position = spawnPos;
-
-        Vector3 flatForward = GetCarryReferenceForward();
-        if (flatForward.sqrMagnitude > 0.0001f)
-            restoreObject.transform.rotation = Quaternion.LookRotation(flatForward.normalized, Vector3.up);
-
-        PickUp(rb, wo);
-        bool restored = _carriedRb != null;
-        if (!restored && restoreObject != null)
-            Destroy(restoreObject);
-
-        return restored;
-    }
-
-    void ClearPendingCollectedRestoreObject()
-    {
-        if (_pendingCollectedRestoreObject != null)
-            Destroy(_pendingCollectedRestoreObject);
-
-        if (_pendingCollectedOriginalObject != null)
-            Destroy(_pendingCollectedOriginalObject);
-
-        _pendingCollectedRestoreObject = null;
-        _pendingCollectedOriginalObject = null;
-        _pendingInventoryCarryItemData = null;
-    }
-
-    GameObject CreateCarryObjectFromItemData(ItemData itemData)
-    {
-        if (itemData == null)
-            return null;
-
-        GameObject go = itemData.previewPrefab != null
-            ? Instantiate(itemData.previewPrefab)
-            : GameObject.CreatePrimitive(PrimitiveType.Cube);
-
-        if (go == null)
-            return null;
-
-        go.name = string.IsNullOrEmpty(itemData.itemName)
-            ? itemData.name + "_Carry"
-            : itemData.itemName + "_Carry";
-
-        return go;
-    }
-
-    void EnableAllColliders(GameObject go, bool enabled)
-    {
-        if (go == null)
-            return;
-
-        Collider[] cols = go.GetComponentsInChildren<Collider>(true);
-        for (int i = 0; i < cols.Length; i++)
-        {
-            if (cols[i] != null)
-                cols[i].enabled = enabled;
-        }
     }
 
     InventoryCameraController GetInventoryCameraController()
@@ -1197,7 +1100,7 @@ public class InteractionSystem : MonoBehaviour
         _carriedRadius = ComputeCarriedRadius();
         ApplyCarryNoFriction();
 
-        Transform playerT = _playerCc != null ? _playerCc.transform : transform;
+        Transform playerT = _playerCol != null ? _playerCol.transform : transform;
         if (_carriedWo != null && _carriedWo.isHeavy)
         {
             // Set drag anchor to the closest point on bounds and compute initial leash length
@@ -1242,19 +1145,34 @@ public class InteractionSystem : MonoBehaviour
         Quaternion objYawOnly = Quaternion.Euler(0f, objYaw, 0f);
         _carryPitchRollOffset = Quaternion.Inverse(objYawOnly) * _carriedRb.rotation;
 
+        // Ignore player-object collisions for all carried objects.
+        // Unity's solver can't handle overlapping carried geometry reliably
+        // (causes physics explosions when jumping/tilting). Manual soft separation
+        // handles heavy-object blocking instead.
+        bool isHeavy = _carriedWo != null && _carriedWo.isHeavy;
         SetCarryPlayerCollisionIgnored(true);
 
-        _carriedRb.isKinematic = false;
-        _carriedRb.useGravity = true;
-        
-        bool isHeavy = _carriedWo != null && _carriedWo.isHeavy;
-        _carriedRb.drag = isHeavy ? 0.5f : carryDrag;
-        _carriedRb.angularDrag = isHeavy ? 0.5f : carryAngularDrag;
-        
-        _carriedRb.interpolation = RigidbodyInterpolation.Interpolate;
-        _carriedRb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+        // Clear velocity BEFORE going kinematic to avoid Unity warnings
         _carriedRb.velocity = Vector3.zero;
         _carriedRb.angularVelocity = Vector3.zero;
+        // Non-heavy objects: kinematic during carry → zero physics jitter against walls.
+        // Heavy objects: stay dynamic for dragging physics.
+        _carriedRb.isKinematic = !isHeavy;
+        _carriedRb.useGravity = isHeavy;
+        _carriedRb.drag = isHeavy ? 0.5f : 0f;
+        _carriedRb.angularDrag = isHeavy ? 0.5f : 0.05f;
+        
+        _carriedRb.interpolation = RigidbodyInterpolation.Interpolate;
+        if (!isHeavy)
+        {
+            _carriedRb.collisionDetectionMode = CollisionDetectionMode.Discrete;
+            // Disable colliders during kinematic carry to prevent pushing player/objects through floor
+            SetCarriedCollidersEnabled(false);
+        }
+        else
+        {
+            _carriedRb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+        }
 
         _carriedWo?.SetCarriedState(true);
         _carriedWo?.TriggerPickUp(gameObject);
@@ -1276,6 +1194,9 @@ public class InteractionSystem : MonoBehaviour
             SetCarryPlayerCollisionIgnored(false);
 
         RestoreCarryFriction();
+
+        // Re-enable colliders before restoring physics
+        SetCarriedCollidersEnabled(true);
 
         _carriedRb.isKinematic = _rbWasKinematic;
         _carriedRb.useGravity = _rbHadGravity;
@@ -1303,10 +1224,20 @@ public class InteractionSystem : MonoBehaviour
         _carriedRadius = 0f;
     }
 
+    void SetCarriedCollidersEnabled(bool enabled)
+    {
+        if (_carriedCols == null) return;
+        for (int i = 0; i < _carriedCols.Length; i++)
+        {
+            if (_carriedCols[i] != null)
+                _carriedCols[i].enabled = enabled;
+        }
+    }
+
     Vector3 GetPlayerVelocity()
     {
-        if (_playerCc != null)
-            return _playerCc.velocity;
+        if (_playerCol != null)
+            return _playerCol.GetComponent<Rigidbody>().velocity;
 
         Rigidbody rb = GetComponent<Rigidbody>();
         return rb != null ? rb.velocity : Vector3.zero;
@@ -1360,8 +1291,6 @@ public class InteractionSystem : MonoBehaviour
         if (carryDistanceLimitLabel == null || string.IsNullOrEmpty(message))
             return;
 
-        SyncCarryDistanceLabelStyle();
-
         if (_hideCarryDistanceLimitCo != null)
             StopCoroutine(_hideCarryDistanceLimitCo);
 
@@ -1388,7 +1317,7 @@ public class InteractionSystem : MonoBehaviour
 
     void OnDestroy()
     {
-        ClearPendingCollectedRestoreObject();
+
     }
 
     void InitializePlacementMaterials()
@@ -1469,6 +1398,7 @@ public class InteractionSystem : MonoBehaviour
             }
             else
             {
+                c.enabled = true; // Re-enable in case source had disabled colliders during carry
                 c.isTrigger = true;
                 c.gameObject.layer = 2; // Ignore Raycast layer
             }
@@ -1494,6 +1424,8 @@ public class InteractionSystem : MonoBehaviour
         EnsurePlayerCollidersCached();
         
         RaycastHit[] hits = Physics.RaycastAll(ray, placementRayRange, placementMask, QueryTriggerInteraction.Ignore);
+        
+        // Find the nearest valid hit (any surface)
         float nearest = float.PositiveInfinity;
         RaycastHit bestHit = default;
         
@@ -1515,10 +1447,28 @@ public class InteractionSystem : MonoBehaviour
             bool isWall = !isFloor && !isCeiling;
 
             bool canPlaceOnSurface = true;
+            if (isFloor && (_carriedWo != null && !_carriedWo.canBePlacedOnFloor))
+                canPlaceOnSurface = false;
             if (isWall && (_carriedWo == null || !_carriedWo.canBePlacedOnWall))
                 canPlaceOnSurface = false;
             if (isCeiling && (_carriedWo == null || !_carriedWo.canBePlacedOnCeiling))
                 canPlaceOnSurface = false;
+
+            // If nearest hit is a non-placeable wall, find the floor at the wall base
+            if (!canPlaceOnSurface && isWall)
+            {
+                Vector3 wallFront = bestHit.point + bestHit.normal * 0.02f;
+                if (Physics.Raycast(wallFront, Vector3.down, out RaycastHit floorAtBase, 10f, placementMask, QueryTriggerInteraction.Ignore))
+                {
+                    float floorDot = Vector3.Dot(floorAtBase.normal, Vector3.up);
+                    bool baseIsFloor = floorDot > 0.7f;
+                    if (baseIsFloor && (_carriedWo == null || _carriedWo.canBePlacedOnFloor))
+                    {
+                        bestHit = floorAtBase;
+                        canPlaceOnSurface = true;
+                    }
+                }
+            }
 
             if (canPlaceOnSurface)
             {
@@ -1534,21 +1484,15 @@ public class InteractionSystem : MonoBehaviour
                 Vector3 fwd = Vector3.ProjectOnPlane(GetCarryReferenceForward(), bestHit.normal);
                 if (fwd.sqrMagnitude < 0.001f) fwd = GetCarryReferenceForward();
                 
-                // Get the base frame from surface normal and forward vector
-                Quaternion surfaceFrame = Quaternion.LookRotation(fwd, bestHit.normal) * Quaternion.Euler(0f, _placementRotationOffset, 0f);
-                
-                // Apply the object's design-time posture (so horizontal cabinets stay horizontal!)
-                Quaternion basePosture = _carriedWo != null ? _carriedWo.defaultPitchRoll : Quaternion.identity;
-                _placementRotation = surfaceFrame * basePosture;
+                _placementRotation = ComputePlacementRotation(fwd, bestHit.normal);
                 
                 _placementGhost.transform.position = _placementPosition;
                 _placementGhost.transform.rotation = _placementRotation;
-                Physics.SyncTransforms(); // 强制刷新物理引擎状态，以便获取准确的包围盒
+                Physics.SyncTransforms();
                 
-                // 通用精确防穿模：利用 ClosestPoint 找到每个碰撞体在法线反方向上的极点（无论旋转角度和墙面朝向）
+                // ── Primary anti-penetration: push ghost out of the placement surface ──
                 float maxPenetration = 0f;
                 bool foundCollider = false;
-                
                 Plane plane = new Plane(bestHit.normal, bestHit.point);
 
                 foreach(Collider c in _placementGhost.GetComponentsInChildren<Collider>())
@@ -1556,7 +1500,6 @@ public class InteractionSystem : MonoBehaviour
                     MeshCollider mc = c as MeshCollider;
                     if (mc != null && !mc.convex)
                     {
-                        // 非凸 MeshCollider 的 ClosestPoint 会失效，降级使用它的 AABB 计算
                         Vector3 center = c.bounds.center;
                         Vector3 extents = c.bounds.extents;
                         Vector3 lowestCorner = center;
@@ -1573,13 +1516,9 @@ public class InteractionSystem : MonoBehaviour
                         continue;
                     }
 
-                    // 取碰撞体中心向墙体内部延伸极远的点
                     Vector3 farPoint = c.bounds.center - bestHit.normal * 1000f;
-                    // 获取碰撞体表面最接近该远点的点，即为最深入墙体的极点
                     Vector3 extremePoint = c.ClosestPoint(farPoint);
-                    
                     float dist = plane.GetDistanceToPoint(extremePoint);
-                    
                     if (dist < 0 && -dist > maxPenetration)
                     {
                         maxPenetration = -dist;
@@ -1594,7 +1533,6 @@ public class InteractionSystem : MonoBehaviour
                 }
                 else if (!foundCollider)
                 {
-                    // 降级方案：如果没有 Collider，则使用 Renderer 的 bounds (AABB)
                     Bounds bounds = new Bounds(_placementGhost.transform.position, Vector3.zero);
                     bool hasRenderer = false;
                     foreach(Renderer r in _placementGhost.GetComponentsInChildren<Renderer>())
@@ -1602,7 +1540,6 @@ public class InteractionSystem : MonoBehaviour
                         if (hasRenderer) bounds.Encapsulate(r.bounds);
                         else { bounds = r.bounds; hasRenderer = true; }
                     }
-
                     if (hasRenderer)
                     {
                         Vector3 center = bounds.center;
@@ -1611,13 +1548,157 @@ public class InteractionSystem : MonoBehaviour
                         lowestCorner.x += bestHit.normal.x < 0 ? extents.x : -extents.x;
                         lowestCorner.y += bestHit.normal.y < 0 ? extents.y : -extents.y;
                         lowestCorner.z += bestHit.normal.z < 0 ? extents.z : -extents.z;
-
                         float dist = plane.GetDistanceToPoint(lowestCorner);
                         if (dist < 0)
                         {
                             _placementPosition += bestHit.normal * (-dist + 0.01f);
                             _placementGhost.transform.position = _placementPosition;
                         }
+                    }
+                }
+                
+                // ── Fix 1: Occlusion check — clamp ghost to wall base if occluded ──
+                Physics.SyncTransforms();
+                Vector3 ghostCenter = _placementPosition + bestHit.normal * 0.05f;
+                Vector3 toGhost = ghostCenter - ray.origin;
+                float toGhostDist = toGhost.magnitude;
+                if (toGhostDist > 0.01f)
+                {
+                    RaycastHit[] occlusionHits = Physics.RaycastAll(ray.origin, toGhost / toGhostDist, toGhostDist, placementMask, QueryTriggerInteraction.Ignore);
+                    RaycastHit occWallHit = default;
+                    bool occluded = false;
+                    for (int i = 0; i < occlusionHits.Length; i++)
+                    {
+                        if (IsIgnoredCarryHitCollider(occlusionHits[i].collider)) continue;
+                        if (occlusionHits[i].collider == bestHit.collider) continue;
+                        float occDot = Vector3.Dot(occlusionHits[i].normal, Vector3.up);
+                        bool occIsWall = Mathf.Abs(occDot) < 0.7f;
+                        if (occIsWall)
+                        {
+                            occWallHit = occlusionHits[i];
+                            occluded = true;
+                            break;
+                        }
+                    }
+                    if (occluded)
+                    {
+                        // Clamp ghost to the floor at the wall base instead of hiding
+                        Vector3 wallFront = occWallHit.point + occWallHit.normal * 0.02f;
+                        if (Physics.Raycast(wallFront, Vector3.down, out RaycastHit cornerFloor, 10f, placementMask, QueryTriggerInteraction.Ignore))
+                        {
+                            float fDot = Vector3.Dot(cornerFloor.normal, Vector3.up);
+                            if (fDot > 0.7f && (_carriedWo == null || _carriedWo.canBePlacedOnFloor))
+                            {
+                                _placementPosition = cornerFloor.point;
+                                _placementSurfaceNormal = cornerFloor.normal;
+                                bestHit = cornerFloor;
+                                
+                                Vector3 fwd2 = Vector3.ProjectOnPlane(GetCarryReferenceForward(), cornerFloor.normal);
+                                if (fwd2.sqrMagnitude < 0.001f) fwd2 = GetCarryReferenceForward();
+                                _placementRotation = ComputePlacementRotation(fwd2, cornerFloor.normal);
+                                
+                                _placementGhost.transform.position = _placementPosition;
+                                _placementGhost.transform.rotation = _placementRotation;
+                                Physics.SyncTransforms();
+                                
+                                // Re-run primary anti-penetration for the new floor surface
+                                Plane floorPlane = new Plane(cornerFloor.normal, cornerFloor.point);
+                                float floorPen = 0f;
+                                foreach(Collider c in _placementGhost.GetComponentsInChildren<Collider>())
+                                {
+                                    Vector3 fp = c.bounds.center - cornerFloor.normal * 1000f;
+                                    Vector3 ep = c.ClosestPoint(fp);
+                                    float dd = floorPlane.GetDistanceToPoint(ep);
+                                    if (dd < 0 && -dd > floorPen) floorPen = -dd;
+                                }
+                                if (floorPen > 0f)
+                                {
+                                    _placementPosition += cornerFloor.normal * (floorPen + 0.01f);
+                                    _placementGhost.transform.position = _placementPosition;
+                                }
+                            }
+                            else
+                            {
+                                _placementGhost.SetActive(false);
+                                _isPlacementValid = false;
+                                return;
+                            }
+                        }
+                        else
+                        {
+                            _placementGhost.SetActive(false);
+                            _isPlacementValid = false;
+                            return;
+                        }
+                    }
+                }
+                
+                // ── Fix 3: Corner anti-clip — raycast from center to all 8 AABB corners ──
+                // If a ray from center to corner hits a non-placement surface,
+                // the corner extends past that surface. Push ghost out along hit normal.
+                // This handles walls at ANY angle, not just cardinal directions.
+                Bounds ghostBounds = new Bounds(_placementGhost.transform.position, Vector3.zero);
+                bool hasBounds = false;
+                foreach(Renderer r in _placementGhost.GetComponentsInChildren<Renderer>())
+                {
+                    if (hasBounds) ghostBounds.Encapsulate(r.bounds);
+                    else { ghostBounds = r.bounds; hasBounds = true; }
+                }
+                
+                if (hasBounds)
+                {
+                    // Run up to 3 iterations to resolve multi-surface corners
+                    for (int iteration = 0; iteration < 3; iteration++)
+                    {
+                        Vector3 gc = ghostBounds.center;
+                        Vector3 ge = ghostBounds.extents;
+                        
+                        Vector3[] corners = {
+                            gc + new Vector3(-ge.x, -ge.y, -ge.z),
+                            gc + new Vector3( ge.x, -ge.y, -ge.z),
+                            gc + new Vector3(-ge.x,  ge.y, -ge.z),
+                            gc + new Vector3( ge.x,  ge.y, -ge.z),
+                            gc + new Vector3(-ge.x, -ge.y,  ge.z),
+                            gc + new Vector3( ge.x, -ge.y,  ge.z),
+                            gc + new Vector3(-ge.x,  ge.y,  ge.z),
+                            gc + new Vector3( ge.x,  ge.y,  ge.z)
+                        };
+                        
+                        float worstPen = 0f;
+                        Vector3 worstNormal = Vector3.zero;
+                        
+                        for (int ci = 0; ci < corners.Length; ci++)
+                        {
+                            Vector3 dir = corners[ci] - gc;
+                            float dist = dir.magnitude;
+                            if (dist < 0.001f) continue;
+                            dir /= dist;
+                            
+                            if (Physics.Raycast(gc, dir, out RaycastHit cHit, dist, placementMask, QueryTriggerInteraction.Ignore))
+                            {
+                                if (cHit.collider == bestHit.collider) continue;
+                                if (cHit.collider.transform.IsChildOf(_placementGhost.transform)) continue;
+                                if (IsIgnoredCarryHitCollider(cHit.collider)) continue;
+                                
+                                float pen = dist - cHit.distance;
+                                if (pen > worstPen)
+                                {
+                                    worstPen = pen;
+                                    worstNormal = cHit.normal;
+                                }
+                            }
+                        }
+                        
+                        if (worstPen < 0.001f) break; // No penetration found, done
+                        
+                        _placementPosition += worstNormal * (worstPen + 0.01f);
+                        _placementGhost.transform.position = _placementPosition;
+                        Physics.SyncTransforms();
+                        
+                        // Recompute bounds for next iteration
+                        ghostBounds = new Bounds(_placementGhost.transform.position, Vector3.zero);
+                        foreach(Renderer r in _placementGhost.GetComponentsInChildren<Renderer>())
+                            ghostBounds.Encapsulate(r.bounds);
                     }
                 }
                 

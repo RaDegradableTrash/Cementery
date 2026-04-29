@@ -1,10 +1,11 @@
 using UnityEngine;
 
 /// <summary>
-/// First-person player controller. Requires a CharacterController component.
+/// First-person player controller. Requires a Rigidbody and CapsuleCollider component.
 /// Supports: WASD movement, sprinting (Left Shift), jump force, physics-gravity falling, head bobbing.
 /// </summary>
-[RequireComponent(typeof(CharacterController))]
+[RequireComponent(typeof(Rigidbody))]
+[RequireComponent(typeof(CapsuleCollider))]
 public class PlayerController : MonoBehaviour
 {
     [Header("Movement")]
@@ -24,6 +25,8 @@ public class PlayerController : MonoBehaviour
     [Header("Jump & Fall")]
     [Tooltip("Initial upward velocity applied when jumping.")]
     public float jumpForce = 7f;
+    [Tooltip("Maximum number of jumps allowed before touching ground (e.g., 2 for double jump).")]
+    public int maxJumps = 2;
 
     [Header("Head Bob")]
     [SerializeField] private float bobFrequency = 1.8f;
@@ -55,43 +58,60 @@ public class PlayerController : MonoBehaviour
     private bool _canClimbThisJump = true;
 
     // ── Internal State ──────────────────────────────────────────────────────
-    private CharacterController _cc;
+    private Rigidbody _rb;
+    private CapsuleCollider _col;
     private PlayerStamina _stamina;
     private Collider[] _selfColliders;
 
     private const float JumpBufferTime = 0.12f;
     private const float CoyoteTime = 0.08f;
 
-    private float _verticalVelocity;
     private float _bobTimer;
     private bool _isGrounded;
     private float _jumpBufferedUntil;
     private float _groundedUntil;
 
+    private Vector2 _inputMove;
+    private int _jumpCount;
+    private Rigidbody _activePlatform;
+    private Vector3 _lastPlatformPos;
+
+    [Header("Ground Check Settings")]
+    public float groundCheckOffset = 0.15f;
+    public float groundCheckRadius = 0.3f;
+    public LayerMask groundMask = ~0;
+    public int groundCheckInterval = 2;
+    private int _groundCheckFrameCounter;
+
     // ── Lifecycle ────────────────────────────────────────────────────────────
     void Awake()
     {
-        _cc      = GetComponent<CharacterController>();
+        _rb = GetComponent<Rigidbody>();
+        _col = GetComponent<CapsuleCollider>();
         _stamina = GetComponent<PlayerStamina>();
         _selfColliders = GetComponentsInChildren<Collider>(true);
 
-        // Avoid losing grounded flags on tiny frame displacements when standing still.
-        _cc.minMoveDistance = 0f;
+        _rb.freezeRotation = true;
+        _rb.useGravity = true;
+        _rb.interpolation = RigidbodyInterpolation.Interpolate;
+        _rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
 
-        // CharacterController should not collide with colliders in its own hierarchy.
+        // Apply zero-friction material to prevent sticking to walls
+        PhysicMaterial pm = new PhysicMaterial("PlayerMaterial") { dynamicFriction = 0f, staticFriction = 0f, frictionCombine = PhysicMaterialCombine.Minimum };
+        _col.material = pm;
+
+        // Player should not collide with colliders in its own hierarchy.
         for (int i = 0; i < _selfColliders.Length; i++)
         {
             Collider c = _selfColliders[i];
-            if (c == null || c == _cc)
+            if (c == null || c == _col)
                 continue;
 
-            Physics.IgnoreCollision(_cc, c, true);
+            Physics.IgnoreCollision(_col, c, true);
         }
 
         if (inventoryCameraController == null)
             inventoryCameraController = InventoryCameraController.GetPrimaryController();
-        if (inventoryCameraController == null)
-            inventoryCameraController = FindObjectOfType<InventoryCameraController>();
 
         if (mouseLook == null && Camera.main != null)
             mouseLook = Camera.main.GetComponent<MouseLook>();
@@ -101,44 +121,60 @@ public class PlayerController : MonoBehaviour
     {
         if (IsInventoryModeActive())
         {
-            _verticalVelocity = 0f;
+            _inputMove = Vector2.zero;
             _jumpBufferedUntil = 0f;
-            _groundedUntil = 0f;
             _stamina?.Recover();
             BobOffset = Vector3.Lerp(BobOffset, Vector3.zero, Time.deltaTime * 12f);
             return;
         }
 
-        _isGrounded = _cc.isGrounded;
+        _groundCheckFrameCounter++;
+        if (_groundCheckFrameCounter >= groundCheckInterval)
+        {
+            _groundCheckFrameCounter = 0;
+            CheckGrounded();
+        }
+
         if (_isGrounded)
         {
             _groundedUntil = Time.time + CoyoteTime;
             _canClimbThisJump = true;
+            _jumpCount = 0;
+            
+            // Handle moving platforms
+            HandlePlatformMovement();
+        }
+        else
+        {
+            _activePlatform = null;
         }
 
         bool jumpPressed = Input.GetButtonDown("Jump") || Input.GetKeyDown(KeyCode.Space);
         if (jumpPressed)
         {
-            if (!_isGrounded && Time.time - _climbCandidateTime < 0.2f && _climbCandidateCol != null)
-            {
-                if (TryStartClimb())
-                    return;
-            }
             _jumpBufferedUntil = Time.time + JumpBufferTime;
+            
+            // If in air, try to climb immediately (prioritize climb over double jump if facing wall)
+            if (!_isGrounded && TryStartClimb())
+                return;
         }
 
-        Vector3 planarVelocity = HandleMovement();
-        ApplyGravity(planarVelocity);
+        GatherInput();
         HandleHeadBob();
+    }
+
+    void FixedUpdate()
+    {
+        if (IsInventoryModeActive()) return;
+
+        HandleMovement();
+        HandleJump();
     }
 
     bool IsInventoryModeActive()
     {
-        InventoryCameraController primary = InventoryCameraController.GetPrimaryController();
-        if (primary != null)
-            inventoryCameraController = primary;
-        else if (inventoryCameraController == null)
-            inventoryCameraController = FindObjectOfType<InventoryCameraController>();
+        if (inventoryCameraController == null)
+            inventoryCameraController = InventoryCameraController.GetPrimaryController();
 
         return inventoryCameraController != null && inventoryCameraController.IsInventoryActive;
     }
@@ -146,10 +182,11 @@ public class PlayerController : MonoBehaviour
     // ── Movement ─────────────────────────────────────────────────────────────
     public void ResetVelocity()
     {
-        _verticalVelocity = 0f;
+        if (_rb != null)
+            _rb.velocity = new Vector3(0f, _rb.velocity.y, 0f);
     }
 
-    Vector3 HandleMovement()
+    void GatherInput()
     {
         float h = useRawMovementInput ? Input.GetAxisRaw("Horizontal") : Input.GetAxis("Horizontal");
         float v = useRawMovementInput ? Input.GetAxisRaw("Vertical") : Input.GetAxis("Vertical");
@@ -157,9 +194,14 @@ public class PlayerController : MonoBehaviour
         if (Mathf.Abs(h) < movementInputDeadZone) h = 0f;
         if (Mathf.Abs(v) < movementInputDeadZone) v = 0f;
 
+        _inputMove = new Vector2(h, v);
+    }
+
+    void HandleMovement()
+    {
         bool wantsSprint = Input.GetKey(KeyCode.LeftShift);
         bool canSprint   = _stamina == null || _stamina.HasStamina;
-        bool isSprinting = wantsSprint && canSprint && v > 0.1f;
+        bool isSprinting = wantsSprint && canSprint && _inputMove.y > 0.1f;
 
         if (isSprinting)
             _stamina?.Drain();
@@ -168,47 +210,84 @@ public class PlayerController : MonoBehaviour
 
         float speed = (isSprinting ? sprintSpeed : walkSpeed) * SpeedMultiplier;
 
-        Vector3 move = transform.right * h + transform.forward * v;
-        if (move.sqrMagnitude > 1f)
-            move.Normalize();
+        Vector3 moveDir = transform.right * _inputMove.x + transform.forward * _inputMove.y;
+        if (moveDir.sqrMagnitude > 1f)
+            moveDir.Normalize();
 
-        return move * speed;
+        Vector3 targetVelocity = moveDir * speed;
+        
+        // Preserve vertical velocity (gravity/jumping)
+        _rb.velocity = new Vector3(targetVelocity.x, _rb.velocity.y, targetVelocity.z);
     }
 
-    // ── Gravity ───────────────────────────────────────────────────────────────
-    void ApplyGravity(Vector3 planarVelocity)
+    // ── Jump & Gravity ───────────────────────────────────────────────────────
+    void CheckGrounded()
     {
-        if (_isGrounded && _verticalVelocity < 0f)
-            _verticalVelocity = 0f;
+        // Raycast from slightly inside the capsule bottom straight down.
+        // Raycast is immune to the SphereCast "initial overlap" bug.
+        Vector3 origin = transform.position + _col.center - Vector3.up * (_col.height * 0.5f - 0.05f);
+        float castDist = 0.15f + groundCheckRadius;
 
-        bool hasBufferedJump = Time.time <= _jumpBufferedUntil;
-        bool canUseGroundedJump = Time.time <= _groundedUntil;
-        if (hasBufferedJump && canUseGroundedJump)
+        if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, castDist, groundMask, QueryTriggerInteraction.Ignore))
         {
-            _verticalVelocity = jumpForce;
+            _isGrounded = true;
+            // Only kinematic rigidbodies are real moving platforms.
+            // Dynamic objects (cabinets, physics props) must NOT be treated as platforms
+            // — their movement would directly teleport the player via HandlePlatformMovement.
+            _activePlatform = (hit.rigidbody != null && hit.rigidbody.isKinematic) ? hit.rigidbody : null;
+        }
+        else
+        {
             _isGrounded = false;
-            _jumpBufferedUntil = 0f;
-            _groundedUntil = 0f;
+            _activePlatform = null;
         }
+    }
 
-        _verticalVelocity += Physics.gravity.y * Time.deltaTime;
-        Vector3 frameVelocity = planarVelocity + Vector3.up * _verticalVelocity;
-        CollisionFlags flags = _cc.Move(frameVelocity * Time.deltaTime);
-        _isGrounded = ((flags & CollisionFlags.Below) != 0) || _cc.isGrounded;
-        if (_isGrounded)
+    void HandlePlatformMovement()
+    {
+        if (_activePlatform == null) return;
+        
+        // If the platform moved, nudge the player by the same amount to prevent slipping/clipping
+        Vector3 platformDelta = _activePlatform.position - _lastPlatformPos;
+        if (platformDelta.sqrMagnitude > 0.0001f && platformDelta.sqrMagnitude < 100f)
         {
-            _groundedUntil = Time.time + CoyoteTime;
-            _canClimbThisJump = true;
+            _rb.position += platformDelta;
         }
+        _lastPlatformPos = _activePlatform.position;
+    }
 
-        if (_isGrounded && _verticalVelocity < 0f)
-            _verticalVelocity = 0f;
+    void HandleJump()
+    {
+        if (Time.time > _jumpBufferedUntil) return;
+
+        bool canNormalJump = Time.time <= _groundedUntil && _jumpCount == 0;
+        bool canDoubleJump = _jumpCount > 0 && _jumpCount < maxJumps;
+        
+        // Initial jump from ground/coyote
+        if (canNormalJump)
+        {
+            ExecuteJump();
+        }
+        // Double jump in mid-air
+        else if (canDoubleJump)
+        {
+            ExecuteJump();
+        }
+    }
+
+    private void ExecuteJump()
+    {
+        _rb.velocity = new Vector3(_rb.velocity.x, jumpForce, _rb.velocity.z);
+        _isGrounded = false;
+        _jumpCount++;
+        _jumpBufferedUntil = 0f;
+        _groundedUntil = 0f;
     }
 
     // ── Head Bob ─────────────────────────────────────────────────────────────
     void HandleHeadBob()
     {
-        bool isMoving = new Vector3(_cc.velocity.x, 0f, _cc.velocity.z).sqrMagnitude > 0.04f && _isGrounded;
+        bool isMoving = new Vector3(_rb.velocity.x, 0f, _rb.velocity.z).sqrMagnitude > 0.04f && _isGrounded;
 
         if (isMoving)
         {
@@ -229,49 +308,52 @@ public class PlayerController : MonoBehaviour
     {
         if (!_canClimbThisJump) return false;
 
-        Vector3 headPos = new Vector3(transform.position.x, _cc.bounds.max.y - 0.2f, transform.position.z);
+        Vector3 headPos = new Vector3(transform.position.x, _col.bounds.max.y - 0.2f, transform.position.z);
         Vector3 castDir = transform.forward;
-        float castDist = _cc.radius + 0.8f;
+        float castDist = _col.radius + 0.8f;
 
         bool isFacingWall = Physics.Raycast(headPos, castDir, out RaycastHit wallHit, castDist, climbObstacleMask, QueryTriggerInteraction.Ignore);
+        
+        Collider targetCol = isFacingWall ? wallHit.collider : _climbCandidateCol;
+        Vector3 hitPoint = isFacingWall ? wallHit.point : transform.position + castDir * _col.radius;
 
-        // If we are facing a wall or recently bumped into one
-        if (isFacingWall || (Time.time - _climbCandidateTime < 0.2f && _climbCandidateCol != null))
+        // Fallback: If raycast from head misses (short wall), try a spherecast from center
+        if (targetCol == null || !isFacingWall)
         {
-            float targetHeightY = transform.position.y + climbMaxHeight * 0.5f; // Fallback height
+            Vector3 center = transform.position + _col.center;
+            if (Physics.SphereCast(center, _col.radius * 0.9f, castDir, out RaycastHit sphereHit, 0.8f, climbObstacleMask, QueryTriggerInteraction.Ignore))
+            {
+                targetCol = sphereHit.collider;
+                hitPoint = sphereHit.point;
+                isFacingWall = true;
+            }
+        }
 
-            // Determine which object we are climbing
-            Collider targetCol = isFacingWall ? wallHit.collider : _climbCandidateCol;
-            Vector3 hitPoint = isFacingWall ? wallHit.point : transform.position + castDir * _cc.radius;
+        if (targetCol != null && (isFacingWall || Time.time - _climbCandidateTime < 0.2f))
+        {
+            float targetHeightY = transform.position.y + climbMaxHeight * 0.5f;
 
-            // Try to find the exact top of the ledge by casting down from above
             Vector3 topCastOrigin = hitPoint + castDir * 0.3f + Vector3.up * climbMaxHeight;
             if (Physics.Raycast(topCastOrigin, Vector3.down, out RaycastHit topHit, climbMaxHeight * 2f, climbObstacleMask, QueryTriggerInteraction.Ignore))
             {
                 targetHeightY = topHit.point.y;
             }
-            // Fallback: use the bounding box's max Y if downward raycast misses (e.g. thin walls)
             else if (targetCol != null)
             {
                 targetHeightY = targetCol.bounds.max.y;
             }
 
-            // Calculate how much height we need to clear the ledge with our feet
-            float neededHeight = (targetHeightY - _cc.bounds.min.y) + 0.2f; // 0.2f extra clearance
-            
-            // Clamp the needed height so we don't shoot into the stratosphere or do a tiny hop
+            float neededHeight = (targetHeightY - _col.bounds.min.y) + 0.2f;
             neededHeight = Mathf.Clamp(neededHeight, 1.5f, climbMaxHeight);
 
-            // Calculate required vertical velocity (v = sqrt(2*g*h))
             float requiredVelocity = Mathf.Sqrt(2f * Mathf.Abs(Physics.gravity.y) * neededHeight);
             
-            // Ensure the climb boost is at least slightly stronger than a standard jump
-            _verticalVelocity = Mathf.Max(requiredVelocity, jumpForce * 1.1f);
+            _rb.velocity = new Vector3(_rb.velocity.x, Mathf.Max(requiredVelocity, jumpForce * 1.1f), _rb.velocity.z);
 
             _isGrounded = false;
             _jumpBufferedUntil = 0f;
             _groundedUntil = 0f;
-            _canClimbThisJump = false; // Only allow one climb boost per jump
+            _canClimbThisJump = false;
 
             if (mouseLook != null)
                 mouseLook.TriggerClimbShake();
@@ -282,37 +364,91 @@ public class PlayerController : MonoBehaviour
         return false;
     }
 
-        // ── Pushing ───────────────────────────────────────────────────────────────
-    void OnControllerColliderHit(ControllerColliderHit hit)
+    // ── Pushing ───────────────────────────────────────────────────────────────
+    void OnCollisionStay(Collision collision)
     {
-        if (!_isGrounded && hit.normal.y < 0.1f)
+        HandleCrushEscape(collision);
+        if (!_isGrounded)
         {
-            _climbCandidateCol = hit.collider;
-            _climbCandidateTime = Time.time;
+            foreach (ContactPoint contact in collision.contacts)
+            {
+                if (contact.normal.y < 0.1f)
+                {
+                    _climbCandidateCol = contact.otherCollider;
+                    _climbCandidateTime = Time.time;
+                    break;
+                }
+            }
         }
 
-        Rigidbody rb = hit.collider.attachedRigidbody;
-        if (rb == null || rb.isKinematic) return;
+        Rigidbody otherRb = collision.rigidbody;
+        if (otherRb == null || otherRb.isKinematic) return;
 
-        WorldObject wo = hit.collider.GetComponentInParent<WorldObject>();
+        WorldObject wo = collision.gameObject.GetComponentInParent<WorldObject>();
         if (wo == null || !wo.canBePushed) return;
 
-        // Ignore downward hits — standing on top of an object should not push it down.
-        if (hit.moveDirection.y < -0.3f) return;
-
-        // Push horizontally in the direction we are moving into the object.
-        Vector3 pushDir = new Vector3(hit.moveDirection.x, 0f, hit.moveDirection.z);
+        Vector3 pushDir = Vector3.zero;
+        foreach (ContactPoint contact in collision.contacts)
+        {
+            pushDir -= contact.normal;
+        }
+        pushDir.y = 0f;
         if (pushDir.sqrMagnitude < 0.01f) return;
         pushDir.Normalize();
 
-        if (rb.mass <= 0f) return;
+        if (otherRb.mass <= 0f) return;
 
-        float pushSpeed = pushForce / rb.mass;
-        Vector3 currentHorizontal = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
+        float pushSpeed = Mathf.Min(pushForce / otherRb.mass, 3f); // Cap push speed
+        Vector3 currentHorizontal = new Vector3(otherRb.velocity.x, 0f, otherRb.velocity.z);
         Vector3 desiredHorizontal = pushDir * pushSpeed;
         Vector3 nextHorizontal = Vector3.MoveTowards(currentHorizontal, desiredHorizontal, pushSpeed * 0.35f);
 
-        rb.velocity = new Vector3(nextHorizontal.x, rb.velocity.y, nextHorizontal.z);
-        rb.angularVelocity = Vector3.zero;
+        // Clamp downward velocity to prevent collision resolution pushing objects through floor
+        float yVel = Mathf.Max(otherRb.velocity.y, -5f);
+        otherRb.velocity = new Vector3(nextHorizontal.x, yVel, nextHorizontal.z);
+        otherRb.angularVelocity *= 0.9f;
+    }
+
+    // ── Anti-Crush ────────────────────────────────────────────────────────────
+    // Physics-driven gradual escape: when something presses from above while grounded,
+    // apply a continuous lateral acceleration proportional to the crushing pressure.
+    // This creates a natural "squeezed sideways" feel without instant teleportation.
+    void OnCollisionEnter(Collision collision) { HandleCrushEscape(collision); }
+
+    void HandleCrushEscape(Collision collision)
+    {
+        if (!_isGrounded) return;
+
+        Vector3 escapeDir = Vector3.zero;
+        float crushPressure = 0f;
+
+        foreach (ContactPoint contact in collision.contacts)
+        {
+            // Contact normal pointing downward = object pressing from above
+            if (contact.normal.y < -0.3f)
+            {
+                // Pressure intensity from how vertical the contact is (straight down = 1.0)
+                float intensity = Mathf.Abs(contact.normal.y);
+                crushPressure = Mathf.Max(crushPressure, intensity);
+                
+                Vector3 lateral = transform.position - contact.point;
+                lateral.y = 0f;
+                if (lateral.sqrMagnitude > 0.001f)
+                    escapeDir += lateral.normalized * intensity;
+            }
+        }
+
+        if (crushPressure > 0f && escapeDir.sqrMagnitude > 0.001f)
+        {
+            escapeDir.Normalize();
+            // Continuous acceleration, not instant velocity — gradual squeeze-out
+            // 30 m/s² × pressure creates a building lateral movement
+            float escapeAccel = 30f * crushPressure;
+            _rb.AddForce(escapeDir * escapeAccel, ForceMode.Acceleration);
+            
+            // Suppress downward velocity while being crushed to prevent floor penetration
+            if (_rb.velocity.y < 0f)
+                _rb.velocity = new Vector3(_rb.velocity.x, 0f, _rb.velocity.z);
+        }
     }
 }

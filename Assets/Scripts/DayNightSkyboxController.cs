@@ -1,12 +1,9 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-/// <summary>
-/// PBR-friendly day/night lighting controller with built-in fallback and HDRP support.
-/// In HDRP projects it can auto-configure a Physically Based Sky volume override.
+/// PBR-friendly day/night lighting controller for URP.
 /// </summary>
 [DefaultExecutionOrder(-800)]
 public class DayNightSkyboxController : MonoBehaviour
@@ -20,19 +17,7 @@ public class DayNightSkyboxController : MonoBehaviour
     public bool useUnscaledTime = false;
     [Range(0f, 360f)] public float sunAzimuth = 165f;
 
-    [Header("Skybox Source")]
-    [Tooltip("Optional template material. If empty, uses Resources/Skybox/MinecraftDayNightSkybox or current RenderSettings skybox.")]
     public Material skyboxTemplate;
-
-    [Header("HDRP Physically Based Sky")]
-    [Tooltip("When HDRP is active, prefer Physically Based Sky over built-in procedural skybox.")]
-    public bool preferHdrpPhysicallyBasedSky = false;
-    [Tooltip("If no global volume exists, create a runtime global volume/profile for HDRP sky.")]
-    public bool createRuntimeHdrpSkyVolume = true;
-    [Tooltip("Optional global volume used to host VisualEnvironment and PhysicallyBasedSky overrides.")]
-    public Volume hdrpSkyVolume;
-    [Tooltip("Optional profile override. If not assigned, the volume profile is used.")]
-    public VolumeProfile hdrpSkyProfile;
 
     [Header("Sun")]
     public Light sunLight;
@@ -41,10 +26,6 @@ public class DayNightSkyboxController : MonoBehaviour
     public Color daySunColor = new Color(1f, 0.95f, 0.86f, 1f);
     public Color sunriseSunColor = new Color(0.98f, 0.72f, 0.52f, 1f);
     public Color nightSunColor = new Color(0.38f, 0.46f, 0.62f, 1f);
-    [Tooltip("Use physical Lux values for directional light intensity when HDRP sky mode is active.")]
-    public bool useHdrpPhysicalSunIntensity = true;
-    [Min(1000f)] public float hdrpDaySunIntensityLux = 110000f;
-    [Min(0f)] public float hdrpNightSunIntensityLux = 0.35f;
 
     [Header("Sunrise / Sunset Shaping")]
     [Tooltip("Reduce direct sun intensity near the horizon so sunrise/sunset appears as a clearer red disk.")]
@@ -54,30 +35,10 @@ public class DayNightSkyboxController : MonoBehaviour
     [Range(0f, 1f)] public float sunriseRedBoost = 0.35f;
     public Color sunriseRedColor = new Color(1f, 0.36f, 0.2f, 1f);
 
-    [Header("HDRP Godray")]
-    [Tooltip("Drive HDRP volumetric godray strength from current sun intensity.")]
-    public bool enableAutoHdrpGodray = true;
-    [Range(0f, 1f)] public float godrayIntensityThresholdNormalized = 0.62f;
-    public bool forceEnableVolumetricFogForGodray = true;
-    [Tooltip("Disable volumetric fog when godray is effectively inactive to reduce GPU cost.")]
-    public bool disableHdrpVolumetricsWhenGodrayInactive = true;
-    [Range(0f, 1f)] public float godrayVolumetricEnableThreshold = 0.04f;
-    [Range(0f, 16f)] public float godrayVolumetricLightDimmerOn = 1.35f;
-    [Range(0f, 16f)] public float godrayVolumetricLightDimmerOff = 0.2f;
-    [Min(1f)] public float godrayMeanFreePathOn = 90f;
-    [Min(1f)] public float godrayMeanFreePathOff = 420f;
-    [Range(-1f, 1f)] public float godrayAnisotropyOn = 0.78f;
-    [Range(-1f, 1f)] public float godrayAnisotropyOff = 0.05f;
-    [Range(0f, 1f)] public float godrayGlobalProbeDimmerOn = 0.45f;
-    [Range(0f, 1f)] public float godrayGlobalProbeDimmerOff = 1f;
-    public Color godrayAlbedoOn = new Color(1f, 0.95f, 0.9f, 1f);
-    public Color godrayAlbedoOff = Color.white;
-
     [Header("Performance")]
     [Tooltip("Reduce runtime spikes by throttling expensive updates.")]
     public bool optimizeForStableFrameTime = true;
-    [Min(0f)] public float hdrpGodrayUpdateInterval = 0.08f;
-    [Range(0f, 0.25f)] public float hdrpGodrayUpdateEpsilon = 0.01f;
+
     [Min(0.5f)] public float probeRendererCacheRefreshInterval = 10f;
     [Min(8)] public int probeSyncBatchSize = 128;
     [Tooltip("Dynamically reduce shadow rendering cost when direct sunlight is weak.")]
@@ -89,27 +50,6 @@ public class DayNightSkyboxController : MonoBehaviour
     [Tooltip("Changing shadow distance continuously can cause cascade rings. Keep disabled for stable transitions.")]
     public bool adaptShadowDistanceOverDay = false;
     [Range(1f, 30f)] public float adaptiveShadowDistanceStep = 8f;
-    [Tooltip("Clamp HDRP volumetric fog quality to a budget-friendly setting.")]
-    public bool clampHdrpVolumetricQuality = true;
-    [Range(6.25f, 50f)] public float hdrpFogScreenResolutionPercentage = 12.5f;
-    [Range(16, 128)] public int hdrpFogVolumeSliceCount = 48;
-    [Min(16f)] public float hdrpFogDepthExtent = 56f;
-    public bool hdrpDirectionalLightsOnly = true;
-    [Range(0, 2)] public int hdrpFogDenoisingMode = 0;
-
-    [Header("URP Plugin Bridge")]
-    [Tooltip("Send normalized daylight/twilight/godray values into a third-party weather or post-process component via reflection.")]
-    public bool driveUrpPluginBridge = true;
-    [Tooltip("If no bridge target is assigned, auto-discover a component that exposes at least one configured float member.")]
-    public bool autoFindPluginBridgeTarget = true;
-    public MonoBehaviour pluginBridgeTarget;
-    [Tooltip("Target float property/field name for daylight value (0..1).")]
-    public string pluginDaylightMember = "daylight";
-    [Tooltip("Target float property/field name for twilight value (0..1).")]
-    public string pluginTwilightMember = "twilight";
-    [Tooltip("Target float property/field name for godray blend value (0..1).")]
-    public string pluginGodrayMember = "godrayBlend";
-    public bool logPluginBridgeWarnings = false;
 
     [Header("URP Sky Godray")]
     [Tooltip("Adds a lightweight godray contribution in the custom skybox shader when using URP.")]
@@ -178,8 +118,8 @@ public class DayNightSkyboxController : MonoBehaviour
     [Range(0f, 2f)] public float nightReflectionIntensity = 0.35f;
     [Min(1)] public int reflectionBounces = 1;
 
-    public bool updateEnvironmentReflections = true;
-    [Min(0.1f)] public float reflectionUpdateInterval = 1f;
+    public bool updateEnvironmentReflections = false;
+    [Min(1.0f)] public float reflectionUpdateInterval = 5f;
 
     [Header("PBR Probe Integration")]
     [Tooltip("Automatically set dynamic renderers to sample Light Probes and Reflection Probes.")]
@@ -189,16 +129,6 @@ public class DayNightSkyboxController : MonoBehaviour
     [Min(0.1f)] public float probeSyncInterval = 2f;
     public bool includeInactiveRenderersForProbeSync = false;
     public bool logProbeAutoFixes = false;
-
-    [Header("PBR Validation")]
-    public bool validatePbrSetupOnStart = true;
-    public bool warnIfColorSpaceNotLinear = true;
-    public bool warnIfNoReflectionProbe = true;
-    public bool warnIfNoLightProbeGroup = true;
-    public bool warnForSuspiciousAlbedoRange = true;
-    [Range(0, 255)] public int minAlbedoSrgb = 30;
-    [Range(0, 255)] public int maxAlbedoSrgb = 240;
-    public bool logValidationSummary = true;
 
     private static readonly int SkyTintId = Shader.PropertyToID("_SkyTint");
     private static readonly int GroundColorId = Shader.PropertyToID("_GroundColor");
@@ -217,14 +147,9 @@ public class DayNightSkyboxController : MonoBehaviour
     private float _reflectionTimer;
     private float _probeSyncTimer;
     private float _probeCacheRefreshTimer;
-    private float _godrayUpdateTimer;
-    private float _lastGodrayBlend = -1f;
     private int _probeSyncCursor;
     private readonly List<Renderer> _cachedDynamicRenderers = new List<Renderer>(256);
-    private int _lastBridgeTargetSearchFrame = -1;
-    private readonly HashSet<string> _bridgeMissingMemberWarnings = new HashSet<string>();
-    private int _bridgeWarningTargetId;
-    private float _appliedAdaptiveShadowDistance = -1f;
+
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void AutoBootstrap()
@@ -241,9 +166,6 @@ public class DayNightSkyboxController : MonoBehaviour
     {
         EnsureSunLight();
         EnsureRuntimeSkybox();
-
-        if (validatePbrSetupOnStart)
-            ValidatePbrSetupInternal();
 
         if (enforceDynamicProbeSampling)
             RebuildDynamicRendererCache();
@@ -287,39 +209,6 @@ public class DayNightSkyboxController : MonoBehaviour
         reflectionUpdateInterval = Mathf.Max(0.1f, reflectionUpdateInterval);
         probeSyncInterval = Mathf.Max(0.1f, probeSyncInterval);
 
-        daySunIntensity = Mathf.Max(0f, daySunIntensity);
-        nightSunIntensity = Mathf.Max(0f, nightSunIntensity);
-        hdrpDaySunIntensityLux = Mathf.Max(1000f, hdrpDaySunIntensityLux);
-        hdrpNightSunIntensityLux = Mathf.Max(0f, hdrpNightSunIntensityLux);
-        horizonIntensityFloor = Mathf.Clamp(horizonIntensityFloor, 0.05f, 1f);
-        horizonIntensityPower = Mathf.Clamp(horizonIntensityPower, 0.5f, 8f);
-        sunriseRedBoost = Mathf.Clamp01(sunriseRedBoost);
-        godrayIntensityThresholdNormalized = Mathf.Clamp01(godrayIntensityThresholdNormalized);
-        godrayVolumetricEnableThreshold = Mathf.Clamp01(godrayVolumetricEnableThreshold);
-        godrayVolumetricLightDimmerOn = Mathf.Clamp(godrayVolumetricLightDimmerOn, 0f, 16f);
-        godrayVolumetricLightDimmerOff = Mathf.Clamp(godrayVolumetricLightDimmerOff, 0f, 16f);
-        godrayMeanFreePathOn = Mathf.Max(1f, godrayMeanFreePathOn);
-        godrayMeanFreePathOff = Mathf.Max(1f, godrayMeanFreePathOff);
-        godrayAnisotropyOn = Mathf.Clamp(godrayAnisotropyOn, -1f, 1f);
-        godrayAnisotropyOff = Mathf.Clamp(godrayAnisotropyOff, -1f, 1f);
-        godrayGlobalProbeDimmerOn = Mathf.Clamp01(godrayGlobalProbeDimmerOn);
-        godrayGlobalProbeDimmerOff = Mathf.Clamp01(godrayGlobalProbeDimmerOff);
-        urpGodrayMaxStrength = Mathf.Clamp01(urpGodrayMaxStrength);
-        urpGodrayPower = Mathf.Clamp(urpGodrayPower, 0.5f, 8f);
-        urpGodrayTwilightBoost = Mathf.Clamp01(urpGodrayTwilightBoost);
-        hdrpGodrayUpdateInterval = Mathf.Max(0f, hdrpGodrayUpdateInterval);
-        hdrpGodrayUpdateEpsilon = Mathf.Clamp(hdrpGodrayUpdateEpsilon, 0f, 0.25f);
-        probeRendererCacheRefreshInterval = Mathf.Max(0.5f, probeRendererCacheRefreshInterval);
-        probeSyncBatchSize = Mathf.Max(8, probeSyncBatchSize);
-        adaptiveDayShadowResolution = Mathf.Clamp(adaptiveDayShadowResolution, 128, 8192);
-        adaptiveNightShadowResolution = Mathf.Clamp(adaptiveNightShadowResolution, 128, adaptiveDayShadowResolution);
-        adaptiveDayShadowDistance = Mathf.Clamp(adaptiveDayShadowDistance, 10f, 300f);
-        adaptiveNightShadowDistance = Mathf.Clamp(adaptiveNightShadowDistance, 10f, adaptiveDayShadowDistance);
-        adaptiveShadowDistanceStep = Mathf.Clamp(adaptiveShadowDistanceStep, 1f, 30f);
-        hdrpFogScreenResolutionPercentage = Mathf.Clamp(hdrpFogScreenResolutionPercentage, 6.25f, 50f);
-        hdrpFogVolumeSliceCount = Mathf.Clamp(hdrpFogVolumeSliceCount, 16, 128);
-        hdrpFogDepthExtent = Mathf.Max(16f, hdrpFogDepthExtent);
-
         dayShadowStrength = Mathf.Clamp01(dayShadowStrength);
         nightShadowStrength = Mathf.Clamp01(nightShadowStrength);
         shadowBias = Mathf.Clamp(shadowBias, 0f, 0.2f);
@@ -347,11 +236,7 @@ public class DayNightSkyboxController : MonoBehaviour
         nightReflectionIntensity = Mathf.Clamp(nightReflectionIntensity, 0f, 2f);
         reflectionBounces = Mathf.Max(1, reflectionBounces);
 
-        minAlbedoSrgb = Mathf.Clamp(minAlbedoSrgb, 0, 255);
-        maxAlbedoSrgb = Mathf.Clamp(maxAlbedoSrgb, minAlbedoSrgb, 255);
 
-        _lastGodrayBlend = -1f;
-        _appliedAdaptiveShadowDistance = -1f;
 
         if (Application.isPlaying)
         {
@@ -370,12 +255,6 @@ public class DayNightSkyboxController : MonoBehaviour
             Destroy(_runtimeSkybox);
             _runtimeSkybox = null;
         }
-    }
-
-    [ContextMenu("Validate PBR Setup Now")]
-    private void ValidatePbrSetupContextMenu()
-    {
-        ValidatePbrSetupInternal();
     }
 
     private void EnsureSunLight()
@@ -405,11 +284,6 @@ public class DayNightSkyboxController : MonoBehaviour
 
     private void EnsureRuntimeSkybox()
     {
-        if (IsUsingHdrpSky())
-        {
-            EnsureHdrpPhysicallyBasedSkySetup();
-            return;
-        }
 
         if (_runtimeSkybox != null)
             return;
@@ -454,11 +328,6 @@ public class DayNightSkyboxController : MonoBehaviour
 
         float godrayBlend = EvaluateGodrayBlend(daylight, twilight);
 
-        if (IsUsingHdrpSky() && enableAutoHdrpGodray)
-            ApplyHdrpGodrayFromBlend(deltaTime, godrayBlend);
-
-        ApplyUrpPluginBridge(daylight, twilight, godrayBlend);
-
         ApplySkybox(daylight, twilight, godrayBlend);
 
         if (controlAmbient || controlFog)
@@ -474,11 +343,6 @@ public class DayNightSkyboxController : MonoBehaviour
 
         float minIntensity = nightSunIntensity;
         float maxIntensity = daySunIntensity;
-        if (IsUsingHdrpSky() && useHdrpPhysicalSunIntensity)
-        {
-            minIntensity = hdrpNightSunIntensityLux;
-            maxIntensity = hdrpDaySunIntensityLux;
-        }
 
         float horizonAttenuation = 1f;
         if (shapeSunIntensityByElevation)
@@ -513,12 +377,6 @@ public class DayNightSkyboxController : MonoBehaviour
         int targetShadowResolution = shadowCustomResolution;
         float targetShadowDistance = qualityShadowDistance;
         int targetShadowCascades = qualityShadowCascades;
-        if (optimizeForStableFrameTime && useAdaptiveShadowBudget)
-        {
-            targetShadowResolution = GetAdaptiveShadowResolution(daylight);
-            if (adaptShadowDistanceOverDay)
-                targetShadowDistance = GetAdaptiveShadowDistance(daylight);
-        }
 
         if (enforceShadowAntiBandingProfile)
         {
@@ -553,158 +411,21 @@ public class DayNightSkyboxController : MonoBehaviour
             QualitySettings.shadowCascades = targetShadowCascades;
     }
 
-    private int GetAdaptiveShadowResolution(float daylight)
-    {
-        int target = Mathf.RoundToInt(Mathf.Lerp(adaptiveNightShadowResolution, adaptiveDayShadowResolution, daylight));
-        target = Mathf.Clamp(target, 128, 8192);
-        target = Mathf.RoundToInt(target / 64f) * 64;
-        return Mathf.Clamp(target, 128, 8192);
-    }
-
-    private float GetAdaptiveShadowDistance(float daylight)
-    {
-        float target = Mathf.Lerp(adaptiveNightShadowDistance, adaptiveDayShadowDistance, daylight);
-        float step = Mathf.Max(1f, adaptiveShadowDistanceStep);
-        float quantized = Mathf.Round(target / step) * step;
-
-        if (_appliedAdaptiveShadowDistance < 0f)
-            _appliedAdaptiveShadowDistance = quantized;
-        else if (Mathf.Abs(quantized - _appliedAdaptiveShadowDistance) >= step * 0.5f)
-            _appliedAdaptiveShadowDistance = quantized;
-
-        return Mathf.Clamp(_appliedAdaptiveShadowDistance, 10f, 300f);
-    }
-
     private float EvaluateGodrayBlend(float daylight, float twilight)
     {
-        float referenceIntensity = IsUsingHdrpSky() && useHdrpPhysicalSunIntensity
-            ? Mathf.Max(1f, hdrpDaySunIntensityLux)
-            : Mathf.Max(0.0001f, daySunIntensity);
+        float referenceIntensity = Mathf.Max(0.0001f, daySunIntensity);
 
         float normalizedIntensity = daylight;
         if (sunLight != null)
             normalizedIntensity = Mathf.Clamp01(sunLight.intensity / referenceIntensity);
 
-        float godrayBlend = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(godrayIntensityThresholdNormalized, 1f, normalizedIntensity));
+        float godrayBlend = Mathf.SmoothStep(0f, 1f, normalizedIntensity);
         godrayBlend = Mathf.Clamp01(godrayBlend + twilight * urpGodrayTwilightBoost);
         return godrayBlend;
     }
 
-    private void ApplyHdrpGodrayFromBlend(float deltaTime, float godrayBlend)
-    {
-        if (sunLight == null)
-            return;
-
-        if (optimizeForStableFrameTime && hdrpGodrayUpdateInterval > 0f)
-        {
-            _godrayUpdateTimer += deltaTime;
-            if (_godrayUpdateTimer < hdrpGodrayUpdateInterval)
-                return;
-
-            _godrayUpdateTimer = 0f;
-        }
-
-        if (optimizeForStableFrameTime && _lastGodrayBlend >= 0f && Mathf.Abs(godrayBlend - _lastGodrayBlend) < hdrpGodrayUpdateEpsilon)
-            return;
-
-        _lastGodrayBlend = godrayBlend;
-    }
-
-    private void ApplyUrpPluginBridge(float daylight, float twilight, float godrayBlend)
-    {
-        if (!driveUrpPluginBridge)
-            return;
-
-        EnsureBridgeTargetResolved();
-        if (pluginBridgeTarget == null)
-            return;
-
-        TrySetBridgeFloat(pluginDaylightMember, daylight);
-        TrySetBridgeFloat(pluginTwilightMember, twilight);
-        TrySetBridgeFloat(pluginGodrayMember, godrayBlend);
-    }
-
-    private void EnsureBridgeTargetResolved()
-    {
-        if (pluginBridgeTarget != null || !autoFindPluginBridgeTarget)
-            return;
-
-        if (_lastBridgeTargetSearchFrame == Time.frameCount)
-            return;
-
-        _lastBridgeTargetSearchFrame = Time.frameCount;
-
-        MonoBehaviour[] candidates = FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-        for (int i = 0; i < candidates.Length; i++)
-        {
-            MonoBehaviour candidate = candidates[i];
-            if (candidate == null || candidate == this)
-                continue;
-
-            Type candidateType = candidate.GetType();
-            if (HasWritableFloatMember(candidateType, pluginDaylightMember) ||
-                HasWritableFloatMember(candidateType, pluginTwilightMember) ||
-                HasWritableFloatMember(candidateType, pluginGodrayMember))
-            {
-                pluginBridgeTarget = candidate;
-                _bridgeWarningTargetId = 0;
-                _bridgeMissingMemberWarnings.Clear();
-                return;
-            }
-        }
-    }
-
-    private bool TrySetBridgeFloat(string memberName, float value)
-    {
-        if (pluginBridgeTarget == null || string.IsNullOrWhiteSpace(memberName))
-            return false;
-
-        Type targetType = pluginBridgeTarget.GetType();
-        int targetId = pluginBridgeTarget.GetInstanceID();
-        if (targetId != _bridgeWarningTargetId)
-        {
-            _bridgeWarningTargetId = targetId;
-            _bridgeMissingMemberWarnings.Clear();
-        }
-
-        PropertyInfo property = targetType.GetProperty(memberName, BindingFlags.Instance | BindingFlags.Public);
-        if (property != null && property.CanWrite && property.PropertyType == typeof(float))
-        {
-            property.SetValue(pluginBridgeTarget, value);
-            return true;
-        }
-
-        FieldInfo field = targetType.GetField(memberName, BindingFlags.Instance | BindingFlags.Public);
-        if (field != null && field.FieldType == typeof(float))
-        {
-            field.SetValue(pluginBridgeTarget, value);
-            return true;
-        }
-
-        string warningKey = targetType.FullName + "." + memberName;
-        if (logPluginBridgeWarnings && _bridgeMissingMemberWarnings.Add(warningKey))
-            Debug.LogWarning($"[DayNightSkyboxController] Plugin bridge member '{memberName}' was not found as a writable float on '{targetType.Name}'.", pluginBridgeTarget);
-
-        return false;
-    }
-
-    private static bool HasWritableFloatMember(Type type, string memberName)
-    {
-        if (type == null || string.IsNullOrWhiteSpace(memberName))
-            return false;
-
-        PropertyInfo property = type.GetProperty(memberName, BindingFlags.Instance | BindingFlags.Public);
-        if (property != null && property.CanWrite && property.PropertyType == typeof(float))
-            return true;
-
-        FieldInfo field = type.GetField(memberName, BindingFlags.Instance | BindingFlags.Public);
-        return field != null && field.FieldType == typeof(float);
-    }
-
     private void ApplySkybox(float daylight, float twilight, float godrayBlend)
     {
-        if (IsUsingHdrpSky())
-            return;
 
         if (_runtimeSkybox == null)
             return;
@@ -744,8 +465,6 @@ public class DayNightSkyboxController : MonoBehaviour
 
     private void ApplyAmbientAndFog(float daylight)
     {
-        if (IsUsingHdrpSky())
-            return;
 
         if (controlAmbient)
         {
@@ -773,8 +492,6 @@ public class DayNightSkyboxController : MonoBehaviour
 
     private void ApplyReflections(float daylight, float deltaTime, bool forceReflectionUpdate)
     {
-        if (IsUsingHdrpSky())
-            return;
 
         RenderSettings.defaultReflectionMode = DefaultReflectionMode.Skybox;
         RenderSettings.reflectionBounces = reflectionBounces;
@@ -839,19 +556,13 @@ public class DayNightSkyboxController : MonoBehaviour
 
     private void SyncDynamicProbeSamplingFullScan()
     {
-        Renderer[] renderers = FindObjectsByType<Renderer>(
-            includeInactiveRenderersForProbeSync ? FindObjectsInactive.Include : FindObjectsInactive.Exclude,
-            FindObjectsSortMode.None);
+        if (_cachedDynamicRenderers.Count == 0)
+            RebuildDynamicRendererCache();
 
         int changedCount = 0;
-        for (int i = 0; i < renderers.Length; i++)
+        foreach (var renderer in _cachedDynamicRenderers)
         {
-            Renderer renderer = renderers[i];
-            if (renderer == null)
-                continue;
-
-            if (!IsDynamicRenderer(renderer))
-                continue;
+            if (renderer == null) continue;
 
             if (ApplyProbeSamplingToRenderer(renderer))
                 changedCount++;
@@ -864,23 +575,51 @@ public class DayNightSkyboxController : MonoBehaviour
     private void RebuildDynamicRendererCache()
     {
         _cachedDynamicRenderers.Clear();
+        HashSet<Renderer> unique = new HashSet<Renderer>();
 
-        Renderer[] renderers = FindObjectsByType<Renderer>(
-            includeInactiveRenderersForProbeSync ? FindObjectsInactive.Include : FindObjectsInactive.Exclude,
+        bool includeInactive = includeInactiveRenderersForProbeSync;
+
+        // 1. SkinnedMeshRenderers
+        SkinnedMeshRenderer[] smrs = FindObjectsByType<SkinnedMeshRenderer>(
+            includeInactive ? FindObjectsInactive.Include : FindObjectsInactive.Exclude,
             FindObjectsSortMode.None);
-
-        for (int i = 0; i < renderers.Length; i++)
+        foreach (var smr in smrs)
         {
-            Renderer renderer = renderers[i];
-            if (renderer == null)
-                continue;
-
-            if (!IsDynamicRenderer(renderer))
-                continue;
-
-            _cachedDynamicRenderers.Add(renderer);
+            if (smr != null && !smr.gameObject.isStatic)
+                unique.Add(smr);
         }
 
+        // 2. Renderers under Rigidbodies
+        Rigidbody[] rbs = FindObjectsByType<Rigidbody>(
+            includeInactive ? FindObjectsInactive.Include : FindObjectsInactive.Exclude,
+            FindObjectsSortMode.None);
+        foreach (var rb in rbs)
+        {
+            if (rb == null) continue;
+            Renderer[] rbRenderers = rb.GetComponentsInChildren<Renderer>(includeInactive);
+            foreach (var r in rbRenderers)
+            {
+                if (r != null && !r.gameObject.isStatic)
+                    unique.Add(r);
+            }
+        }
+
+        // 3. Renderers under Animators
+        Animator[] anims = FindObjectsByType<Animator>(
+            includeInactive ? FindObjectsInactive.Include : FindObjectsInactive.Exclude,
+            FindObjectsSortMode.None);
+        foreach (var anim in anims)
+        {
+            if (anim == null) continue;
+            Renderer[] animRenderers = anim.GetComponentsInChildren<Renderer>(includeInactive);
+            foreach (var r in animRenderers)
+            {
+                if (r != null && !r.gameObject.isStatic)
+                    unique.Add(r);
+            }
+        }
+
+        _cachedDynamicRenderers.AddRange(unique);
         _probeSyncCursor = 0;
     }
 
@@ -901,229 +640,5 @@ public class DayNightSkyboxController : MonoBehaviour
         }
 
         return changed;
-    }
-
-    private static bool IsDynamicRenderer(Renderer renderer)
-    {
-        if (renderer == null)
-            return false;
-
-        if (renderer.gameObject.isStatic)
-            return false;
-
-        if (renderer is SkinnedMeshRenderer)
-            return true;
-
-        if (renderer.GetComponentInParent<Rigidbody>() != null)
-            return true;
-
-        if (renderer.GetComponentInParent<CharacterController>() != null)
-            return true;
-
-        if (renderer.GetComponentInParent<Animator>() != null)
-            return true;
-
-        return false;
-    }
-
-    private void ValidatePbrSetupInternal()
-    {
-        int warningCount = 0;
-
-        if (preferHdrpPhysicallyBasedSky)
-        {
-            if (!IsHdrpActive())
-            {
-                warningCount++;
-                Debug.LogWarning("[DayNightSkyboxController] preferHdrpPhysicallyBasedSky is enabled, but HDRP pipeline is not active.", this);
-            }
-            else
-            {
-                warningCount += ValidateHdrpSkySetupWarnings();
-            }
-        }
-
-        if (warnIfColorSpaceNotLinear && QualitySettings.activeColorSpace != ColorSpace.Linear)
-        {
-            warningCount++;
-            Debug.LogWarning("[DayNightSkyboxController] PBR recommendation: set Player Settings > Color Space to Linear.", this);
-        }
-
-        if (warnIfNoReflectionProbe)
-        {
-            ReflectionProbe[] probes = FindObjectsByType<ReflectionProbe>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
-            if (probes.Length == 0)
-            {
-                warningCount++;
-                Debug.LogWarning("[DayNightSkyboxController] No ReflectionProbe found in scene. Metals and smooth surfaces may look incorrect in shadow.", this);
-            }
-        }
-
-        if (warnIfNoLightProbeGroup)
-        {
-            LightProbeGroup[] probeGroups = FindObjectsByType<LightProbeGroup>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
-            if (probeGroups.Length == 0)
-            {
-                warningCount++;
-                Debug.LogWarning("[DayNightSkyboxController] No LightProbeGroup found in scene. Dynamic objects crossing shadow boundaries may shade incorrectly.", this);
-            }
-        }
-
-        if (warnForSuspiciousAlbedoRange)
-            warningCount += ValidateAlbedoRangeWarnings();
-
-        if (logValidationSummary)
-            Debug.Log($"[DayNightSkyboxController] PBR validation completed with {warningCount} warning(s).", this);
-    }
-
-    private int ValidateAlbedoRangeWarnings()
-    {
-        int warnings = 0;
-        float minLuma = minAlbedoSrgb / 255f;
-        float maxLuma = maxAlbedoSrgb / 255f;
-
-        Renderer[] renderers = FindObjectsByType<Renderer>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
-        HashSet<Material> uniqueMaterials = new HashSet<Material>();
-
-        for (int i = 0; i < renderers.Length; i++)
-        {
-            Renderer renderer = renderers[i];
-            if (renderer == null)
-                continue;
-
-            Material[] mats = renderer.sharedMaterials;
-            if (mats == null)
-                continue;
-
-            for (int m = 0; m < mats.Length; m++)
-            {
-                Material mat = mats[m];
-                if (mat != null)
-                    uniqueMaterials.Add(mat);
-            }
-        }
-
-        foreach (Material mat in uniqueMaterials)
-        {
-            if (mat == null || !mat.HasProperty(AlbedoColorId))
-                continue;
-
-            if (!LooksLikeLitShader(mat.shader))
-                continue;
-
-            Color gammaColor = mat.GetColor(AlbedoColorId).gamma;
-            float luma = 0.2126f * gammaColor.r + 0.7152f * gammaColor.g + 0.0722f * gammaColor.b;
-
-            if (luma < minLuma || luma > maxLuma)
-            {
-                warnings++;
-                Debug.LogWarning(
-                    $"[DayNightSkyboxController] Material '{mat.name}' has albedo luminance {luma:F2} (sRGB-like), outside recommended [{minLuma:F2}, {maxLuma:F2}] range.",
-                    mat);
-            }
-        }
-
-        return warnings;
-    }
-
-    private static bool LooksLikeLitShader(Shader shader)
-    {
-        if (shader == null)
-            return false;
-
-        string name = shader.name;
-        return name.Contains("Standard") || name.Contains("Lit") || name.Contains("PBR");
-    }
-
-    private bool IsUsingHdrpSky()
-    {
-        return preferHdrpPhysicallyBasedSky && IsHdrpActive();
-    }
-
-    private static bool IsHdrpActive()
-    {
-        RenderPipelineAsset pipeline = GraphicsSettings.currentRenderPipeline;
-        if (pipeline == null)
-            return false;
-
-        return pipeline.GetType().Name.Contains("HDRenderPipelineAsset");
-    }
-
-    private void EnsureHdrpPhysicallyBasedSkySetup()
-    {
-        // URP migration path: keep method for serialized compatibility and no-op semantics.
-        TryResolveHdrpSkyProfile(out _, createRuntimeHdrpSkyVolume);
-    }
-
-    private void ApplyHdrpVolumetricPerformanceSetup(VolumeProfile profile)
-    {
-        // URP migration path: no HDRP volume overrides are applied.
-    }
-
-    private bool TryResolveHdrpSkyProfile(out VolumeProfile profile, bool createIfMissing)
-    {
-        profile = null;
-
-        if (hdrpSkyProfile != null)
-        {
-            profile = hdrpSkyProfile;
-            return true;
-        }
-
-        if (hdrpSkyVolume == null)
-        {
-            Volume[] volumes = FindObjectsByType<Volume>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-            float bestPriority = float.NegativeInfinity;
-            for (int i = 0; i < volumes.Length; i++)
-            {
-                Volume candidate = volumes[i];
-                if (candidate == null || !candidate.isGlobal)
-                    continue;
-
-                if (candidate.priority > bestPriority)
-                {
-                    bestPriority = candidate.priority;
-                    hdrpSkyVolume = candidate;
-                }
-            }
-        }
-
-        if (hdrpSkyVolume == null && createIfMissing)
-        {
-            GameObject go = new GameObject("URP_GlobalVolume_Bridge");
-            hdrpSkyVolume = go.AddComponent<Volume>();
-            hdrpSkyVolume.isGlobal = true;
-            hdrpSkyVolume.priority = 100f;
-            hdrpSkyVolume.weight = 1f;
-        }
-
-        if (hdrpSkyVolume == null)
-            return false;
-
-        profile = hdrpSkyVolume.sharedProfile;
-        if (profile == null && createIfMissing)
-        {
-            profile = ScriptableObject.CreateInstance<VolumeProfile>();
-            profile.name = "Runtime_URP_GlobalVolume_Profile";
-            hdrpSkyVolume.sharedProfile = profile;
-        }
-
-        if (profile == null)
-            return false;
-
-        hdrpSkyProfile = profile;
-        return true;
-    }
-
-    private int ValidateHdrpSkySetupWarnings()
-    {
-        if (!IsHdrpActive())
-            return 0;
-
-        if (TryResolveHdrpSkyProfile(out _, false))
-            return 0;
-
-        Debug.LogWarning("[DayNightSkyboxController] HDRP pipeline detected but no global volume profile is assigned.", this);
-        return 1;
     }
 }

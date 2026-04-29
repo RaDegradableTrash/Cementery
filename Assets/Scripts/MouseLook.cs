@@ -54,6 +54,8 @@ public class MouseLook : MonoBehaviour
     private Vector3 _attractBaseLocalOffset;
     private bool _attractOrbitInitialized;
     private bool _pendingStartCursorLock;
+    private Rigidbody _playerRb;
+    private float _yaw;
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
     void Start()
@@ -74,7 +76,11 @@ public class MouseLook : MonoBehaviour
         if (_pitch > 180f) _pitch -= 360f;
 
         if (player != null)
+        {
             _playerController = player.GetComponent<PlayerController>();
+            _playerRb = player.GetComponent<Rigidbody>();
+            _yaw = player.eulerAngles.y;
+        }
 
         if (cameraHolder != null)
             _holderDefaultLocalPos = cameraHolder.localPosition;
@@ -147,7 +153,19 @@ public class MouseLook : MonoBehaviour
 
         // Horizontal yaw — rotates the player body so movement stays aligned with the view
         if (player != null)
-            player.Rotate(Vector3.up * mouseX, Space.World);
+        {
+            _yaw += mouseX;
+            Quaternion targetRot = Quaternion.Euler(0f, _yaw, 0f);
+            if (_playerRb != null)
+            {
+                _playerRb.rotation = targetRot;
+                // setting Rigidbody.rotation updates physics state immediately, preventing interpolation fighting
+            }
+            else
+            {
+                player.rotation = targetRot;
+            }
+        }
     }
 
     bool ShouldUseAttractOrbit()

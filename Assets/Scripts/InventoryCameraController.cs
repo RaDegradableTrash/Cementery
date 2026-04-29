@@ -126,17 +126,6 @@ public class InventoryCameraController : MonoBehaviour
         if (interaction == null)
             return;
 
-        if (placer != null)
-        {
-            var tempItems = placer.GetTempItems();
-            if (tempItems.Count > 0)
-            {
-                interaction.EjectInventoryTempItems(tempItems);
-                placer.ClearTempItems();
-            }
-        }
-
-        interaction.CommitPendingCollectedObject();
         interaction.DropCarriedObjectIfAny();
     }
 

@@ -261,7 +261,6 @@ public class InventoryRaycastPlacer : MonoBehaviour
             InteractionSystem interaction = GetInteractionSystem();
             if (interaction != null)
             {
-                interaction.CommitPendingCollectedObject();
                 interaction.DropCarriedObjectIfAny();
             }
 
@@ -311,7 +310,9 @@ public class InventoryRaycastPlacer : MonoBehaviour
 
         InteractionSystem interaction = GetInteractionSystem();
         if (interaction != null)
-            interaction.SetPendingInventoryCarryItem(previewItemData);
+        {
+            // Removed SetPendingInventoryCarryItem logic
+        }
     }
 
     PlacedItemMarker FindNearestPlacedItemMarker(Ray ray)

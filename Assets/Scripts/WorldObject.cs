@@ -34,10 +34,20 @@ public class WorldObject : MonoBehaviour
     public bool canBePushed = false;
 
     [Header("Placement Options")]
+    [Tooltip("If true, the object can be placed on floors (default behavior).")]
+    public bool canBePlacedOnFloor = true;
     [Tooltip("If true, the object can be placed on vertical surfaces ignoring gravity.")]
     public bool canBePlacedOnWall = false;
     [Tooltip("If true, the object can be placed on ceilings ignoring gravity.")]
     public bool canBePlacedOnCeiling = false;
+    
+    [Header("Placement Orientation")]
+    [Tooltip("If true, the object keeps its upright (ground) orientation when placed on walls, " +
+             "instead of aligning to the wall surface. E.g., a cabinet's doors still face horizontally.")]
+    public bool isFlippingRestricted_Wall = false;
+    [Tooltip("If true, the object keeps its upright (ground) orientation when placed on ceilings, " +
+             "instead of flipping upside-down. E.g., a lamp hangs from ceiling in its normal posture.")]
+    public bool isFlippingRestricted_Ceiling = false;
     
     internal bool isPlacedAndAttached = false;
 
@@ -120,12 +130,8 @@ public class WorldObject : MonoBehaviour
 
     void OnValidate() => ApplyPushabilityState();
 
-    void FixedUpdate()
-    {
-        // Re-assert each physics step so external forces/scripts cannot keep a
-        // non-pushable object dynamic by accident.
-        ApplyPushabilityState();
-    }
+    // Removed FixedUpdate call to ApplyPushabilityState to save CPU. 
+    // State is now managed via SetCarriedState and explicit calls.
 
     internal void SetCarriedState(bool carried)
     {
