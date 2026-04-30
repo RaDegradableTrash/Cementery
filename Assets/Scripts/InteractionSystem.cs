@@ -103,6 +103,12 @@ public class InteractionSystem : MonoBehaviour
     private float _carryRayDistance;
     private float _carriedRadius;
 
+    // Transition Animation
+    private float _carryTransitionTimer = 0f;
+    private const float CarryTransitionDuration = 0.25f;
+    private Vector3 _carryStartLocalPos;
+    private Quaternion _carryStartLocalRot;
+
     private Coroutine _hideInfoCo;
     private Coroutine _hideCarryDistanceLimitCo;
 
@@ -220,14 +226,7 @@ public class InteractionSystem : MonoBehaviour
     {
         if (_carriedRb == null)
             return;
-
-        // 一般搬运时在偏右下方（避免挡视线），放置模式时更加靠右下方
-        Vector3 normalCarryDir = new Vector3(0.35f, -0.3f, 0.9f).normalized;
-        Vector3 placementDir = new Vector3(0.55f, -0.6f, 0.8f).normalized;
-        Vector3 targetDir = _isPlacementMode ? placementDir : normalCarryDir;
-        
-        _carryRayLocalDir = Vector3.Lerp(_carryRayLocalDir, targetDir, Time.fixedDeltaTime * 12f);
-
+ 
         // Heavy objects: drive via forces in FixedUpdate (physics-based dragging)
         if (_carriedWo != null && _carriedWo.isHeavy)
             DriveCarry();
@@ -236,8 +235,12 @@ public class InteractionSystem : MonoBehaviour
     void LateUpdate()
     {
         if (_carriedRb == null) return;
-        // Non-heavy (kinematic) objects: drive position in LateUpdate
-        // so it syncs with the camera transform every render frame.
+        
+        // Mode-based direction LERP (Normal vs Placement)
+        Vector3 targetDir = _isPlacementMode ? new Vector3(0.55f, -0.6f, 0.8f).normalized : unifiedCarryAnchorLocalOffset.normalized;
+        _carryRayLocalDir = Vector3.Lerp(_carryRayLocalDir, targetDir, Time.deltaTime * 12f);
+
+        // Non-heavy (kinematic) objects: drive position
         if (_carriedWo == null || !_carriedWo.isHeavy)
             DriveCarryKinematic();
     }
@@ -327,44 +330,38 @@ public class InteractionSystem : MonoBehaviour
 
     void DriveCarryKinematic()
     {
-        // Use camera as reference for carry target, not the player collider.
-        // playerCol.bounds.center is the physics-step position (50Hz) which causes
-        // visible 50Hz stepping. Camera transform is updated every render frame.
-        Vector3 origin = playerCamera != null ? playerCamera.transform.position : GetCarryReferenceOrigin();
-        Transform carryRef = playerCamera != null ? playerCamera.transform : GetCarryReferenceTransform();
-        
-        Vector3 rayDir = carryRef.TransformDirection(_carryRayLocalDir);
-        if (rayDir.sqrMagnitude < 0.0001f)
-            rayDir = GetCarryReferenceForward();
-        rayDir.Normalize();
+        if (playerCamera == null || _carriedRb == null) return;
+        Transform camT = playerCamera.transform;
 
+        // 1. Calculate Base Target Orientation & Position
+        Quaternion targetRot = GetCarryTargetRotationYawOnly();
+        Vector3 rayDirWorld = camT.TransformDirection(_carryRayLocalDir).normalized;
         float dist = ClampCarryDistance(_carryRayDistance);
-        Vector3 targetPos = origin + rayDir * dist;
+        Vector3 targetPos = camT.position + rayDirWorld * dist;
 
-        // Wall avoidance: SphereCast from camera
-        float castRadius = Mathf.Max(0.05f, _carriedRadius * 0.85f);
-        Vector3 castVec = targetPos - origin;
-        float castDist = castVec.magnitude;
-        if (castDist > 0.001f)
+        // 2. Wall/Obstacle Avoidance
+        float castRadius = Mathf.Max(0.05f, _carriedRadius * 0.8f);
+        if (Physics.SphereCast(camT.position, castRadius, rayDirWorld, out RaycastHit hit, dist, interactMask, QueryTriggerInteraction.Ignore))
         {
-            Vector3 castDir = castVec / castDist;
-            if (Physics.SphereCast(origin, castRadius, castDir, out RaycastHit hit, castDist, interactMask, QueryTriggerInteraction.Ignore))
-            {
-                if (!IsIgnoredCarryHitCollider(hit.collider))
-                {
-                    float safeDist = Mathf.Max(0.15f, hit.distance - castRadius - 0.03f);
-                    targetPos = origin + castDir * safeDist;
-                }
-            }
+            if (!IsIgnoredCarryHitCollider(hit.collider))
+                targetPos = camT.position + rayDirWorld * Mathf.Max(0.15f, hit.distance - 0.02f);
         }
 
-        Quaternion targetRot = GetCarryTargetRotationYawOnly();
-
-        // Set directly — zero lag. Camera-synced origin means no interpolation needed.
-        _carriedRb.transform.position = targetPos;
-        _carriedRb.transform.rotation = Quaternion.Slerp(
-            _carriedRb.transform.rotation, targetRot,
-            Mathf.Clamp01(Time.deltaTime * carryTurnStrength));
+        // 3. Transition Animation (LERP from original world pickup point)
+        if (_carryTransitionTimer < CarryTransitionDuration)
+        {
+            _carryTransitionTimer += Time.deltaTime;
+            float t = Mathf.SmoothStep(0f, 1f, _carryTransitionTimer / CarryTransitionDuration);
+            Vector3 startWorldPos = camT.TransformPoint(_carryStartLocalPos);
+            Quaternion startWorldRot = camT.rotation * _carryStartLocalRot;
+            _carriedRb.transform.position = Vector3.Lerp(startWorldPos, targetPos, t);
+            _carriedRb.transform.rotation = Quaternion.Slerp(startWorldRot, targetRot, t);
+        }
+        else
+        {
+            _carriedRb.transform.position = targetPos;
+            _carriedRb.transform.rotation = Quaternion.Slerp(_carriedRb.transform.rotation, targetRot, Time.deltaTime * carryTurnStrength);
+        }
     }
 
     Vector3 GetCarryTargetPosition()
@@ -1110,32 +1107,22 @@ public class InteractionSystem : MonoBehaviour
             
             Vector3 pPos = playerT.position; pPos.y = 0;
             Vector3 aPos = anchorWorld; aPos.y = 0;
-            // 缩短狗绳的初始长度，使得拖拽时物体离玩家更近
             _carryRayDistance = Mathf.Max(0.5f, Vector3.Distance(pPos, aPos) - 0.5f);
         }
         else
         {
-            Transform carryRef = GetCarryReferenceTransform();
-            Vector3 carryOrigin = GetCarryReferenceOrigin();
-            if (useUnifiedCarryAnchor)
-            {
-                Vector3 localAnchor = GetUnifiedCarryAnchorLocalOffset();
-                _carryRayLocalDir = localAnchor.normalized;
-                _carryRayDistance = localAnchor.magnitude;
-            }
-            else
-            {
-                Vector3 ray = _carriedTransform.position - carryOrigin;
-                float rayLen = ray.magnitude;
-                if (rayLen < 0.05f)
-                {
-                    ray = GetCarryReferenceForward() * 0.05f;
-                    rayLen = 0.05f;
-                }
-
-                _carryRayLocalDir = carryRef.InverseTransformDirection(ray / rayLen).normalized;
-                _carryRayDistance = ClampCarryDistance(rayLen);
-            }
+            Transform camT = playerCamera != null ? playerCamera.transform : transform;
+            
+            // Record start for transition animation (capture exact world state at pickup)
+            _carryTransitionTimer = 0f;
+            _carryStartLocalPos = camT.InverseTransformPoint(_carriedTransform.position);
+            _carryStartLocalRot = Quaternion.Inverse(camT.rotation) * _carriedTransform.rotation;
+ 
+            // Target Anchor: Start with current distance but target unified direction
+            // DriveCarryKinematic will handle the rest of the smoothing.
+            Vector3 targetLocalAnchor = GetUnifiedCarryAnchorLocalOffset();
+            _carryRayLocalDir = _carryStartLocalPos.normalized; // Start with current direction to avoid pop
+            _carryRayDistance = targetLocalAnchor.magnitude;    // Target unified distance
         }
 
         Vector3 flatCarryFwd = GetCarryReferenceForward();
