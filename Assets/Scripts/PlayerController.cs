@@ -49,7 +49,7 @@ public class PlayerController : MonoBehaviour
     public float SpeedMultiplier { get; set; } = 1f;
 
     [Header("Climbing")]
-    [SerializeField] private float climbMaxHeight = 5f;
+    [SerializeField] private float climbMaxHeight = 2.5f;
     [SerializeField] private LayerMask climbObstacleMask = ~0;
     [SerializeField] private MouseLook mouseLook;
 
@@ -67,9 +67,17 @@ public class PlayerController : MonoBehaviour
     private const float CoyoteTime = 0.08f;
 
     private float _bobTimer;
+    private bool _isClimbing = false;
+    private float _activeClimbTargetY = 0f;
+    private float _climbStartTime = 0f;
+
+    private float _struggleHeightGained = 0f;
+    private float _groundCheckDisabledUntil;
     private bool _isGrounded;
     private float _jumpBufferedUntil;
     private float _groundedUntil;
+    private bool _isOnStairs;
+    private Vector3 _stairsContactNormal = Vector3.up;
 
     private Vector2 _inputMove;
     private int _jumpCount;
@@ -128,40 +136,58 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        _groundCheckFrameCounter++;
-        if (_groundCheckFrameCounter >= groundCheckInterval)
-        {
-            _groundCheckFrameCounter = 0;
-            CheckGrounded();
-        }
+        CheckGrounded();
 
-        if (_isGrounded)
+        if (_isGrounded && Time.time > _groundCheckDisabledUntil)
         {
-            _groundedUntil = Time.time + CoyoteTime;
-            _canClimbThisJump = true;
             _jumpCount = 0;
-            
-            // Handle moving platforms
+            _isClimbing = false;
+            _canClimbThisJump = true;
+            _struggleHeightGained = 0f;
             HandlePlatformMovement();
         }
         else
         {
+            _isGrounded = false;
             _activePlatform = null;
+            
+            // Handle momentum erasure for high climbs
+            if (_isClimbing && Time.time - _climbStartTime < 1.5f)
+            {
+                if (transform.position.y >= _activeClimbTargetY)
+                {
+                    // Erase vertical momentum to land precisely
+                    _rb.velocity = new Vector3(_rb.velocity.x, Mathf.Min(_rb.velocity.y, 0f), _rb.velocity.z);
+                    _isClimbing = false;
+                }
+            }
         }
 
         bool jumpPressed = Input.GetButtonDown("Jump") || Input.GetKeyDown(KeyCode.Space);
         if (jumpPressed)
         {
             _jumpBufferedUntil = Time.time + JumpBufferTime;
-            
-            // If in air, try to climb immediately (prioritize climb over double jump if facing wall)
-            if (!_isGrounded && TryStartClimb())
-                return;
         }
 
         GatherInput();
         HandleHeadBob();
-        UpdateDebugCollisionLog();
+        // UpdateDebugCollisionLog(); // Commented out per user request
+        TrackJumpPeak();
+    }
+
+    private float _currentJumpPeakY = -Mathf.Infinity;
+    private void TrackJumpPeak()
+    {
+        if (!_isGrounded)
+        {
+            if (transform.position.y > _currentJumpPeakY)
+                _currentJumpPeakY = transform.position.y;
+        }
+        else if (_currentJumpPeakY > -Mathf.Infinity)
+        {
+            Debug.Log($"[Jump Peak] Maximum Height Reached: {_currentJumpPeakY:F2}m (Delta: {(_currentJumpPeakY - transform.position.y):F2}m)");
+            _currentJumpPeakY = -Mathf.Infinity;
+        }
     }
 
     private float _collisionDebugTimer = 0f;
@@ -280,62 +306,53 @@ public class PlayerController : MonoBehaviour
             }
         }
 
+        // --- Slow Climb Physics ---
+        if (_isClimbing)
+        {
+            _rb.AddForce(Physics.gravity * 0.7f, ForceMode.Acceleration);
+            if (verticalVelocity < -0.1f && Time.time - _climbStartTime > 0.2f) _isClimbing = false;
+        }
+
+        // --- Climb Struggle Mechanic ---
+        // If mid-air, touching wall, holding Mouse0 + W, slowly hoist up
+        bool recentlyTouchedWall = _climbCandidateCol != null && (Time.time - _climbCandidateTime < 0.3f);
+        bool struggleInput = Input.GetMouseButton(0) && _inputMove.y > 0.1f;
+
+        if (!_isGrounded && recentlyTouchedWall && struggleInput && _struggleHeightGained < 1.0f)
+        {
+            float struggleSpeed = 1.8f;
+            verticalVelocity = struggleSpeed;
+            _struggleHeightGained += struggleSpeed * Time.deltaTime;
+            
+            // Apply a small forward nudge into the wall to maintain contact
+            _rb.AddForce(transform.forward * 5f, ForceMode.Acceleration);
+        }
+
+        // --- Final Velocity Assignment ---
         _rb.velocity = new Vector3(targetVelocity.x, verticalVelocity, targetVelocity.z);
     }
 
-    private bool _isOnStairs = false;
-    private Vector3 _stairsContactNormal = Vector3.up;
+
 
     void CheckGrounded()
     {
-        _isOnStairs = false; // Reset, will be set by Raycast or Collision
-
-        // Raycast from slightly inside the capsule bottom straight down.
-        Vector3 origin = transform.position + _col.center - Vector3.up * (_col.height * 0.5f - 0.05f);
-        float castDist = 0.15f + groundCheckRadius;
-
-        bool hitSomething = false;
-        RaycastHit groundHit;
-
-        // Primary: Straight down ray (standard floor)
-        if (Physics.Raycast(origin, Vector3.down, out groundHit, castDist, groundMask, QueryTriggerInteraction.Ignore))
+        // GroundCheck: Narrow downward spherecast (0.1m radius) to avoid walls
+        float radius = 0.1f;
+        float castDist = 0.15f;
+        Vector3 origin = transform.position + Vector3.up * 0.1f;
+        
+        _isGrounded = false;
+        if (Physics.SphereCast(origin, radius, Vector3.down, out RaycastHit hit, castDist, groundMask, QueryTriggerInteraction.Ignore))
         {
-            hitSomething = true;
-        }
-        // Secondary: SphereCast for steep slopes (isStairs support)
-        else if (Physics.SphereCast(origin, _col.radius * 0.8f, Vector3.down, out groundHit, castDist, groundMask, QueryTriggerInteraction.Ignore))
-        {
-            hitSomething = true;
-        }
-
-        if (hitSomething)
-        {
-            _isGrounded = true;
-            
-            bool treatAsPlatform = false;
-            if (groundHit.rigidbody != null)
+            // Only count if it's NOT part of the player
+            if (hit.transform.root != transform.root)
             {
-                if (groundHit.rigidbody.isKinematic)
-                {
-                    treatAsPlatform = true;
-                }
-                else
-                {
-                    WorldObject wo = groundHit.collider.GetComponentInParent<WorldObject>();
-                    if (wo != null && wo.isStairs)
-                    {
-                        treatAsPlatform = true;
-                        _isOnStairs = true;
-                        _stairsContactNormal = groundHit.normal;
-                    }
-                }
+                _isGrounded = true;
+                _activePlatform = hit.rigidbody;
             }
-
-            _activePlatform = treatAsPlatform ? groundHit.rigidbody : null;
         }
         else
         {
-            _isGrounded = false;
             _activePlatform = null;
         }
     }
@@ -357,18 +374,18 @@ public class PlayerController : MonoBehaviour
     {
         if (Time.time > _jumpBufferedUntil) return;
 
-        bool canNormalJump = (Time.time <= _groundedUntil || _isOnStairs) && _jumpCount == 0;
-        bool canDoubleJump = _jumpCount > 0 && _jumpCount < maxJumps;
-        
-        // Initial jump from ground/stairs/coyote
-        if (canNormalJump)
+        // 1. FIRST JUMP (Only from ground)
+        if (_jumpCount == 0 && _isGrounded)
         {
             ExecuteJump();
         }
-        // Double jump in mid-air
-        else if (canDoubleJump)
+        // 2. SECOND JUMP (Strictly for climbing walls/ledges)
+        else if (_jumpCount == 1 && _jumpCount < maxJumps)
         {
-            ExecuteJump();
+            if (TryStartClimb())
+            {
+                // TryStartClimb handles the jumpCount increment
+            }
         }
     }
 
@@ -378,7 +395,9 @@ public class PlayerController : MonoBehaviour
         _isGrounded = false;
         _jumpCount++;
         _jumpBufferedUntil = 0f;
-        _groundedUntil = 0f;
+        
+        // Disable grounding for 0.15s to prevent immediate reset while leaving the floor
+        _groundCheckDisabledUntil = Time.time + 0.15f;
     }
 
     // ── Head Bob ─────────────────────────────────────────────────────────────
@@ -414,46 +433,79 @@ public class PlayerController : MonoBehaviour
         Collider targetCol = isFacingWall ? wallHit.collider : _climbCandidateCol;
         Vector3 hitPoint = isFacingWall ? wallHit.point : transform.position + castDir * _col.radius;
 
-        // Fallback: If raycast from head misses (short wall), try a spherecast from center
-        if (targetCol == null || !isFacingWall)
+        if (targetCol != null && (isFacingWall || (Time.time - _climbCandidateTime < 0.25f)))
         {
-            Vector3 center = transform.position + _col.center;
-            if (Physics.SphereCast(center, _col.radius * 0.9f, castDir, out RaycastHit sphereHit, 0.8f, climbObstacleMask, QueryTriggerInteraction.Ignore))
+            // --- Precise Vertical Exit Detection ---
+            // 1. Use the actual collision/raycast hit point to find the scan position
+            Vector3 scanPos = hitPoint + transform.forward * 0.1f;
+            
+            // 2. Scan DOWN from above to find the exact top surface
+            float scanLimitY = transform.position.y + climbMaxHeight + 1.0f;
+            Vector3 rayOrigin = new Vector3(scanPos.x, scanLimitY, scanPos.z);
+            
+            float targetHeightY = transform.position.y;
+            RaycastHit[] hits = Physics.RaycastAll(rayOrigin, Vector3.down, climbMaxHeight + 2.0f, climbObstacleMask);
+            
+            bool foundLedge = false;
+            foreach (var hit in hits)
             {
-                targetCol = sphereHit.collider;
-                hitPoint = sphereHit.point;
-                isFacingWall = true;
-            }
-        }
+                // Skip our own colliders (including any interaction spheres/triggers)
+                if (hit.transform.root == transform.root) continue;
 
-        if (targetCol != null && (isFacingWall || Time.time - _climbCandidateTime < 0.2f))
-        {
-            float targetHeightY = transform.position.y + climbMaxHeight * 0.5f;
-
-            Vector3 topCastOrigin = hitPoint + castDir * 0.3f + Vector3.up * climbMaxHeight;
-            if (Physics.Raycast(topCastOrigin, Vector3.down, out RaycastHit topHit, climbMaxHeight * 2f, climbObstacleMask, QueryTriggerInteraction.Ignore))
-            {
-                targetHeightY = topHit.point.y;
+                if (hit.point.y > targetHeightY)
+                {
+                    targetHeightY = hit.point.y;
+                    foundLedge = true;
+                }
             }
-            else if (targetCol != null)
+
+            if (!foundLedge)
             {
+                // Fallback to collider bounds if raycast missed but we know something is there
                 targetHeightY = targetCol.bounds.max.y;
             }
 
-            float neededHeight = (targetHeightY - _col.bounds.min.y) + 0.2f;
-            neededHeight = Mathf.Clamp(neededHeight, 1.5f, climbMaxHeight);
-
-            float requiredVelocity = Mathf.Sqrt(2f * Mathf.Abs(Physics.gravity.y) * neededHeight);
+            // 3. Calculation and Reachability Check
+            float heightDiff = targetHeightY - transform.position.y;
             
-            _rb.velocity = new Vector3(_rb.velocity.x, Mathf.Max(requiredVelocity, jumpForce * 1.1f), _rb.velocity.z);
+            // CRITICAL: If the target height is not significantly above us, it's not a climb!
+            // This prevents "Double Jumping" on the floor or in empty air.
+            if (heightDiff < 0.4f)
+            {
+                return false;
+            }
+
+            // If too high, fail climb
+            if (heightDiff > climbMaxHeight)
+            {
+                Debug.Log($"[Climb Debug] Too high: {heightDiff:F2}m. Fail.");
+                return false;
+            }
+
+            // Calculate force for the height
+            float h = heightDiff + 0.2f;
+            float gravity = Mathf.Abs(Physics.gravity.y);
+            float vY = Mathf.Sqrt(2f * gravity * h);
+            
+            Debug.Log($"[Climb Debug] CLIMB SUCCESS! Target: {targetHeightY:F2}m | Force: {vY:F2}");
+
+            _rb.velocity = new Vector3(_rb.velocity.x, vY, _rb.velocity.z);
+            
+            // Track climb target for momentum erasure
+            _isClimbing = true;
+            _activeClimbTargetY = targetHeightY - 0.05f;
+            _climbStartTime = Time.time;
 
             _isGrounded = false;
+            _isOnStairs = false;
             _jumpBufferedUntil = 0f;
             _groundedUntil = 0f;
             _canClimbThisJump = false;
 
             if (mouseLook != null)
-                mouseLook.TriggerClimbShake();
+            {
+                // Ready for future camera effects
+            }
                 
             return true;
         }
@@ -466,41 +518,25 @@ public class PlayerController : MonoBehaviour
     {
         HandleCrushEscape(collision);
 
-        // --- isStairs Contact Logic ---
-        // Detect isStairs via direct collision to catch steep angles raycasts miss.
-        WorldObject wo = collision.gameObject.GetComponentInParent<WorldObject>();
-        if (wo != null && wo.isStairs)
+        // WallCheck: Only consider contacts as climb candidates if they hit our torso/waist area (>0.5m)
+        // This ensures the ground is NEVER treated as a wall for second jumps.
+        foreach (ContactPoint cp in collision.contacts)
         {
-            foreach (ContactPoint cp in collision.contacts)
+            float relativeY = cp.point.y - transform.position.y;
+            
+            // If contact is vertical-ish AND above knee height (0.25m)
+            // This ensures the ground is NEVER treated as a wall, but low obstacles are.
+            if (relativeY > 0.25f && Mathf.Abs(cp.normal.y) < 0.4f)
             {
-                // If touching it with anything but our very top (head)
-                if (cp.normal.y > -0.1f)
-                {
-                    _isOnStairs = true;
-                    _isGrounded = true; // Force grounded state while "gripping"
-                    _stairsContactNormal = cp.normal;
-                    _activePlatform = collision.rigidbody;
-                    break;
-                }
-            }
-        }
-
-        if (!_isGrounded)
-        {
-            foreach (ContactPoint contact in collision.contacts)
-            {
-                if (contact.normal.y < 0.1f)
-                {
-                    _climbCandidateCol = contact.otherCollider;
-                    _climbCandidateTime = Time.time;
-                    break;
-                }
+                _climbCandidateCol = cp.otherCollider;
+                _climbCandidateTime = Time.time;
             }
         }
 
         Rigidbody otherRb = collision.rigidbody;
         if (otherRb == null || otherRb.isKinematic) return;
 
+        WorldObject wo = collision.gameObject.GetComponentInParent<WorldObject>();
         if (wo == null || !wo.canBePushed) return;
 
         Vector3 pushDir = Vector3.zero;

@@ -28,12 +28,12 @@ public class InteractionSystem : MonoBehaviour
     [SerializeField] private float interactionRayRadius = 0.08f;
     [SerializeField] private LayerMask interactMask = ~0;
 
-    [Header("Carry")]
-    [SerializeField] private float carryFollowStrength = 18f;
-    [SerializeField] private float carryMaxSpeed = 10f;
+    [Header("Carry (Legacy/Unused)")]
+    // [SerializeField] private float carryFollowStrength = 18f;
+    // [SerializeField] private float carryMaxSpeed = 10f;
     [SerializeField] private float carryTurnStrength = 14f;
-    [SerializeField] private float carryDrag = 8f;
-    [SerializeField] private float carryAngularDrag = 10f;
+    // [SerializeField] private float carryDrag = 8f;
+    // [SerializeField] private float carryAngularDrag = 10f;
 
     [SerializeField] private float carryScrollStep = 0.2f;
     [Min(0.05f)]
@@ -1386,7 +1386,7 @@ public class InteractionSystem : MonoBehaviour
         
         Destroy(_placementGhost.GetComponent<Rigidbody>());
         foreach(MonoBehaviour mb in _placementGhost.GetComponentsInChildren<MonoBehaviour>())
-            Destroy(mb);
+            mb.enabled = false; // Disable instead of Destroy to avoid "RequiredComponent" dependency errors
             
         Collider[] allCols = _placementGhost.GetComponentsInChildren<Collider>();
         foreach(Collider c in allCols)

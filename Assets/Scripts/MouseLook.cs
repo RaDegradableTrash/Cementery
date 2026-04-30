@@ -41,10 +41,7 @@ public class MouseLook : MonoBehaviour
     [Header("Cursor")]
     [SerializeField] private bool autoLockCursorOnStart = true;
 
-    [Header("Climb Camera Shake")]
-    [SerializeField] private float climbShakePitch = -25f;
-    [SerializeField] private float climbShakeDuration = 0.25f;
-    private float _climbShakeTimer;
+
 
     // ── State ─────────────────────────────────────────────────────────────────
     [HideInInspector] public bool suspendMouseLook = false;
@@ -124,10 +121,7 @@ public class MouseLook : MonoBehaviour
             ApplyAttractOrbit();
     }
 
-    public void TriggerClimbShake()
-    {
-        _climbShakeTimer = climbShakeDuration;
-    }
+
 
     // ── Look ──────────────────────────────────────────────────────────────────
     void ApplyMouseLook()
@@ -137,19 +131,16 @@ public class MouseLook : MonoBehaviour
         float mouseX = (useRawMouseInput ? Input.GetAxisRaw("Mouse X") : Input.GetAxis("Mouse X")) * sensitivityX;
         float mouseY = (useRawMouseInput ? Input.GetAxisRaw("Mouse Y") : Input.GetAxis("Mouse Y")) * sensitivityY;
 
-        float climbPitchOffset = 0f;
-        if (_climbShakeTimer > 0f)
-        {
-            _climbShakeTimer -= Time.deltaTime;
-            float t = _climbShakeTimer / climbShakeDuration;
-            climbPitchOffset = Mathf.Sin(t * Mathf.PI) * climbShakePitch;
-        }
 
-        // Vertical pitch — applied only to the camera
+
+        // Vertical pitch
         _pitch -= mouseY;
-        _pitch  = Mathf.Clamp(_pitch, minVertical, maxVertical);
+        _pitch = Mathf.Clamp(_pitch, minVertical, maxVertical);
+        
         if (!ShouldUseAttractOrbit())
-            transform.localRotation = Quaternion.Euler(_pitch + climbPitchOffset, 0f, 0f);
+        {
+            transform.localRotation = Quaternion.Euler(_pitch, 0f, 0f);
+        }
 
         // Horizontal yaw — rotates the player body so movement stays aligned with the view
         if (player != null)
