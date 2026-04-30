@@ -48,6 +48,11 @@ public class WorldObject : MonoBehaviour
     [Tooltip("If true, the object keeps its upright (ground) orientation when placed on ceilings, " +
              "instead of flipping upside-down. E.g., a lamp hangs from ceiling in its normal posture.")]
     public bool isFlippingRestricted_Ceiling = false;
+
+    [Header("Behavior")]
+    [Tooltip("If true, the player can stand on this object stably without sliding off, " +
+             "and will move along with it if it moves (treated as a platform).")]
+    public bool isStairs = false;
     
     internal bool isPlacedAndAttached = false;
 

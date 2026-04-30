@@ -161,6 +161,44 @@ public class PlayerController : MonoBehaviour
 
         GatherInput();
         HandleHeadBob();
+        UpdateDebugCollisionLog();
+    }
+
+    private float _collisionDebugTimer = 0f;
+    private void UpdateDebugCollisionLog()
+    {
+        _collisionDebugTimer += Time.deltaTime;
+        if (_collisionDebugTimer >= 1f)
+        {
+            _collisionDebugTimer = 0f;
+            
+            CapsuleCollider col = GetComponent<CapsuleCollider>();
+            if (col == null) return;
+
+            // Calculate capsule world points
+            Vector3 point0, point1;
+            float radius = col.radius * Mathf.Max(transform.lossyScale.x, transform.lossyScale.z);
+            float height = col.height * transform.lossyScale.y;
+            Vector3 dir = Vector3.up; // Standard capsule direction is Y
+            
+            float centerOffset = (height / 2f) - radius;
+            point0 = transform.TransformPoint(col.center - dir * centerOffset);
+            point1 = transform.TransformPoint(col.center + dir * centerOffset);
+
+            // Detect all colliders in this area
+            Collider[] hits = Physics.OverlapCapsule(point0, point1, radius, ~0, QueryTriggerInteraction.Collide);
+            
+            if (hits.Length > 1) // 1 because it will always hit itself
+            {
+                string log = $"[Player Collision Debug] Touching {hits.Length - 1} other colliders:\n";
+                foreach (var hit in hits)
+                {
+                    if (hit.gameObject == gameObject) continue;
+                    log += $"- {hit.name} (Layer: {LayerMask.LayerToName(hit.gameObject.layer)}, Trigger: {hit.isTrigger}, Type: {hit.GetType().Name})\n";
+                }
+                Debug.Log(log);
+            }
+        }
     }
 
     void FixedUpdate()
@@ -216,25 +254,84 @@ public class PlayerController : MonoBehaviour
 
         Vector3 targetVelocity = moveDir * speed;
         
-        // Preserve vertical velocity (gravity/jumping)
-        _rb.velocity = new Vector3(targetVelocity.x, _rb.velocity.y, targetVelocity.z);
+        float verticalVelocity = _rb.velocity.y;
+
+        // --- isStairs Aggressive Grip ---
+        if (_isOnStairs)
+        {
+            // If not jumping (upward velocity is low), we "glue" the player to the surface
+            if (verticalVelocity < 0.5f)
+            {
+                // Kill all velocity to prevent sliding down steep slopes
+                _rb.velocity = Vector3.zero;
+                _rb.angularVelocity = Vector3.zero;
+                
+                // Allow movement relative to the slope
+                if (targetVelocity.sqrMagnitude > 0.01f)
+                {
+                    // Project movement onto the slope to allow climbing up/down
+                    Vector3 slopeDir = Vector3.ProjectOnPlane(targetVelocity, _stairsContactNormal);
+                    _rb.velocity = slopeDir;
+                }
+                
+                // Counteract gravity entirely for this frame
+                _rb.AddForce(-Physics.gravity, ForceMode.Acceleration);
+                return; // Skip standard assignment
+            }
+        }
+
+        _rb.velocity = new Vector3(targetVelocity.x, verticalVelocity, targetVelocity.z);
     }
 
-    // ── Jump & Gravity ───────────────────────────────────────────────────────
+    private bool _isOnStairs = false;
+    private Vector3 _stairsContactNormal = Vector3.up;
+
     void CheckGrounded()
     {
+        _isOnStairs = false; // Reset, will be set by Raycast or Collision
+
         // Raycast from slightly inside the capsule bottom straight down.
-        // Raycast is immune to the SphereCast "initial overlap" bug.
         Vector3 origin = transform.position + _col.center - Vector3.up * (_col.height * 0.5f - 0.05f);
         float castDist = 0.15f + groundCheckRadius;
 
-        if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, castDist, groundMask, QueryTriggerInteraction.Ignore))
+        bool hitSomething = false;
+        RaycastHit groundHit;
+
+        // Primary: Straight down ray (standard floor)
+        if (Physics.Raycast(origin, Vector3.down, out groundHit, castDist, groundMask, QueryTriggerInteraction.Ignore))
+        {
+            hitSomething = true;
+        }
+        // Secondary: SphereCast for steep slopes (isStairs support)
+        else if (Physics.SphereCast(origin, _col.radius * 0.8f, Vector3.down, out groundHit, castDist, groundMask, QueryTriggerInteraction.Ignore))
+        {
+            hitSomething = true;
+        }
+
+        if (hitSomething)
         {
             _isGrounded = true;
-            // Only kinematic rigidbodies are real moving platforms.
-            // Dynamic objects (cabinets, physics props) must NOT be treated as platforms
-            // — their movement would directly teleport the player via HandlePlatformMovement.
-            _activePlatform = (hit.rigidbody != null && hit.rigidbody.isKinematic) ? hit.rigidbody : null;
+            
+            bool treatAsPlatform = false;
+            if (groundHit.rigidbody != null)
+            {
+                if (groundHit.rigidbody.isKinematic)
+                {
+                    treatAsPlatform = true;
+                }
+                else
+                {
+                    WorldObject wo = groundHit.collider.GetComponentInParent<WorldObject>();
+                    if (wo != null && wo.isStairs)
+                    {
+                        treatAsPlatform = true;
+                        _isOnStairs = true;
+                        _stairsContactNormal = groundHit.normal;
+                    }
+                }
+            }
+
+            _activePlatform = treatAsPlatform ? groundHit.rigidbody : null;
         }
         else
         {
@@ -260,10 +357,10 @@ public class PlayerController : MonoBehaviour
     {
         if (Time.time > _jumpBufferedUntil) return;
 
-        bool canNormalJump = Time.time <= _groundedUntil && _jumpCount == 0;
+        bool canNormalJump = (Time.time <= _groundedUntil || _isOnStairs) && _jumpCount == 0;
         bool canDoubleJump = _jumpCount > 0 && _jumpCount < maxJumps;
         
-        // Initial jump from ground/coyote
+        // Initial jump from ground/stairs/coyote
         if (canNormalJump)
         {
             ExecuteJump();
@@ -368,6 +465,26 @@ public class PlayerController : MonoBehaviour
     void OnCollisionStay(Collision collision)
     {
         HandleCrushEscape(collision);
+
+        // --- isStairs Contact Logic ---
+        // Detect isStairs via direct collision to catch steep angles raycasts miss.
+        WorldObject wo = collision.gameObject.GetComponentInParent<WorldObject>();
+        if (wo != null && wo.isStairs)
+        {
+            foreach (ContactPoint cp in collision.contacts)
+            {
+                // If touching it with anything but our very top (head)
+                if (cp.normal.y > -0.1f)
+                {
+                    _isOnStairs = true;
+                    _isGrounded = true; // Force grounded state while "gripping"
+                    _stairsContactNormal = cp.normal;
+                    _activePlatform = collision.rigidbody;
+                    break;
+                }
+            }
+        }
+
         if (!_isGrounded)
         {
             foreach (ContactPoint contact in collision.contacts)
@@ -384,7 +501,6 @@ public class PlayerController : MonoBehaviour
         Rigidbody otherRb = collision.rigidbody;
         if (otherRb == null || otherRb.isKinematic) return;
 
-        WorldObject wo = collision.gameObject.GetComponentInParent<WorldObject>();
         if (wo == null || !wo.canBePushed) return;
 
         Vector3 pushDir = Vector3.zero;
