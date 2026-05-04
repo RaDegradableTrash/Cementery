@@ -105,9 +105,10 @@ public class InteractionSystem : MonoBehaviour
 
     // Transition Animation
     private float _carryTransitionTimer = 0f;
-    private const float CarryTransitionDuration = 0.25f;
+    private const float CarryTransitionDuration = 0.35f; // Slightly longer for better feel
     private Vector3 _carryStartLocalPos;
     private Quaternion _carryStartLocalRot;
+    private float _carrySmoothDistance;
 
     private Coroutine _hideInfoCo;
     private Coroutine _hideCarryDistanceLimitCo;
@@ -236,10 +237,6 @@ public class InteractionSystem : MonoBehaviour
     {
         if (_carriedRb == null) return;
         
-        // Mode-based direction LERP (Normal vs Placement)
-        Vector3 targetDir = _isPlacementMode ? new Vector3(0.55f, -0.6f, 0.8f).normalized : unifiedCarryAnchorLocalOffset.normalized;
-        _carryRayLocalDir = Vector3.Lerp(_carryRayLocalDir, targetDir, Time.deltaTime * 12f);
-
         // Non-heavy (kinematic) objects: drive position
         if (_carriedWo == null || !_carriedWo.isHeavy)
             DriveCarryKinematic();
@@ -333,27 +330,42 @@ public class InteractionSystem : MonoBehaviour
         if (playerCamera == null || _carriedRb == null) return;
         Transform camT = playerCamera.transform;
 
-        // 1. Calculate Base Target Orientation & Position
+        // 1. Mode-based direction LERP (Normal vs Placement)
+        Vector3 targetDirLocal = _isPlacementMode ? new Vector3(0.55f, -0.6f, 0.8f).normalized : unifiedCarryAnchorLocalOffset.normalized;
+        _carryRayLocalDir = Vector3.Lerp(_carryRayLocalDir, targetDirLocal, Time.deltaTime * 10f);
+        
+        // 2. Calculate Base Target Orientation
         Quaternion targetRot = GetCarryTargetRotationYawOnly();
         Vector3 rayDirWorld = camT.TransformDirection(_carryRayLocalDir).normalized;
-        float dist = ClampCarryDistance(_carryRayDistance);
-        Vector3 targetPos = camT.position + rayDirWorld * dist;
-
-        // 2. Wall/Obstacle Avoidance
+        
+        // 3. Smooth Distance Calculation (Wall Avoidance + Scroll)
+        float desiredDist = ClampCarryDistance(_carryRayDistance);
         float castRadius = Mathf.Max(0.05f, _carriedRadius * 0.8f);
-        if (Physics.SphereCast(camT.position, castRadius, rayDirWorld, out RaycastHit hit, dist, interactMask, QueryTriggerInteraction.Ignore))
+        
+        if (Physics.SphereCast(camT.position, castRadius, rayDirWorld, out RaycastHit hit, desiredDist, interactMask, QueryTriggerInteraction.Ignore))
         {
             if (!IsIgnoredCarryHitCollider(hit.collider))
-                targetPos = camT.position + rayDirWorld * Mathf.Max(0.15f, hit.distance - 0.02f);
+            {
+                desiredDist = Mathf.Max(0.15f, hit.distance - 0.02f);
+            }
         }
 
-        // 3. Transition Animation (LERP from original world pickup point)
+        // Smoothly transition the distance to avoid snapping when hitting walls
+        _carrySmoothDistance = Mathf.Lerp(_carrySmoothDistance, desiredDist, Time.deltaTime * 15f);
+        Vector3 targetPos = camT.position + rayDirWorld * _carrySmoothDistance;
+
+        // 4. Transition Animation (LERP from original world pickup point)
         if (_carryTransitionTimer < CarryTransitionDuration)
         {
             _carryTransitionTimer += Time.deltaTime;
-            float t = Mathf.SmoothStep(0f, 1f, _carryTransitionTimer / CarryTransitionDuration);
+            float progress = _carryTransitionTimer / CarryTransitionDuration;
+            
+            // Variable speed: Ease Out Cubic (starts fast, slows down)
+            float t = 1f - Mathf.Pow(1f - progress, 3f);
+            
             Vector3 startWorldPos = camT.TransformPoint(_carryStartLocalPos);
             Quaternion startWorldRot = camT.rotation * _carryStartLocalRot;
+            
             _carriedRb.transform.position = Vector3.Lerp(startWorldPos, targetPos, t);
             _carriedRb.transform.rotation = Quaternion.Slerp(startWorldRot, targetRot, t);
         }
@@ -1119,10 +1131,9 @@ public class InteractionSystem : MonoBehaviour
             _carryStartLocalRot = Quaternion.Inverse(camT.rotation) * _carriedTransform.rotation;
  
             // Target Anchor: Start with current distance but target unified direction
-            // DriveCarryKinematic will handle the rest of the smoothing.
-            Vector3 targetLocalAnchor = GetUnifiedCarryAnchorLocalOffset();
-            _carryRayLocalDir = _carryStartLocalPos.normalized; // Start with current direction to avoid pop
-            _carryRayDistance = targetLocalAnchor.magnitude;    // Target unified distance
+            _carryRayDistance = GetUnifiedCarryAnchorLocalOffset().magnitude;
+            _carryRayLocalDir = _carryStartLocalPos.normalized;
+            _carrySmoothDistance = _carryStartLocalPos.magnitude; // Start smooth dist from current
         }
 
         Vector3 flatCarryFwd = GetCarryReferenceForward();

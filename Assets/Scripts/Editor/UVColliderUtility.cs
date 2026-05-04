@@ -61,40 +61,86 @@ namespace RVSystem.Editor
             MeshFilter[] meshFilters = targetRoot.GetComponentsInChildren<MeshFilter>(true);
             int count = 0;
 
+            GameObject colliderContainer = null;
+            if (useFittedBoxes)
+            {
+                // Find or create a dedicated container for the compound colliders
+                Transform existingContainer = targetRoot.transform.Find("Generated_Colliders");
+                if (existingContainer != null)
+                {
+                    if (removeExisting)
+                    {
+                        Undo.DestroyObjectImmediate(existingContainer.gameObject);
+                        existingContainer = null;
+                    }
+                }
+                
+                if (existingContainer == null)
+                {
+                    colliderContainer = new GameObject("Generated_Colliders");
+                    colliderContainer.transform.SetParent(targetRoot.transform, false);
+                    colliderContainer.transform.localPosition = Vector3.zero;
+                    colliderContainer.transform.localRotation = Quaternion.identity;
+                    Undo.RegisterCreatedObjectUndo(colliderContainer, "Create Collider Container");
+                }
+                else
+                {
+                    colliderContainer = existingContainer.gameObject;
+                }
+            }
+
             foreach (var mf in meshFilters)
             {
                 bool isWheel = mf.name.ToLower().Contains("wheel");
                 
                 if (targetMode == TargetMode.BodyOnly && isWheel) continue;
                 if (targetMode == TargetMode.WheelsOnly && !isWheel) continue;
-
                 if (mf.sharedMesh == null) continue;
 
-                GameObject go = mf.gameObject;
+                GameObject targetGo = mf.gameObject;
 
-                if (removeExisting)
+                if (removeExisting && !useFittedBoxes)
                 {
-                    Collider[] existing = go.GetComponents<Collider>();
+                    // Clean up direct colliders if not in compound mode
+                    Collider[] existing = targetGo.GetComponents<Collider>();
                     foreach (var c in existing) 
                     {
-                        // Don't remove WheelColliders, they are precious!
                         if (c is WheelCollider) continue;
-                        DestroyImmediate(c);
+                        Undo.DestroyObjectImmediate(c);
                     }
                 }
 
                 if (useConvexMesh)
                 {
-                    MeshCollider mc = go.AddComponent<MeshCollider>();
+                    MeshCollider mc = Undo.AddComponent<MeshCollider>(targetGo);
                     mc.sharedMesh = mf.sharedMesh;
                     mc.convex = true;
                     count++;
                 }
                 else if (useFittedBoxes)
                 {
-                    BoxCollider bc = go.AddComponent<BoxCollider>();
+                    // Create a separate object for this box to "piece together" the complex shape
+                    GameObject boxObj = new GameObject(mf.name + "_Collider");
+                    boxObj.transform.SetParent(colliderContainer.transform, false);
+                    
+                    // Sync transform with the original mesh
+                    boxObj.transform.position = mf.transform.position;
+                    boxObj.transform.rotation = mf.transform.rotation;
+                    
+                    // Adjust local scale to match world lossy scale, accounting for the container's hierarchy
+                    Vector3 lossy = mf.transform.lossyScale;
+                    Vector3 containerLossy = colliderContainer.transform.lossyScale;
+                    boxObj.transform.localScale = new Vector3(
+                        containerLossy.x != 0 ? lossy.x / containerLossy.x : lossy.x,
+                        containerLossy.y != 0 ? lossy.y / containerLossy.y : lossy.y,
+                        containerLossy.z != 0 ? lossy.z / containerLossy.z : lossy.z
+                    );
+
+                    BoxCollider bc = boxObj.AddComponent<BoxCollider>();
                     bc.center = mf.sharedMesh.bounds.center;
                     bc.size = mf.sharedMesh.bounds.size;
+                    
+                    Undo.RegisterCreatedObjectUndo(boxObj, "Create Box Collider Piece");
                     count++;
                 }
             }

@@ -61,6 +61,7 @@ public class PlayerDeathFlowController : MonoBehaviour
     private Quaternion _spawnRot;
     private Vector3 _frozenCameraPos;
     private bool _isDead;
+    private float _reviveProtectionTimer = 0f;
     private Vector3 _cameraOriginalLocalPos;
     private Quaternion _cameraOriginalLocalRot;
     private Coroutine _uiCo;
@@ -173,6 +174,12 @@ public class PlayerDeathFlowController : MonoBehaviour
         if (_isDead || _playerRoot == null)
             return;
 
+        if (_reviveProtectionTimer > 0f)
+        {
+            _reviveProtectionTimer -= Time.deltaTime;
+            return;
+        }
+
         if (_playerRoot.position.y <= deathY)
             EnterDeathState();
     }
@@ -235,7 +242,13 @@ public class PlayerDeathFlowController : MonoBehaviour
             Transform playerBody = FindChildByName(_playerRoot, "PlayerBodyCapsule");
             lookTarget = playerBody != null ? playerBody : _playerRoot;
         }
+
+        if (_playerRb == null && _playerRoot != null)
+        {
+            _playerRb = _playerRoot.GetComponent<Rigidbody>();
+        }
     }
+    private Rigidbody _playerRb;
 
     private void EnterDeathState()
     {
@@ -284,6 +297,13 @@ public class PlayerDeathFlowController : MonoBehaviour
             cc.enabled = false;
 
         _playerRoot.SetPositionAndRotation(_spawnPos, _spawnRot);
+        if (_playerRb != null)
+        {
+            _playerRb.position = _spawnPos;
+            _playerRb.rotation = _spawnRot;
+            _playerRb.velocity = Vector3.zero;
+            _playerRb.angularVelocity = Vector3.zero;
+        }
 
         if (mainCamera != null)
         {
@@ -298,6 +318,7 @@ public class PlayerDeathFlowController : MonoBehaviour
             _playerController.ResetVelocity();
 
         _isDead = false;
+        _reviveProtectionTimer = 0.2f; // Give it a moment to settle
         SetNonMovementSystemsEnabled(true);
         HideDeathUiImmediate();
         

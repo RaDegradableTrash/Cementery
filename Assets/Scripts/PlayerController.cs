@@ -247,7 +247,11 @@ public class PlayerController : MonoBehaviour
     public void ResetVelocity()
     {
         if (_rb != null)
-            _rb.velocity = new Vector3(0f, _rb.velocity.y, 0f);
+        {
+            _rb.velocity = Vector3.zero;
+            _rb.angularVelocity = Vector3.zero;
+        }
+        _jumpCount = 0;
     }
 
     void GatherInput()
