@@ -1421,6 +1421,7 @@ public class InteractionSystem : MonoBehaviour
         Ray ray = new Ray(GetInteractionRayOrigin(), GetInteractionRayDirection(GetInteractionRayOrigin()));
         EnsurePlayerCollidersCached();
         
+        float maxReach = GetEffectiveCarryRangeFromCamera();
         RaycastHit[] hits = Physics.RaycastAll(ray, placementRayRange, placementMask, QueryTriggerInteraction.Ignore);
         
         // Find the nearest valid hit (any surface)
@@ -1471,8 +1472,33 @@ public class InteractionSystem : MonoBehaviour
             if (canPlaceOnSurface)
             {
                 _placementGhost.SetActive(true);
+                
+                // 1. Initial placement on the surface
                 _placementPosition = bestHit.point;
                 _placementSurfaceNormal = bestHit.normal;
+
+                // 2. If the hit is beyond reach, clamp it to the maxReach boundary 
+                // but try to keep it snapped to the surface to avoid floating.
+                if (bestHit.distance > maxReach)
+                {
+                    // Find the point at maxReach along the original ray
+                    Vector3 boundaryPointOnRay = ray.origin + ray.direction * maxReach;
+                    
+                    // Try to snap this boundary point back onto the surface by casting along the surface normal
+                    // This allows the ghost to "slide" along the surface but stop at the 3m reach limit.
+                    if (Physics.Raycast(boundaryPointOnRay + bestHit.normal * 2f, -bestHit.normal, out RaycastHit snapHit, 4f, placementMask, QueryTriggerInteraction.Ignore))
+                    {
+                        _placementPosition = snapHit.point;
+                    }
+                    else
+                    {
+                        // Fallback: if we can't snap to the surface, just use the hit point but it will be out of range.
+                        // However, to satisfy "don't let it float", we could also choose to hide it or keep it at bestHit.point
+                        // but mark it invalid. But the user wants it "pressed against the limit".
+                        // So we'll use the clamped ray point as a last resort.
+                        _placementPosition = boundaryPointOnRay;
+                    }
+                }
 
                 _placementValidMat.SetVector("_PlaneNormal", bestHit.normal);
                 _placementValidMat.SetVector("_PlanePoint", bestHit.point);
@@ -1718,7 +1744,7 @@ public class InteractionSystem : MonoBehaviour
     void CheckPlacementValidity()
     {
         _isPlacementValid = true;
-        
+
         Renderer[] ghostRenderers = _placementGhost.GetComponentsInChildren<Renderer>();
         Bounds bounds = new Bounds(_placementGhost.transform.position, Vector3.zero);
         bool hasBounds = false;
@@ -1729,7 +1755,7 @@ public class InteractionSystem : MonoBehaviour
             else { bounds = r.bounds; hasBounds = true; }
         }
         
-        if (hasBounds)
+        if (_isPlacementValid && hasBounds)
         {
             Vector3 extents = bounds.extents - Vector3.one * placementOverlapShrink;
             extents.x = Mathf.Max(0.01f, extents.x);
