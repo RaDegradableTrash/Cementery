@@ -713,12 +713,23 @@ public class InteractionSystem : MonoBehaviour
             if (c == null) continue;
             if (IsIgnoredCarryHitCollider(c)) continue;
 
+            // Unity SphereCast returns (0,0,0) and distance 0 if the sphere overlaps the collider at the start.
+            // This causes straight-on views to fail because distance to origin is evaluated instead of distance to ray.
+            Vector3 pointToEvaluate = hit.point;
+            if (hit.distance == 0f && hit.point == Vector3.zero)
+            {
+                pointToEvaluate = c.ClosestPoint(ray.origin);
+            }
+
             // Angular deviation: how far the hit point is from the ray center line
-            Vector3 toHit = hit.point - ray.origin;
+            Vector3 toHit = pointToEvaluate - ray.origin;
             float alongRay = Vector3.Dot(toHit, ray.direction);
-            if (alongRay < 0.001f) alongRay = hit.distance; // Fallback for zero-distance hits
+            
+            // Prevent negative projection if the closest point is slightly behind the camera
+            if (alongRay < 0.001f) alongRay = 0.001f; 
+            
             Vector3 projected = ray.origin + ray.direction * alongRay;
-            float lateralDist = Vector3.Distance(hit.point, projected);
+            float lateralDist = Vector3.Distance(pointToEvaluate, projected);
             
             // Score: prioritize center alignment, use distance as secondary factor
             // lateralDist weighted heavily so centered objects always win

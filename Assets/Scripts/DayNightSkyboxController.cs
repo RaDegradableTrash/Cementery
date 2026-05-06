@@ -92,8 +92,8 @@ public class DayNightSkyboxController : MonoBehaviour
     [Range(0f, 8f)] public float nightExposure = 0.2f;
     [Range(0f, 5f)] public float dayAtmosphereThickness = 0.8f;
     [Range(0f, 5f)] public float nightAtmosphereThickness = 0.28f;
-    [Range(0.001f, 0.05f)] public float sunDiskSize = 0.008f;
-    [Range(0.0005f, 0.03f)] public float sunDiskSoftness = 0.0018f;
+    [Range(0.001f, 0.2f)] public float sunDiskSize = 4f;
+    [Range(0.0005f, 0.1f)] public float sunDiskSoftness = 0.005f;
 
     [Header("Ambient & Fog")]
     public bool controlAmbient = true;
@@ -232,8 +232,8 @@ public class DayNightSkyboxController : MonoBehaviour
         nightExposure = Mathf.Clamp(nightExposure, 0f, 8f);
         dayAtmosphereThickness = Mathf.Clamp(dayAtmosphereThickness, 0f, 5f);
         nightAtmosphereThickness = Mathf.Clamp(nightAtmosphereThickness, 0f, 5f);
-        sunDiskSize = Mathf.Clamp(sunDiskSize, 0.001f, 0.05f);
-        sunDiskSoftness = Mathf.Clamp(sunDiskSoftness, 0.0005f, 0.03f);
+        sunDiskSize = Mathf.Clamp(sunDiskSize, 0.001f, 0.2f);
+        sunDiskSoftness = Mathf.Clamp(sunDiskSoftness, 0.0005f, 0.1f);
 
         ambientIntensity = Mathf.Clamp(ambientIntensity, 0f, 2f);
         dayReflectionIntensity = Mathf.Clamp(dayReflectionIntensity, 0f, 2f);

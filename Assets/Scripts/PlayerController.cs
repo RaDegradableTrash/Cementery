@@ -303,27 +303,31 @@ public class PlayerController : MonoBehaviour
         float verticalVelocity = _rb.velocity.y;
 
         // --- isStairs Aggressive Grip ---
-        if (_isOnStairs)
+        if (_isOnStairs && verticalVelocity < 0.5f)
         {
-            // If not jumping (upward velocity is low), we "glue" the player to the surface
-            if (verticalVelocity < 0.5f)
+            // FUNDAMENTAL FIX: Do not override _rb.velocity on stairs. 
+            // Forcing velocity on a ramp into a wall causes deep wedge penetration, resulting in explosive pop-ups.
+            
+            // Counteract most of gravity so we don't slide down easily, but keep 10% to stay grounded and avoid jitter.
+            _rb.AddForce(-Physics.gravity * 0.9f, ForceMode.Acceleration);
+            
+            Vector3 currentVel = _rb.velocity;
+            Vector3 desiredVel = Vector3.zero;
+            
+            if (targetVelocity.sqrMagnitude > 0.01f)
             {
-                // Kill all velocity to prevent sliding down steep slopes
-                _rb.velocity = Vector3.zero;
-                _rb.angularVelocity = Vector3.zero;
-                
-                // Allow movement relative to the slope
-                if (targetVelocity.sqrMagnitude > 0.01f)
-                {
-                    // Project movement onto the slope to allow climbing up/down
-                    Vector3 slopeDir = Vector3.ProjectOnPlane(targetVelocity, _stairsContactNormal);
-                    _rb.velocity = slopeDir;
-                }
-                
-                // Counteract gravity entirely for this frame
-                _rb.AddForce(-Physics.gravity, ForceMode.Acceleration);
-                return; // Skip standard assignment
+                desiredVel = Vector3.ProjectOnPlane(targetVelocity, _stairsContactNormal);
             }
+            
+            Vector3 velChange = desiredVel - currentVel;
+            
+            // Clamp acceleration so the physics solver can still push us back from walls
+            float maxStairsAccel = 120f;
+            velChange = Vector3.ClampMagnitude(velChange, maxStairsAccel * Time.fixedDeltaTime);
+            
+            _rb.AddForce(velChange, ForceMode.VelocityChange);
+            
+            return; // Skip standard assignment
         }
 
         // --- Slow Climb Physics ---
