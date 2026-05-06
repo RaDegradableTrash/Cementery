@@ -6,6 +6,7 @@ using UnityEngine.Rendering;
 /// PBR-friendly day/night lighting controller for URP.
 /// </summary>
 [DefaultExecutionOrder(-800)]
+[ExecuteAlways]
 public class DayNightSkyboxController : MonoBehaviour
 {
     private const string DefaultSkyboxResourcePath = "Skybox/MinecraftDayNightSkybox";
@@ -21,7 +22,7 @@ public class DayNightSkyboxController : MonoBehaviour
 
     [Header("Sun")]
     public Light sunLight;
-    [Min(0f)] public float daySunIntensity = 0.07f;
+    [Min(0f)] public float daySunIntensity = 0.005f;
     [Min(0f)] public float nightSunIntensity = 0.03f;
     public Color daySunColor = new Color(1f, 0.95f, 0.86f, 1f);
     public Color sunriseSunColor = new Color(0.98f, 0.72f, 0.52f, 1f);
@@ -178,25 +179,28 @@ public class DayNightSkyboxController : MonoBehaviour
     {
         float delta = useUnscaledTime ? Time.unscaledDeltaTime : Time.deltaTime;
 
-        if (autoAdvance)
-            timeOfDay = Mathf.Repeat(timeOfDay + delta / Mathf.Max(10f, dayLengthSeconds), 1f);
-
-        if (enforceDynamicProbeSampling && keepSyncingDynamicProbeSampling)
+        if (Application.isPlaying)
         {
-            _probeSyncTimer += delta;
-            if (optimizeForStableFrameTime)
-                _probeCacheRefreshTimer += delta;
+            if (autoAdvance)
+                timeOfDay = Mathf.Repeat(timeOfDay + delta / Mathf.Max(10f, dayLengthSeconds), 1f);
 
-            if (optimizeForStableFrameTime && _probeCacheRefreshTimer >= probeRendererCacheRefreshInterval)
+            if (enforceDynamicProbeSampling && keepSyncingDynamicProbeSampling)
             {
-                _probeCacheRefreshTimer = 0f;
-                RebuildDynamicRendererCache();
-            }
+                _probeSyncTimer += delta;
+                if (optimizeForStableFrameTime)
+                    _probeCacheRefreshTimer += delta;
 
-            if (_probeSyncTimer >= probeSyncInterval)
-            {
-                _probeSyncTimer = 0f;
-                SyncDynamicProbeSampling();
+                if (optimizeForStableFrameTime && _probeCacheRefreshTimer >= probeRendererCacheRefreshInterval)
+                {
+                    _probeCacheRefreshTimer = 0f;
+                    RebuildDynamicRendererCache();
+                }
+
+                if (_probeSyncTimer >= probeSyncInterval)
+                {
+                    _probeSyncTimer = 0f;
+                    SyncDynamicProbeSampling();
+                }
             }
         }
 
@@ -244,8 +248,9 @@ public class DayNightSkyboxController : MonoBehaviour
                 RebuildDynamicRendererCache();
 
             SyncDynamicProbeSampling(true);
-            ApplyCycle(0f, true);
         }
+        
+        ApplyCycle(0f, true);
     }
 
     private void OnDestroy()

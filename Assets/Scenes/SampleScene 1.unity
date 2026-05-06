@@ -15,18 +15,18 @@ RenderSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 9
   m_Fog: 0
-  m_FogColor: {r: 0.1792453, g: 0.1792453, b: 0.1792453, a: 1}
+  m_FogColor: {r: 0.44764614, g: 0.49797097, b: 0.56653666, a: 1}
   m_FogMode: 3
   m_FogDensity: 0.01
   m_LinearFogStart: 0
   m_LinearFogEnd: 300
-  m_AmbientSkyColor: {r: 0.8773585, g: 0.49247503, b: 0.1448469, a: 1}
-  m_AmbientEquatorColor: {r: 0.007125, g: 0.0078125, b: 0.0083125, a: 1}
-  m_AmbientGroundColor: {r: 0.047, g: 0.043, b: 0.035, a: 1}
+  m_AmbientSkyColor: {r: 0.20833582, g: 0.25129932, b: 0.29602197, a: 1}
+  m_AmbientEquatorColor: {r: 0.16361317, g: 0.18185405, b: 0.20833582, a: 1}
+  m_AmbientGroundColor: {r: 0.08592703, g: 0.0941679, b: 0.103288345, a: 1}
   m_AmbientIntensity: 1
-  m_AmbientMode: 3
+  m_AmbientMode: 1
   m_SubtractiveShadowColor: {r: 0.16398183, g: 0.39746675, b: 0.5188679, a: 1}
-  m_SkyboxMaterial: {fileID: 0}
+  m_SkyboxMaterial: {fileID: 1357444895}
   m_HaloStrength: 0.5
   m_FlareStrength: 1
   m_FlareFadeSpeed: 3
@@ -35,7 +35,7 @@ RenderSettings:
   m_DefaultReflectionMode: 0
   m_DefaultReflectionResolution: 128
   m_ReflectionBounces: 1
-  m_ReflectionIntensity: 1
+  m_ReflectionIntensity: 0.88565713
   m_CustomReflection: {fileID: 0}
   m_Sun: {fileID: 0}
   m_UseRadianceAmbientProbe: 0
@@ -1213,9 +1213,9 @@ MonoBehaviour:
   sunAzimuth: 165
   skyboxTemplate: {fileID: 0}
   sunLight: {fileID: 1838183524}
-  daySunIntensity: 0.5
-  nightSunIntensity: 0.03
-  daySunColor: {r: 1, g: 0.95, b: 0.86, a: 1}
+  daySunIntensity: 0.25
+  nightSunIntensity: 0.05
+  daySunColor: {r: 0.8773585, g: 0.8399972, b: 0.7738964, a: 1}
   sunriseSunColor: {r: 0.98, g: 0.72, b: 0.52, a: 1}
   nightSunColor: {r: 0.38, g: 0.46, b: 0.62, a: 1}
   shapeSunIntensityByElevation: 1
@@ -1255,10 +1255,10 @@ MonoBehaviour:
   antiBandingMaxCascades: 2
   antiBandingMinShadowBias: 0.02
   antiBandingMinShadowNormalBias: 0.28
-  daySkyTint: {r: 0.47, g: 0.52, b: 0.6, a: 1}
-  sunsetSkyTint: {r: 0.82, g: 0.58, b: 0.47, a: 1}
-  nightSkyTint: {r: 0.04, g: 0.07, b: 0.14, a: 1}
-  dayGroundColor: {r: 0.34, g: 0.37, b: 0.42, a: 1}
+  daySkyTint: {r: 0.4510502, g: 0.48148268, b: 0.5283019, a: 1}
+  sunsetSkyTint: {r: 0.7075472, g: 0.49938554, b: 0.4038359, a: 1}
+  nightSkyTint: {r: 0.09692062, g: 0.13095954, b: 0.20754719, a: 1}
+  dayGroundColor: {r: 0.3013083, g: 0.3180202, b: 0.3490566, a: 1}
   nightGroundColor: {r: 0.02, g: 0.03, b: 0.05, a: 1}
   dayExposure: 1
   nightExposure: 0.2
@@ -5650,6 +5650,46 @@ BoxCollider:
   serializedVersion: 3
   m_Size: {x: 0.004286077, y: 0.0060971063, z: 0.01951339}
   m_Center: {x: -0.00004909581, y: -0.0077214953, z: 0.000012740212}
+--- !u!21 &1357444895
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Runtime_DayNightSkybox
+  m_Shader: {fileID: 106, guid: 0000000000000000f000000000000000, type: 0}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords:
+  - _SUNDISK_HIGH_QUALITY
+  m_InvalidKeywords: []
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs: []
+    m_Ints: []
+    m_Floats:
+    - _AtmosphereThickness: 0.7085257
+    - _Exposure: 0.8592703
+    - _GodrayPower: 2.6
+    - _GodrayStrength: 0
+    - _SunDisk: 2
+    - _SunSize: 0.008
+    - _SunSizeConvergence: 5
+    - _SunSoftness: 0.0018
+    m_Colors:
+    - _GodrayTint: {r: 1, g: 0.82, b: 0.62, a: 1}
+    - _GroundColor: {r: 0.25182277, g: 0.26735395, b: 0.29644892, a: 1}
+    - _SkyTint: {r: 0.3887545, g: 0.4198214, b: 0.47187725, a: 1}
+    - _SunColor: {r: 1, g: 0.956, b: 0.84, a: 1}
+  m_BuildTextureStacks: []
 --- !u!1 &1373699320
 GameObject:
   m_ObjectHideFlags: 0
@@ -8961,8 +9001,8 @@ Light:
   serializedVersion: 10
   m_Type: 1
   m_Shape: 0
-  m_Color: {r: 1, g: 1, b: 1, a: 1}
-  m_Intensity: 100000
+  m_Color: {r: 0.7898671, g: 0.77315104, b: 0.74682415, a: 1}
+  m_Intensity: 0.20489287
   m_Range: 10
   m_SpotAngle: 30
   m_InnerSpotAngle: 21.80208
@@ -8970,11 +9010,11 @@ Light:
   m_Shadows:
     m_Type: 2
     m_Resolution: -1
-    m_CustomResolution: -1
-    m_Strength: 1
-    m_Bias: 0.01
-    m_NormalBias: 0.1
-    m_NearPlane: 10
+    m_CustomResolution: 4096
+    m_Strength: 0.9736132
+    m_Bias: 0.05
+    m_NormalBias: 0.4
+    m_NearPlane: 0.2
     m_CullingMatrixOverride:
       e00: 1
       e01: 0
@@ -9020,7 +9060,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1838183523}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.40821788, y: -0.23456968, z: 0.10938163, w: 0.8754261}
+  m_LocalRotation: {x: 0.05032883, y: 0.9147791, z: -0.38228524, w: 0.12043301}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
