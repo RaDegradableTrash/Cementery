@@ -340,10 +340,16 @@ public class PlayerController : MonoBehaviour
 
     void CheckGrounded()
     {
-        // GroundCheck: Narrow downward spherecast (0.1m radius) to avoid walls
-        float radius = 0.1f;
-        float castDist = 0.15f;
-        Vector3 origin = transform.position + Vector3.up * 0.1f;
+        if (_col == null) return;
+        
+        float radius = _col.radius * 0.9f;
+        // Calculate the true bottom of the capsule in world space, independent of pivot point
+        Vector3 localBottom = _col.center + Vector3.down * (_col.height / 2f);
+        Vector3 worldBottom = transform.TransformPoint(localBottom);
+        
+        // Start the spherecast slightly above the bottom so it doesn't start already clipped into the ground
+        Vector3 origin = worldBottom + Vector3.up * (radius + 0.05f);
+        float castDist = 0.15f; 
         
         _isGrounded = false;
         if (Physics.SphereCast(origin, radius, Vector3.down, out RaycastHit hit, castDist, groundMask, QueryTriggerInteraction.Ignore))

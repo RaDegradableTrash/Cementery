@@ -43,7 +43,6 @@ public class InteractionSystem : MonoBehaviour
     [SerializeField] private float carryScrollDirection = 1f;
 
     [Header("Carry Hold Anchor")]
-    [SerializeField] private bool useUnifiedCarryAnchor = true;
     [SerializeField] private Vector3 unifiedCarryAnchorLocalOffset = new Vector3(0.32f, -0.2f, 1.15f);
 
     [Header("UI Prompts")]
