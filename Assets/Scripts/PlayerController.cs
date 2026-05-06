@@ -233,6 +233,10 @@ public class PlayerController : MonoBehaviour
 
         HandleMovement();
         HandleJump();
+        
+        // Clear collision state for the upcoming physics step
+        _isTouchingWall = false;
+        _wallNormal = Vector3.zero;
     }
 
     bool IsInventoryModeActive()
@@ -284,6 +288,18 @@ public class PlayerController : MonoBehaviour
 
         Vector3 targetVelocity = moveDir * speed;
         
+        // --- Wall Slide Projection ---
+        // Prevent setting velocity into walls, which causes severe clipping and teleportation
+        if (_isTouchingWall)
+        {
+            // Flatten the wall normal to prevent projection from launching us into the air or ground
+            Vector3 flatWallNormal = new Vector3(_wallNormal.x, 0, _wallNormal.z).normalized;
+            if (flatWallNormal.sqrMagnitude > 0.001f && Vector3.Dot(targetVelocity, flatWallNormal) < 0)
+            {
+                targetVelocity = Vector3.ProjectOnPlane(targetVelocity, flatWallNormal);
+            }
+        }
+        
         float verticalVelocity = _rb.velocity.y;
 
         // --- isStairs Aggressive Grip ---
@@ -333,7 +349,24 @@ public class PlayerController : MonoBehaviour
         }
 
         // --- Final Velocity Assignment ---
-        _rb.velocity = new Vector3(targetVelocity.x, verticalVelocity, targetVelocity.z);
+        // FUNDAMENTAL FIX: Instead of hard-overriding _rb.velocity (which ignores physics 
+        // bounce-back and causes teleportation), we calculate the required velocity change 
+        // and apply it as a clamped force.
+        Vector3 currentHorizontal = new Vector3(_rb.velocity.x, 0, _rb.velocity.z);
+        Vector3 velocityChange = targetVelocity - currentHorizontal;
+        
+        // Clamp acceleration to prevent infinite pushing force (allows physics to push back)
+        float maxAccel = 150f; 
+        velocityChange = Vector3.ClampMagnitude(velocityChange, maxAccel * Time.fixedDeltaTime);
+        
+        _rb.AddForce(velocityChange, ForceMode.VelocityChange);
+        
+        // We only forcefully override the Y velocity if our custom mechanics (like struggle or stairs) modified it.
+        // Otherwise, we leave the Y velocity exactly as the physics engine calculated it!
+        if (Mathf.Abs(verticalVelocity - _rb.velocity.y) > 0.001f)
+        {
+            _rb.velocity = new Vector3(_rb.velocity.x, verticalVelocity, _rb.velocity.z);
+        }
     }
 
 
@@ -371,12 +404,19 @@ public class PlayerController : MonoBehaviour
     {
         if (_activePlatform == null) return;
         
-        // If the platform moved, nudge the player by the same amount to prevent slipping/clipping
-        Vector3 platformDelta = _activePlatform.position - _lastPlatformPos;
-        if (platformDelta.sqrMagnitude > 0.0001f && platformDelta.sqrMagnitude < 100f)
+        // ONLY manually track platform position if it's a Kinematic (script-driven) platform like an elevator.
+        // For dynamic physics objects (like boxes or debris), we must NOT manually teleport the player,
+        // because standard physics friction handles the movement naturally. Manual teleports cause severe clipping.
+        if (_activePlatform.isKinematic)
         {
-            _rb.position += platformDelta;
+            Vector3 platformDelta = _activePlatform.position - _lastPlatformPos;
+            if (platformDelta.sqrMagnitude > 0.0001f && platformDelta.sqrMagnitude < 100f)
+            {
+                // MovePosition is safer than direct position assignment for dynamic rigidbodies
+                _rb.MovePosition(_rb.position + platformDelta);
+            }
         }
+        
         _lastPlatformPos = _activePlatform.position;
     }
 
@@ -523,19 +563,36 @@ public class PlayerController : MonoBehaviour
         return false;
     }
 
-    // ── Pushing ───────────────────────────────────────────────────────────────
+    // ── Collision & Wall Detection ───────────────────────────────────────────
+    
+    private bool _isTouchingWall = false;
+    private Vector3 _wallNormal = Vector3.zero;
+
+    void OnCollisionEnter(Collision collision)
+    {
+        // Intentional empty: standard physics handles initial impacts. 
+        // Custom anti-crush logic removed to prevent explosive lateral teleportation bugs.
+    }
+
     void OnCollisionStay(Collision collision)
     {
-        HandleCrushEscape(collision);
-
-        // WallCheck: Only consider contacts as climb candidates if they hit our torso/waist area (>0.5m)
-        // This ensures the ground is NEVER treated as a wall for second jumps.
         foreach (ContactPoint cp in collision.contacts)
         {
             float relativeY = cp.point.y - transform.position.y;
             
-            // If contact is vertical-ish AND above knee height (0.25m)
-            // This ensures the ground is NEVER treated as a wall, but low obstacles are.
+            // 1. Wall Projection Tracking
+            // If contact is vertical-ish
+            if (Mathf.Abs(cp.normal.y) < 0.5f)
+            {
+                // Treat ALL vertical contacts as walls to prevent penetration.
+                // If it's a pushable object, our custom push logic will move it safely.
+                // If it's stuck, we simply won't penetrate it, preventing explosive clipping.
+                _isTouchingWall = true;
+                _wallNormal += cp.normal; // Accumulate to average out corners
+            }
+
+            // 2. Climb Candidate Detection
+            // Ensure the contact is above knee height to prevent treating the ground as a wall
             if (relativeY > 0.25f && Mathf.Abs(cp.normal.y) < 0.4f)
             {
                 _climbCandidateCol = cp.otherCollider;
@@ -543,74 +600,32 @@ public class PlayerController : MonoBehaviour
             }
         }
 
+        if (_isTouchingWall)
+        {
+            _wallNormal.Normalize();
+        }
+
+        // 3. Safe Physics Pushing
         Rigidbody otherRb = collision.rigidbody;
-        if (otherRb == null || otherRb.isKinematic) return;
-
-        WorldObject wo = collision.gameObject.GetComponentInParent<WorldObject>();
-        if (wo == null || !wo.canBePushed) return;
-
-        Vector3 pushDir = Vector3.zero;
-        foreach (ContactPoint contact in collision.contacts)
+        if (otherRb != null && !otherRb.isKinematic)
         {
-            pushDir -= contact.normal;
-        }
-        pushDir.y = 0f;
-        if (pushDir.sqrMagnitude < 0.01f) return;
-        pushDir.Normalize();
-
-        if (otherRb.mass <= 0f) return;
-
-        float pushSpeed = Mathf.Min(pushForce / otherRb.mass, 3f); // Cap push speed
-        Vector3 currentHorizontal = new Vector3(otherRb.velocity.x, 0f, otherRb.velocity.z);
-        Vector3 desiredHorizontal = pushDir * pushSpeed;
-        Vector3 nextHorizontal = Vector3.MoveTowards(currentHorizontal, desiredHorizontal, pushSpeed * 0.35f);
-
-        // Clamp downward velocity to prevent collision resolution pushing objects through floor
-        float yVel = Mathf.Max(otherRb.velocity.y, -5f);
-        otherRb.velocity = new Vector3(nextHorizontal.x, yVel, nextHorizontal.z);
-        otherRb.angularVelocity *= 0.9f;
-    }
-
-    // ── Anti-Crush ────────────────────────────────────────────────────────────
-    // Physics-driven gradual escape: when something presses from above while grounded,
-    // apply a continuous lateral acceleration proportional to the crushing pressure.
-    // This creates a natural "squeezed sideways" feel without instant teleportation.
-    void OnCollisionEnter(Collision collision) { HandleCrushEscape(collision); }
-
-    void HandleCrushEscape(Collision collision)
-    {
-        if (!_isGrounded) return;
-
-        Vector3 escapeDir = Vector3.zero;
-        float crushPressure = 0f;
-
-        foreach (ContactPoint contact in collision.contacts)
-        {
-            // Contact normal pointing downward = object pressing from above
-            if (contact.normal.y < -0.3f)
+            WorldObject wo = collision.gameObject.GetComponentInParent<WorldObject>();
+            if (wo != null && wo.canBePushed)
             {
-                // Pressure intensity from how vertical the contact is (straight down = 1.0)
-                float intensity = Mathf.Abs(contact.normal.y);
-                crushPressure = Mathf.Max(crushPressure, intensity);
+                Vector3 pushDir = Vector3.zero;
+                foreach (ContactPoint contact in collision.contacts)
+                {
+                    pushDir -= contact.normal;
+                }
+                pushDir.y = 0f;
                 
-                Vector3 lateral = transform.position - contact.point;
-                lateral.y = 0f;
-                if (lateral.sqrMagnitude > 0.001f)
-                    escapeDir += lateral.normalized * intensity;
+                if (pushDir.sqrMagnitude > 0.01f && _inputMove.sqrMagnitude > 0.01f)
+                {
+                    pushDir.Normalize();
+                    // Apply physics-safe force based on mass instead of hard-setting velocity
+                    otherRb.AddForce(pushDir * (pushForce * 50f), ForceMode.Force);
+                }
             }
-        }
-
-        if (crushPressure > 0f && escapeDir.sqrMagnitude > 0.001f)
-        {
-            escapeDir.Normalize();
-            // Continuous acceleration, not instant velocity — gradual squeeze-out
-            // 30 m/s² × pressure creates a building lateral movement
-            float escapeAccel = 30f * crushPressure;
-            _rb.AddForce(escapeDir * escapeAccel, ForceMode.Acceleration);
-            
-            // Suppress downward velocity while being crushed to prevent floor penetration
-            if (_rb.velocity.y < 0f)
-                _rb.velocity = new Vector3(_rb.velocity.x, 0f, _rb.velocity.z);
         }
     }
 }
