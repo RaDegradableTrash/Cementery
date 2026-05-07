@@ -28,11 +28,22 @@ public class PhysicalGlassShatter : MonoBehaviour
     private Camera shatterCamera;
 
     private List<Rigidbody> shardRigidbodies = new List<Rigidbody>();
+    private bool isCracked = false;
 
     public void TriggerShatter()
     {
+        isCracked = false;
         if (mainCamera == null) mainCamera = Camera.main;
         StartCoroutine(ShatterRoutine());
+    }
+
+    public void Crack()
+    {
+        isCracked = true;
+        if (shatterRoot != null)
+        {
+            StartCoroutine(ShakeScreen(shatterRoot.transform, 1.0f));
+        }
     }
 
     private IEnumerator ShatterRoutine()
@@ -44,18 +55,8 @@ public class PhysicalGlassShatter : MonoBehaviour
         screenRT.Create();
         mainCamera.targetTexture = screenRT;
 
-        // 2. 强制 Canvas 渲染到主摄像机，以便被录入 RT
-        Canvas[] canvases = FindObjectsOfType<Canvas>();
-        foreach (var canvas in canvases)
-        {
-            if (canvas.renderMode == RenderMode.ScreenSpaceOverlay)
-            {
-                canvas.renderMode = RenderMode.ScreenSpaceCamera;
-                canvas.worldCamera = mainCamera;
-                canvas.planeDistance = 1.0f;
-            }
-        }
-
+        // Removed Canvas modification to allow Death UI (letterbox, text) to stay on top 
+        // as ScreenSpaceOverlay, so it won't be shattered or covered by the flying glass fragments.
         // 主相机不再渲染 Water 层，避免穿帮
         mainCamera.cullingMask &= ~(1 << 4);
 
@@ -158,7 +159,11 @@ public class PhysicalGlassShatter : MonoBehaviour
         float halfW = w / 2f;
         float halfH = h / 2f;
 
-        Vector2 impactCenter = new Vector2(Random.Range(-halfW*0.2f, halfW*0.2f), Random.Range(-halfH*0.2f, halfH*0.2f));
+        // Bias impact center towards the edges/corners instead of the center
+        float angleImpact = Random.Range(0f, Mathf.PI * 2f);
+        float rX = Random.Range(0.6f, 0.95f) * halfW;
+        float rY = Random.Range(0.6f, 0.95f) * halfH;
+        Vector2 impactCenter = new Vector2(Mathf.Cos(angleImpact) * rX, Mathf.Sin(angleImpact) * rY);
 
         List<Vector2> boundaryPoints = new List<Vector2>();
         
@@ -212,6 +217,38 @@ public class PhysicalGlassShatter : MonoBehaviour
         }
     }
 
+    private IEnumerator ShakeScreen(Transform target, float zDist)
+    {
+        if (target == null) yield break;
+
+        Vector3 originalPos = new Vector3(0, 0, zDist);
+        float duration = 0.25f; // Shake for a quarter second
+        float elapsed = 0f;
+        float magnitude = 0.08f; // Shake intensity
+
+        while (elapsed < duration)
+        {
+            if (target == null) yield break;
+            
+            float x = Random.Range(-1f, 1f) * magnitude;
+            float y = Random.Range(-1f, 1f) * magnitude;
+
+            target.localPosition = originalPos + new Vector3(x, y, 0);
+
+            elapsed += Time.deltaTime;
+            
+            // Decay the shake magnitude quickly
+            magnitude = Mathf.Lerp(magnitude, 0f, elapsed / duration);
+            
+            yield return null;
+        }
+
+        if (target != null)
+        {
+            target.localPosition = originalPos;
+        }
+    }
+
     private void CreateFragment(Vector2[] points, float w, float h, Vector2 impactCenter)
     {
         if (points.Length < 3) return;
@@ -257,20 +294,61 @@ public class PhysicalGlassShatter : MonoBehaviour
         MeshRenderer mr = frag.AddComponent<MeshRenderer>();
         mr.material = glassMaterial;
 
-        MeshCollider mc = frag.AddComponent<MeshCollider>();
-        mc.sharedMesh = mesh;
-        mc.convex = true;
+        // Use BoxCollider instead of MeshCollider to avoid PhysX convex generation errors
+        // and significantly improve simulation performance for the falling fragments.
+        BoxCollider bc = frag.AddComponent<BoxCollider>();
+        bc.center = mesh.bounds.center;
+        bc.size = mesh.bounds.size;
 
         Rigidbody rb = frag.AddComponent<Rigidbody>();
         rb.mass = mesh.bounds.size.magnitude; 
         rb.isKinematic = true; // 冻结在屏幕上！
         rb.interpolation = RigidbodyInterpolation.Interpolate;
 
-        // 微微推开产生明显的破碎裂痕
-        Vector2 pushDir = (center2D - impactCenter).normalized;
-        frag.transform.localPosition += new Vector3(pushDir.x, pushDir.y, 0) * crackSeparation;
-
         shardRigidbodies.Add(rb);
+
+        // Animate the crack spreading outward
+        Vector2 pushDir = (center2D - impactCenter).normalized;
+        float distToImpact = Vector2.Distance(center2D, impactCenter);
+        float maxDist = new Vector2(w, h).magnitude;
+        StartCoroutine(AnimateCrackPropagation(frag.transform, rb, pushDir, crackSeparation, distToImpact, maxDist));
+    }
+
+    private IEnumerator AnimateCrackPropagation(Transform fragTransform, Rigidbody rb, Vector2 pushDir, float finalSeparation, float distToImpact, float maxDist)
+    {
+        // Wait for the Crack() method to be called
+        while (!isCracked)
+        {
+            yield return null;
+        }
+
+        // Delay based on distance from impact center to simulate outward force wave
+        float normalizedDist = Mathf.Clamp01(distToImpact / (maxDist * 0.6f));
+        float delay = normalizedDist * 0.175f; // 200% faster (halved from 0.35f)
+        
+        if (delay > 0f)
+            yield return new WaitForSeconds(delay);
+
+        float duration = 0.075f; // 200% faster (halved from 0.15f)
+        float t = 0f;
+        Vector3 targetOffset = new Vector3(pushDir.x, pushDir.y, 0) * finalSeparation;
+
+        while (t < duration)
+        {
+            if (fragTransform == null || rb == null || !rb.isKinematic) yield break; // Stop if physics takes over
+            
+            t += Time.deltaTime;
+            float progress = Mathf.Clamp01(t / duration);
+            float eased = 1f - Mathf.Pow(1f - progress, 3f); // Ease out cubic
+            fragTransform.localPosition = targetOffset * eased;
+            
+            yield return null;
+        }
+
+        if (fragTransform != null && rb != null && rb.isKinematic)
+        {
+            fragTransform.localPosition = targetOffset;
+        }
     }
 
     private Vector2 GetRectIntersection(Vector2 origin, Vector2 dir, float halfW, float halfH)

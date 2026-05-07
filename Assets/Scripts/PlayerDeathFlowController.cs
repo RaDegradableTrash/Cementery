@@ -120,6 +120,9 @@ public class PlayerDeathFlowController : MonoBehaviour
     private Color _hintBaseUnderlayColor;
     private Color _buttonLabelBaseUnderlayColor;
 
+    private RenderMode _originalCanvasRenderMode;
+    private Camera _originalCanvasWorldCamera;
+
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void AutoBootstrap()
     {
@@ -320,10 +323,37 @@ public class PlayerDeathFlowController : MonoBehaviour
         _isDead = false;
         _reviveProtectionTimer = 0.2f; // Give it a moment to settle
         SetNonMovementSystemsEnabled(true);
-        HideDeathUiImmediate();
+        
+        HideDeathUiTextsImmediate();
+        if (_uiCo != null)
+        {
+            StopCoroutine(_uiCo);
+            _uiCo = null;
+        }
+        StartCoroutine(RemoveLetterboxSmoothly());
+
+        if (_canvas != null)
+        {
+            _canvas.renderMode = _originalCanvasRenderMode;
+            _canvas.worldCamera = _originalCanvasWorldCamera;
+        }
         
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
+    }
+
+    private IEnumerator RemoveLetterboxSmoothly()
+    {
+        float startHeight = GetLetterboxTargetHeight();
+        float duration = 0.4f;
+        float t = 0f;
+        while (t < duration)
+        {
+            t += Time.unscaledDeltaTime;
+            SetLetterboxHeight(Mathf.Lerp(startHeight, 0f, Ease01(t / duration)));
+            yield return null;
+        }
+        SetLetterboxHeight(0f);
     }
 
     private void SetNonMovementSystemsEnabled(bool enabled)
@@ -338,11 +368,11 @@ public class PlayerDeathFlowController : MonoBehaviour
 
     private IEnumerator PlayDeathUi()
     {
-        // 1. 触发死亡瞬间的碎屏效果（此时碎片静止悬停，UI通过RenderTexture反射在碎片上）
-        PhysicalGlassShatter physicalShatter = FindObjectOfType<PhysicalGlassShatter>();
-        if (physicalShatter != null)
+        if (_canvas != null)
         {
-            physicalShatter.TriggerShatter();
+            _originalCanvasRenderMode = _canvas.renderMode;
+            _originalCanvasWorldCamera = _canvas.worldCamera;
+            _canvas.renderMode = RenderMode.ScreenSpaceOverlay;
         }
 
         if (_leftRt == null || _rightRt == null || _leftCg == null || _rightCg == null)
@@ -361,122 +391,86 @@ public class PlayerDeathFlowController : MonoBehaviour
         Vector2 leftStart = _leftFinalAnchoredPos + Vector2.left * sideStartOffsetX;
         Vector2 rightStart = _rightFinalAnchoredPos + Vector2.right * sideStartOffsetX;
 
+        // Reset text positions initially
+        ApplySideReveal(_leftRt, _leftCg, leftStart, _leftFinalAnchoredPos, _leftMaterial, _leftBaseFaceDilate, _leftBaseOutlineSoftness, _leftBaseOutlineWidth, _leftBaseUnderlayDilate, _leftBaseUnderlaySoftness, _leftBaseUnderlayColor, 0f);
+        ApplySideReveal(_rightRt, _rightCg, rightStart, _rightFinalAnchoredPos, _rightMaterial, _rightBaseFaceDilate, _rightBaseOutlineSoftness, _rightBaseOutlineWidth, _rightBaseUnderlayDilate, _rightBaseUnderlaySoftness, _rightBaseUnderlayColor, 0f);
+
+        // 1. Capture screen WITHOUT letterbox
+        PhysicalGlassShatter physicalShatter = FindObjectOfType<PhysicalGlassShatter>();
+        if (physicalShatter != null)
+        {
+            physicalShatter.TriggerShatter();
+            // Wait for it to capture the screen (1 frame)
+            yield return new WaitForEndOfFrame();
+        }
+
+        // 2. Animate Letterbox First
         float letterboxStartHeight = _topLetterboxRt != null ? _topLetterboxRt.sizeDelta.y : 0f;
         float letterboxTargetHeight = GetLetterboxTargetHeight();
-
         float letterboxDuration = Mathf.Max(0.01f, letterboxAnimDuration);
+
+        float t = 0f;
+        while (t < letterboxDuration)
+        {
+            t += Time.unscaledDeltaTime;
+            float letterboxProgress = Ease01(t / letterboxDuration);
+            SetLetterboxHeight(Mathf.Lerp(letterboxStartHeight, letterboxTargetHeight, letterboxProgress));
+            yield return null;
+        }
+        SetLetterboxHeight(letterboxTargetHeight);
+
+        // 3. Wait 0.1s
+        yield return new WaitForSecondsRealtime(0.1f);
+
+        // 4. Trigger glass shatter (Crack)
+        if (physicalShatter != null)
+        {
+            physicalShatter.Crack();
+        }
+
+        // 5. Animate Death Text (Left/Right)
         float leftDuration = Mathf.Max(0.01f, sideSlideDuration);
         float rightDuration = Mathf.Max(0.01f, sideSlideDuration);
 
-        float leftStartTime = letterboxDuration * Mathf.Clamp01(leftStartAtLetterboxProgress);
-        float rightStartTime = leftStartTime + leftDuration * Mathf.Clamp01(rightStartAtLeftProgress);
-        float totalDuration = Mathf.Max(
-            letterboxDuration,
-            Mathf.Max(leftStartTime + leftDuration, rightStartTime + rightDuration));
+        float rightStartTime = leftDuration * Mathf.Clamp01(rightStartAtLeftProgress);
+        float textDuration = Mathf.Max(leftDuration, rightStartTime + rightDuration);
 
-        ApplySideReveal(
-            _leftRt,
-            _leftCg,
-            leftStart,
-            _leftFinalAnchoredPos,
-            _leftMaterial,
-            _leftBaseFaceDilate,
-            _leftBaseOutlineSoftness,
-            _leftBaseOutlineWidth,
-            _leftBaseUnderlayDilate,
-            _leftBaseUnderlaySoftness,
-            _leftBaseUnderlayColor,
-            0f);
-        ApplySideReveal(
-            _rightRt,
-            _rightCg,
-            rightStart,
-            _rightFinalAnchoredPos,
-            _rightMaterial,
-            _rightBaseFaceDilate,
-            _rightBaseOutlineSoftness,
-            _rightBaseOutlineWidth,
-            _rightBaseUnderlayDilate,
-            _rightBaseUnderlaySoftness,
-            _rightBaseUnderlayColor,
-            0f);
-
-        float t = 0f;
-        while (t < totalDuration)
+        t = 0f;
+        bool hintStarted = false;
+        
+        while (t < textDuration)
         {
             t += Time.unscaledDeltaTime;
 
-            float letterboxProgress = Ease01(t / letterboxDuration);
-            SetLetterboxHeight(Mathf.Lerp(letterboxStartHeight, letterboxTargetHeight, letterboxProgress));
-
-            float leftProgress = Ease01((t - leftStartTime) / leftDuration);
+            float leftProgress = Ease01(t / leftDuration);
             float rightProgress = Ease01((t - rightStartTime) / rightDuration);
 
-            ApplySideReveal(
-                _leftRt,
-                _leftCg,
-                leftStart,
-                _leftFinalAnchoredPos,
-                _leftMaterial,
-                _leftBaseFaceDilate,
-                _leftBaseOutlineSoftness,
-                _leftBaseOutlineWidth,
-                _leftBaseUnderlayDilate,
-                _leftBaseUnderlaySoftness,
-                _leftBaseUnderlayColor,
-                leftProgress);
-            ApplySideReveal(
-                _rightRt,
-                _rightCg,
-                rightStart,
-                _rightFinalAnchoredPos,
-                _rightMaterial,
-                _rightBaseFaceDilate,
-                _rightBaseOutlineSoftness,
-                _rightBaseOutlineWidth,
-                _rightBaseUnderlayDilate,
-                _rightBaseUnderlaySoftness,
-                _rightBaseUnderlayColor,
-                rightProgress);
+            ApplySideReveal(_leftRt, _leftCg, leftStart, _leftFinalAnchoredPos, _leftMaterial, _leftBaseFaceDilate, _leftBaseOutlineSoftness, _leftBaseOutlineWidth, _leftBaseUnderlayDilate, _leftBaseUnderlaySoftness, _leftBaseUnderlayColor, leftProgress);
+            ApplySideReveal(_rightRt, _rightCg, rightStart, _rightFinalAnchoredPos, _rightMaterial, _rightBaseFaceDilate, _rightBaseOutlineSoftness, _rightBaseOutlineWidth, _rightBaseUnderlayDilate, _rightBaseUnderlaySoftness, _rightBaseUnderlayColor, rightProgress);
+
+            // Start hint and buttons earlier (when right text is 50% done)
+            if (!hintStarted && rightProgress > 0.5f)
+            {
+                hintStarted = true;
+                if (_hintRt != null && _hintCg != null)
+                    StartCoroutine(RevealFadeOnly(_hintRt, _hintCg, hintFadeDuration));
+                if (_buttonRt != null && _buttonCg != null)
+                    StartCoroutine(RevealFadeOnly(_buttonRt, _buttonCg, buttonFadeDuration));
+            }
+
             yield return null;
         }
 
-        SetLetterboxHeight(letterboxTargetHeight);
-        ApplySideReveal(
-            _leftRt,
-            _leftCg,
-            leftStart,
-            _leftFinalAnchoredPos,
-            _leftMaterial,
-            _leftBaseFaceDilate,
-            _leftBaseOutlineSoftness,
-            _leftBaseOutlineWidth,
-            _leftBaseUnderlayDilate,
-            _leftBaseUnderlaySoftness,
-            _leftBaseUnderlayColor,
-            1f);
-        ApplySideReveal(
-            _rightRt,
-            _rightCg,
-            rightStart,
-            _rightFinalAnchoredPos,
-            _rightMaterial,
-            _rightBaseFaceDilate,
-            _rightBaseOutlineSoftness,
-            _rightBaseOutlineWidth,
-            _rightBaseUnderlayDilate,
-            _rightBaseUnderlaySoftness,
-            _rightBaseUnderlayColor,
-            1f);
+        ApplySideReveal(_leftRt, _leftCg, leftStart, _leftFinalAnchoredPos, _leftMaterial, _leftBaseFaceDilate, _leftBaseOutlineSoftness, _leftBaseOutlineWidth, _leftBaseUnderlayDilate, _leftBaseUnderlaySoftness, _leftBaseUnderlayColor, 1f);
+        ApplySideReveal(_rightRt, _rightCg, rightStart, _rightFinalAnchoredPos, _rightMaterial, _rightBaseFaceDilate, _rightBaseOutlineSoftness, _rightBaseOutlineWidth, _rightBaseUnderlayDilate, _rightBaseUnderlaySoftness, _rightBaseUnderlayColor, 1f);
 
-        if (_hintRt != null && _hintCg != null)
+        // Ensure hint/buttons start if they somehow didn't
+        if (!hintStarted)
         {
-            yield return RevealFadeOnly(_hintRt, _hintCg, hintFadeDuration);
-        }
-
-        if (_buttonRt != null && _buttonCg != null)
-        {
-            yield return RevealFadeOnly(_buttonRt, _buttonCg, buttonFadeDuration);
+            if (_hintRt != null && _hintCg != null)
+                StartCoroutine(RevealFadeOnly(_hintRt, _hintCg, hintFadeDuration));
+            if (_buttonRt != null && _buttonCg != null)
+                StartCoroutine(RevealFadeOnly(_buttonRt, _buttonCg, buttonFadeDuration));
         }
     }
 
@@ -541,12 +535,12 @@ public class PlayerDeathFlowController : MonoBehaviour
 
     private void HideDeathUiImmediate()
     {
-        if (_uiCo != null)
-        {
-            StopCoroutine(_uiCo);
-            _uiCo = null;
-        }
+        HideDeathUiTextsImmediate();
+        HideLetterboxImmediate();
+    }
 
+    private void HideDeathUiTextsImmediate()
+    {
         HideOne(_leftRt, _leftCg);
         HideOne(_rightRt, _rightCg);
         HideOne(_hintRt, _hintCg);
@@ -583,7 +577,6 @@ public class PlayerDeathFlowController : MonoBehaviour
             _buttonLabelBaseUnderlayDilate,
             _buttonLabelBaseUnderlaySoftness,
             _buttonLabelBaseUnderlayColor);
-        HideLetterboxImmediate();
     }
 
     private static void HideOne(RectTransform rt, CanvasGroup cg)
@@ -790,6 +783,19 @@ public class PlayerDeathFlowController : MonoBehaviour
             ref _rightBaseUnderlayDilate,
             ref _rightBaseUnderlaySoftness,
             ref _rightBaseUnderlayColor);
+
+        // Apply Cyberpunk glitch to hint and button
+        if (_hintLabel != null)
+        {
+            if (_hintLabel.GetComponent<CyberpunkUIGlitch>() == null)
+                _hintLabel.gameObject.AddComponent<CyberpunkUIGlitch>();
+        }
+        if (_reviveButton != null)
+        {
+            if (_reviveButton.GetComponent<CyberpunkUIGlitch>() == null)
+                _reviveButton.gameObject.AddComponent<CyberpunkUIGlitch>();
+        }
+
         CacheBlurState(
             _hintLabel,
             ref _hintMaterial,
