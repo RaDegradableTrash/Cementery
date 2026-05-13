@@ -12,6 +12,8 @@ using UnityEngine.UI;
 [DefaultExecutionOrder(600)]
 public class PlayerDeathFlowController : MonoBehaviour
 {
+    public static bool IsPlayerDead { get; private set; }
+
     [Header("Death Trigger")]
     [SerializeField] private float deathY = -50f;
 
@@ -65,6 +67,14 @@ public class PlayerDeathFlowController : MonoBehaviour
     private Vector3 _cameraOriginalLocalPos;
     private Quaternion _cameraOriginalLocalRot;
     private Coroutine _uiCo;
+
+    private enum TrapDeathState { None, Falling, Extracting }
+    private TrapDeathState _trapDeathState = TrapDeathState.None;
+    private Transform _corpseHeadTarget;
+    private Vector3 _trapDeathCameraStartPos;
+    private Vector3 _trapDeathCameraTargetPos;
+    private float _trapDeathTimer;
+    private Camera _deathCamera; // 专用于灵魂抽离的独立摄像机
 
     private PlayerController _playerController;
     private MouseLook _mouseLook;
@@ -184,7 +194,10 @@ public class PlayerDeathFlowController : MonoBehaviour
         }
 
         if (_playerRoot.position.y <= deathY)
+        {
+            if (_playerController != null) _playerController.hp = 0;
             EnterDeathState();
+        }
     }
 
     private void LateUpdate()
@@ -192,18 +205,92 @@ public class PlayerDeathFlowController : MonoBehaviour
         if (!_isDead || mainCamera == null)
             return;
 
-        if (lockCameraPositionOnDeath)
-            mainCamera.transform.position = _frozenCameraPos;
-
-        if (lookTarget == null)
-            return;
-
-        Vector3 dir = lookTarget.position - mainCamera.transform.position;
-        if (dir.sqrMagnitude > 0.0001f)
+        if (_trapDeathState == TrapDeathState.Falling)
         {
-            Quaternion targetRot = Quaternion.LookRotation(dir.normalized, Vector3.up);
-            // 平滑变速度旋转，Time.deltaTime * speed 会产生非常平滑的先快后慢的阻尼效果
-            mainCamera.transform.rotation = Quaternion.Slerp(mainCamera.transform.rotation, targetRot, Time.deltaTime * cameraLookSpeed);
+            _trapDeathTimer += Time.deltaTime;
+            
+            // 【阶段 1：玩家实体倒下】
+            // 此时真实玩家刚体解锁了冻结，正在摔倒。
+            // 摄像机仍然是玩家的子物体，所以它会自动平滑跟随真实玩家一起摔倒。
+            // 不再强制修改 position 和 rotation。
+
+            // 判断真实的身体是否已经完全倒下
+            bool hasFallen = (_playerRoot != null && Vector3.Dot(_playerRoot.up, Vector3.up) < 0.5f);
+            
+            // 倒下或超时后脱离
+            if (hasFallen || _trapDeathTimer > 3f)
+            {
+                _trapDeathState = TrapDeathState.Extracting;
+                _trapDeathTimer = 0f;
+                
+                // 1. 生成尸体，并隐藏真实玩家。返回尸体用来注视
+                if (_playerController != null)
+                {
+                    lookTarget = _playerController.SpawnCorpseAndHide();
+                }
+
+                // 2. 将旧的摄像机替换为新的死亡摄像机，开始灵魂抽离
+                GameObject deathCamObj = new GameObject("DeathCamera");
+                _deathCamera = deathCamObj.AddComponent<Camera>();
+                _deathCamera.CopyFrom(mainCamera);
+                
+                if (mainCamera.GetComponent<AudioListener>() != null)
+                {
+                    deathCamObj.AddComponent<AudioListener>();
+                    mainCamera.GetComponent<AudioListener>().enabled = false;
+                }
+
+                _trapDeathCameraStartPos = mainCamera.transform.position;
+                _trapDeathCameraTargetPos = _trapDeathCameraStartPos + Vector3.up * 1.5f - mainCamera.transform.forward * 2.5f;
+
+                _deathCamera.transform.position = _trapDeathCameraStartPos;
+                _deathCamera.transform.rotation = mainCamera.transform.rotation;
+                
+                // 禁用旧的真实摄像机，准备在复活后销毁死亡摄像机并恢复
+                mainCamera.enabled = false;
+            }
+        }
+        else if (_trapDeathState == TrapDeathState.Extracting)
+        {
+            // 【阶段 2：灵魂抽离】
+            _trapDeathTimer += Time.deltaTime;
+            
+            float t = Mathf.Clamp01(_trapDeathTimer / 3f);
+            float smoothT = t * t * (3f - 2f * t);
+            
+            if (_deathCamera != null)
+            {
+                // 在 3 秒内将摄像机从尸体头部平滑移动到半空中的目标点
+                _deathCamera.transform.position = Vector3.Lerp(_trapDeathCameraStartPos, _trapDeathCameraTargetPos, smoothT);
+
+                // 无论摄像机怎么退后，始终确保它紧紧盯着尸体（不接受任何鼠标输入）
+                if (lookTarget != null)
+                {
+                    Vector3 center = lookTarget.position + lookTarget.up * 1f;
+                    Vector3 dir = center - _deathCamera.transform.position;
+                    if (dir.sqrMagnitude > 0.001f)
+                    {
+                        Quaternion targetRot = Quaternion.LookRotation(dir.normalized, Vector3.up);
+                        _deathCamera.transform.rotation = Quaternion.Slerp(_deathCamera.transform.rotation, targetRot, Time.deltaTime * cameraLookSpeed);
+                    }
+                }
+            }
+        }
+        else
+        {
+            // 【普通的坠落深渊死亡逻辑】
+            if (lockCameraPositionOnDeath)
+                mainCamera.transform.position = _frozenCameraPos;
+
+            if (lookTarget != null)
+            {
+                Vector3 dir = lookTarget.position - mainCamera.transform.position;
+                if (dir.sqrMagnitude > 0.0001f)
+                {
+                    Quaternion targetRot = Quaternion.LookRotation(dir.normalized, Vector3.up);
+                    mainCamera.transform.rotation = Quaternion.Slerp(mainCamera.transform.rotation, targetRot, Time.deltaTime * cameraLookSpeed);
+                }
+            }
         }
     }
 
@@ -255,6 +342,7 @@ public class PlayerDeathFlowController : MonoBehaviour
 
     private void EnterDeathState()
     {
+        IsPlayerDead = true;
         _isDead = true;
 
         if (mainCamera != null)
@@ -262,6 +350,11 @@ public class PlayerDeathFlowController : MonoBehaviour
             _frozenCameraPos = mainCamera.transform.position;
             _cameraOriginalLocalPos = mainCamera.transform.localPosition;
             _cameraOriginalLocalRot = mainCamera.transform.localRotation;
+            
+            if (_trapDeathState == TrapDeathState.Falling)
+            {
+                _trapDeathTimer = 0f;
+            }
         }
 
         SetNonMovementSystemsEnabled(false);
@@ -273,10 +366,19 @@ public class PlayerDeathFlowController : MonoBehaviour
         _uiCo = StartCoroutine(PlayDeathUi());
     }
 
+    public void TriggerTrapDeathPhase1()
+    {
+        _trapDeathState = TrapDeathState.Falling;
+        EnterDeathState();
+    }
+
     private void OnReviveClicked()
     {
+        Debug.Log("[PlayerDeathFlow] OnReviveClicked fired.");
         PhysicalGlassShatter physicalShatter = FindObjectOfType<PhysicalGlassShatter>();
-        if (physicalShatter != null)
+        bool isTrapDeath = _trapDeathState != TrapDeathState.None;
+
+        if (physicalShatter != null && !isTrapDeath)
         {
             // 点击复活时，触发真正的物理坠落。将 RevivePlayer 作为截屏定格后的回调执行
             physicalShatter.TriggerFall(() => 
@@ -292,54 +394,115 @@ public class PlayerDeathFlowController : MonoBehaviour
 
     private void RevivePlayer()
     {
-        if (_playerRoot == null)
-            return;
-
-        CharacterController cc = _playerRoot.GetComponent<CharacterController>();
-        if (cc != null)
-            cc.enabled = false;
-
-        _playerRoot.SetPositionAndRotation(_spawnPos, _spawnRot);
-        if (_playerRb != null)
+        Debug.Log("[PlayerDeathFlow] RevivePlayer started.");
+        try
         {
-            _playerRb.position = _spawnPos;
-            _playerRb.rotation = _spawnRot;
-            _playerRb.velocity = Vector3.zero;
-            _playerRb.angularVelocity = Vector3.zero;
-        }
+            if (_playerRoot == null)
+            {
+                Debug.Log("[PlayerDeathFlow] _playerRoot is null. Attempting to resolve...");
+                ResolveRuntimeReferences();
+                
+                if (_playerRoot == null)
+                {
+                    Debug.Log("[PlayerDeathFlow] Aborting: _playerRoot is still null after resolve.");
+                    return;
+                }
+            }
 
-        if (mainCamera != null)
-        {
-            mainCamera.transform.localPosition = _cameraOriginalLocalPos;
-            mainCamera.transform.localRotation = _cameraOriginalLocalRot;
-        }
+            Debug.Log("[PlayerDeathFlow] StopAllCoroutines...");
+            StopAllCoroutines();
 
-        if (cc != null)
-            cc.enabled = true;
+            Debug.Log("[PlayerDeathFlow] Disabling CC...");
+            CharacterController cc = _playerRoot.GetComponent<CharacterController>();
+            if (cc != null)
+                cc.enabled = false;
 
-        if (_playerController != null)
-            _playerController.ResetVelocity();
+            Debug.Log("[PlayerDeathFlow] Teleporting player...");
+            _playerRoot.SetPositionAndRotation(_spawnPos, _spawnRot);
+            if (_playerRb != null)
+            {
+                _playerRb.position = _spawnPos;
+                _playerRb.rotation = _spawnRot;
+                if (!_playerRb.isKinematic)
+                {
+                    _playerRb.velocity = Vector3.zero;
+                    _playerRb.angularVelocity = Vector3.zero;
+                }
+            }
 
-        _isDead = false;
-        _reviveProtectionTimer = 0.2f; // Give it a moment to settle
-        SetNonMovementSystemsEnabled(true);
-        
-        HideDeathUiTextsImmediate();
-        if (_uiCo != null)
-        {
-            StopCoroutine(_uiCo);
+            Debug.Log("[PlayerDeathFlow] Destroying DeathCamera...");
+            if (_deathCamera != null)
+            {
+                Destroy(_deathCamera.gameObject);
+                _deathCamera = null;
+            }
+
+            Debug.Log("[PlayerDeathFlow] Re-enabling mainCamera...");
+            if (mainCamera != null)
+            {
+                mainCamera.enabled = true;
+                if (mainCamera.GetComponent<AudioListener>() != null)
+                {
+                    mainCamera.GetComponent<AudioListener>().enabled = true;
+                }
+                mainCamera.transform.localPosition = _cameraOriginalLocalPos;
+                mainCamera.transform.localRotation = _cameraOriginalLocalRot;
+            }
+            else
+            {
+                Debug.LogError("[PlayerDeathFlow] mainCamera is NULL during revive! Visuals will be frozen!");
+            }
+
+            Debug.Log("[PlayerDeathFlow] Enabling CC...");
+            if (cc != null)
+                cc.enabled = true;
+
+            Debug.Log("[PlayerDeathFlow] Resetting PlayerController...");
+            if (_playerController != null)
+            {
+                _playerController.SetPlayerVisible(true);
+                _playerController.ResetVelocity();
+                _playerController.hp = 10;
+            }
+
+            Debug.Log("[PlayerDeathFlow] Resetting LookTarget...");
+            if (_playerRoot != null)
+            {
+                Transform playerBody = FindChildByName(_playerRoot, "PlayerBodyCapsule");
+                lookTarget = playerBody != null ? playerBody : _playerRoot;
+            }
+
+            IsPlayerDead = false;
+            _isDead = false;
+            _trapDeathState = TrapDeathState.None;
+            _reviveProtectionTimer = 0.2f; 
+            
+            Debug.Log("[PlayerDeathFlow] Setting NonMovementSystemsEnabled...");
+            SetNonMovementSystemsEnabled(true);
+            
+            Debug.Log("[PlayerDeathFlow] Hiding Death UI Texts...");
+            HideDeathUiTextsImmediate();
             _uiCo = null;
-        }
-        StartCoroutine(RemoveLetterboxSmoothly());
+            
+            Debug.Log("[PlayerDeathFlow] Removing Letterbox...");
+            StartCoroutine(RemoveLetterboxSmoothly());
 
-        if (_canvas != null)
-        {
-            _canvas.renderMode = _originalCanvasRenderMode;
-            _canvas.worldCamera = _originalCanvasWorldCamera;
+            Debug.Log("[PlayerDeathFlow] Resetting Canvas...");
+            if (_canvas != null)
+            {
+                _canvas.renderMode = _originalCanvasRenderMode;
+                _canvas.worldCamera = _originalCanvasWorldCamera;
+            }
+            
+            Debug.Log("[PlayerDeathFlow] Unlocking Cursor...");
+            Cursor.lockState = CursorLockMode.Locked;
+            Cursor.visible = false;
+            Debug.Log("[PlayerDeathFlow] RevivePlayer fully finished.");
         }
-        
-        Cursor.lockState = CursorLockMode.Locked;
-        Cursor.visible = false;
+        catch (System.Exception e)
+        {
+            Debug.LogError($"[PlayerDeathFlow] RevivePlayer CRASHED: {e.Message}\n{e.StackTrace}");
+        }
     }
 
     private IEnumerator RemoveLetterboxSmoothly()
@@ -397,7 +560,9 @@ public class PlayerDeathFlowController : MonoBehaviour
 
         // 1. Capture screen WITHOUT letterbox
         PhysicalGlassShatter physicalShatter = FindObjectOfType<PhysicalGlassShatter>();
-        if (physicalShatter != null)
+        bool isTrapDeath = _trapDeathState != TrapDeathState.None;
+
+        if (physicalShatter != null && !isTrapDeath)
         {
             physicalShatter.TriggerShatter();
             // Wait for it to capture the screen (1 frame)
@@ -423,7 +588,7 @@ public class PlayerDeathFlowController : MonoBehaviour
         yield return new WaitForSecondsRealtime(0.1f);
 
         // 4. Trigger glass shatter (Crack)
-        if (physicalShatter != null)
+        if (physicalShatter != null && !isTrapDeath)
         {
             physicalShatter.Crack();
         }

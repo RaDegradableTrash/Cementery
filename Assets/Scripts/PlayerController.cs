@@ -13,6 +13,9 @@ public class PlayerController : NetworkBehaviour
     public float walkSpeed = 4f;
     public float sprintSpeed = 7f;
 
+    [Header("Health")]
+    public int hp = 10;
+
     [Header("Input")]
     [Tooltip("Use raw axis values for immediate response (recommended for low input latency).")]
     [SerializeField] private bool useRawMovementInput = true;
@@ -284,15 +287,111 @@ public class PlayerController : NetworkBehaviour
         return inventoryCameraController != null && inventoryCameraController.IsInventoryActive;
     }
 
-    // ── Movement ─────────────────────────────────────────────────────────────
+    // Movements
     public void ResetVelocity()
     {
         if (_rb != null)
         {
             _rb.velocity = Vector3.zero;
             _rb.angularVelocity = Vector3.zero;
+            _rb.freezeRotation = true; // 恢复竖直锁定
+            
+            // 恢复玩家直立姿态
+            transform.rotation = Quaternion.Euler(0f, transform.eulerAngles.y, 0f);
         }
         _jumpCount = 0;
+    }
+
+    public void TakeDamage(int amount, Vector3 sourcePos = default)
+    {
+        if (hp <= 0) return;
+        hp -= amount;
+        if (hp <= 0)
+        {
+            hp = 0;
+            Die(sourcePos);
+        }
+        Debug.Log($"[PlayerController] Took {amount} damage. Current HP: {hp}");
+    }
+
+    private void Die(Vector3 sourcePos)
+    {
+        // 让真实的玩家变成受击倒下状态
+        if (_rb != null)
+        {
+            _rb.freezeRotation = false; // 解除旋转锁定
+            Vector3 pushDir = (transform.position - sourcePos).normalized;
+            if (pushDir.sqrMagnitude < 0.01f) pushDir = -transform.forward;
+            pushDir.y = 0.5f; 
+            _rb.AddForce(pushDir * 12f, ForceMode.Impulse);
+            _rb.AddRelativeTorque(Random.insideUnitSphere * 8f, ForceMode.Impulse);
+        }
+
+        PlayerDeathFlowController pdf = GetComponent<PlayerDeathFlowController>();
+        if (pdf == null) pdf = FindObjectOfType<PlayerDeathFlowController>();
+        
+        if (pdf != null)
+        {
+            pdf.TriggerTrapDeathPhase1();
+        }
+    }
+
+    public Transform SpawnCorpseAndHide()
+    {
+        // 彻底倒下后生成尸体
+        GameObject corpse = Instantiate(gameObject, transform.position, transform.rotation);
+        corpse.name = "PlayerCorpse";
+        
+        Destroy(corpse.GetComponent<PlayerController>());
+        Destroy(corpse.GetComponent<PlayerDeathFlowController>());
+        Destroy(corpse.GetComponent<PlayerStamina>());
+        
+        CharacterController cc = corpse.GetComponent<CharacterController>();
+        if (cc != null) Destroy(cc);
+
+        var netObj = corpse.GetComponent<NetworkObject>();
+        if (netObj != null) Destroy(netObj);
+
+        foreach (MeshCollider mc in corpse.GetComponentsInChildren<MeshCollider>())
+        {
+            mc.convex = true;
+        }
+
+        foreach (Camera cam in corpse.GetComponentsInChildren<Camera>())
+            Destroy(cam.gameObject);
+        foreach (AudioListener al in corpse.GetComponentsInChildren<AudioListener>())
+            Destroy(al);
+        foreach (MouseLook ml in corpse.GetComponentsInChildren<MouseLook>())
+            Destroy(ml);
+
+        Rigidbody corpseRb = corpse.GetComponent<Rigidbody>();
+        if (corpseRb != null && _rb != null)
+        {
+            corpseRb.isKinematic = false;
+            corpseRb.freezeRotation = false; 
+            corpseRb.velocity = _rb.velocity;
+            corpseRb.angularVelocity = _rb.angularVelocity;
+        }
+
+        SetPlayerVisible(false);
+        return corpse.transform;
+    }
+
+    public void SetPlayerVisible(bool visible)
+    {
+        foreach (Renderer r in GetComponentsInChildren<Renderer>())
+            r.enabled = visible;
+        
+        if (_col != null) _col.enabled = visible;
+        if (_rb != null)
+        {
+            _rb.isKinematic = !visible;
+            if (!visible)
+            {
+                _rb.velocity = Vector3.zero;
+                _rb.angularVelocity = Vector3.zero;
+            }
+        }
     }
 
     void GatherInput()
@@ -491,7 +590,7 @@ public class PlayerController : NetworkBehaviour
         _groundCheckDisabledUntil = Time.time + 0.15f;
     }
 
-    // ── Head Bob ─────────────────────────────────────────────────────────────
+    // Head Bobbing
     void HandleHeadBob()
     {
         bool isMoving = new Vector3(_rb.velocity.x, 0f, _rb.velocity.z).sqrMagnitude > 0.04f && _isGrounded;
@@ -604,7 +703,7 @@ public class PlayerController : NetworkBehaviour
         return false;
     }
 
-    // ── Collision & Wall Detection ───────────────────────────────────────────
+    // 碰撞墙壁检测
     
     private bool _isTouchingWall = false;
     private Vector3 _wallNormal = Vector3.zero;
@@ -646,7 +745,7 @@ public class PlayerController : NetworkBehaviour
             _wallNormal.Normalize();
         }
 
-        // 3. Safe Physics Pushing
+        // 安全的碰撞检测
         Rigidbody otherRb = collision.rigidbody;
         if (otherRb != null && !otherRb.isKinematic)
         {

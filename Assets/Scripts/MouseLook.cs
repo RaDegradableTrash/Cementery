@@ -114,8 +114,8 @@ public class MouseLook : MonoBehaviour
 
     void Update()
     {
-        // 如果菜单打开，不处理任何逻辑
-        if (GameMenuManager.IsMenuOpen) return;
+        // 死亡期间或者如果菜单打开，不处理任何逻辑
+        if (PlayerDeathFlowController.IsPlayerDead || GameMenuManager.IsMenuOpen) return;
 
         if (_pendingStartCursorLock)
         {
@@ -138,7 +138,7 @@ public class MouseLook : MonoBehaviour
     // LateUpdate: runs after CharacterController.Move() — apply bob to CameraHolderEmpty.
     void LateUpdate()
     {
-        if (GameMenuManager.IsMenuOpen || IsInventoryModeActive())
+        if (PlayerDeathFlowController.IsPlayerDead || GameMenuManager.IsMenuOpen || IsInventoryModeActive())
             return;
 
         if (cameraHolder == null) return;

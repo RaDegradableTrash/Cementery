@@ -23,6 +23,9 @@ public class GameMenuManager : MonoBehaviour
         // 监听 ESC 键
         if (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.P))
         {
+            // 死亡期间禁止打开菜单
+            if (PlayerDeathFlowController.IsPlayerDead) return;
+            
             Debug.Log("GameMenuManager: Detected ESC or P press. Current IsMenuOpen state: " + IsMenuOpen);
             
             if (menuPanel == null)

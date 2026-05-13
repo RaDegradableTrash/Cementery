@@ -11,13 +11,9 @@ using UnityEngine.UI;
 
 public class NetworkUI : MonoBehaviour
 {
-    [Header("UI References")]
     [SerializeField] private TMP_InputField joinCodeInputField;
     [SerializeField] private TextMeshProUGUI statusText;
     [SerializeField] private TextMeshProUGUI joinCodeDisplayText;
-    [SerializeField] private GameObject menuPanel;
-    
-    [Header("Buttons")]
     [SerializeField] private Button hostButton;
     [SerializeField] private Button joinButton;
     [SerializeField] private Button disconnectButton;
@@ -39,11 +35,11 @@ public class NetworkUI : MonoBehaviour
                 await AuthenticationService.Instance.SignInAnonymouslyAsync();
             }
             
-            statusText.text = "服务已就绪";
+            statusText.text = "Services ready";
         }
         catch (System.Exception e)
         {
-            statusText.text = "服务初始化失败";
+            statusText.text = "Services init failed";
             Debug.LogError(e);
         }
 
