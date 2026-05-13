@@ -1,4 +1,5 @@
 using UnityEngine;
+using Unity.Netcode;
 
 /// <summary>
 /// First-person camera controller. Attach to Main Camera.
@@ -40,6 +41,31 @@ public class MouseLook : MonoBehaviour
 
     [Header("Cursor")]
     [SerializeField] private bool autoLockCursorOnStart = true;
+
+    public void SetupCamera(Transform newPlayer, Transform newCameraHolder)
+    {
+        player = newPlayer;
+        cameraHolder = newCameraHolder;
+        
+        transform.SetParent(cameraHolder);
+        transform.localPosition = Vector3.zero;
+        transform.localRotation = Quaternion.identity;
+
+        _pitch = 0f;
+        
+        if (player != null)
+        {
+            _playerController = player.GetComponent<PlayerController>();
+            _playerRb = player.GetComponent<Rigidbody>();
+            _yaw = player.eulerAngles.y;
+        }
+
+        if (cameraHolder != null)
+            _holderDefaultLocalPos = cameraHolder.localPosition;
+
+        ResolveAttractPivot();
+        InitializeAttractOrbitBaseline();
+    }
 
 
 
@@ -88,6 +114,9 @@ public class MouseLook : MonoBehaviour
 
     void Update()
     {
+        // 如果菜单打开，不处理任何逻辑
+        if (GameMenuManager.IsMenuOpen) return;
+
         if (_pendingStartCursorLock)
         {
             _pendingStartCursorLock = false;
@@ -99,14 +128,17 @@ public class MouseLook : MonoBehaviour
             return;
 
         HandleCursorToggle();
-        if (Cursor.lockState != CursorLockMode.Locked) return;
+        // 联机控制：如果网络已启动且你不是主人，则禁止旋转
+        bool isNetworkActive = NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening;
+        if (isNetworkActive && (_playerController != null && (!_playerController.IsSpawned || !_playerController.IsOwner))) return;
+
         ApplyMouseLook();
     }
 
     // LateUpdate: runs after CharacterController.Move() — apply bob to CameraHolderEmpty.
     void LateUpdate()
     {
-        if (IsInventoryModeActive())
+        if (GameMenuManager.IsMenuOpen || IsInventoryModeActive())
             return;
 
         if (cameraHolder == null) return;

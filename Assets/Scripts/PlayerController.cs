@@ -1,4 +1,5 @@
 using UnityEngine;
+using Unity.Netcode;
 
 /// <summary>
 /// First-person player controller. Requires a Rigidbody and CapsuleCollider component.
@@ -6,7 +7,7 @@ using UnityEngine;
 /// </summary>
 [RequireComponent(typeof(Rigidbody))]
 [RequireComponent(typeof(CapsuleCollider))]
-public class PlayerController : MonoBehaviour
+public class PlayerController : NetworkBehaviour
 {
     [Header("Movement")]
     public float walkSpeed = 4f;
@@ -125,8 +126,37 @@ public class PlayerController : MonoBehaviour
             mouseLook = Camera.main.GetComponent<MouseLook>();
     }
 
+    public override void OnNetworkSpawn()
+    {
+        if (!IsOwner)
+        {
+            // 为防止远程客户端进行本地物理模拟，将其设置为Kinematic
+            if (_rb != null) _rb.isKinematic = true;
+
+            // 【关键修改】禁用其他玩家的摄像机和耳朵，否则你的屏幕会变成别人的视角！
+            Camera playerCam = GetComponentInChildren<Camera>();
+            if (playerCam != null)
+            {
+                playerCam.enabled = false;
+                AudioListener listener = playerCam.GetComponent<AudioListener>();
+                if (listener != null) listener.enabled = false;
+            }
+        }
+    }
+
     void Update()
     {
+        // 逻辑修正：如果网络管理器没启动（单机测试），或者网络已启动且你是房主/本地玩家，才允许执行逻辑
+        bool isNetworkActive = NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening;
+        if (isNetworkActive && (!IsSpawned || !IsOwner)) return;
+
+        // 如果暂停菜单打开，屏蔽所有输入
+        if (GameMenuManager.IsMenuOpen)
+        {
+            _inputMove = Vector2.zero;
+            return;
+        }
+
         if (IsInventoryModeActive())
         {
             _inputMove = Vector2.zero;
@@ -229,6 +259,13 @@ public class PlayerController : MonoBehaviour
 
     void FixedUpdate()
     {
+        // 同样的逻辑应用到物理更新
+        bool isNetworkActive = NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening;
+        if (isNetworkActive && (!IsSpawned || !IsOwner)) return;
+
+        // 如果暂停菜单打开，停止物理处理
+        if (GameMenuManager.IsMenuOpen) return;
+
         if (IsInventoryModeActive()) return;
 
         HandleMovement();
