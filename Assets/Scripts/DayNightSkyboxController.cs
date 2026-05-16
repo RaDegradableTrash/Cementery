@@ -63,8 +63,8 @@ public class DayNightSkyboxController : MonoBehaviour
     [Header("Shadows")]
     public bool forceRealtimeShadows = true;
     public LightShadows shadowMode = LightShadows.Soft;
-    [Range(0f, 1f)] public float dayShadowStrength = 1f;
-    [Range(0f, 1f)] public float nightShadowStrength = 0.85f;
+    [Range(0f, 1f)] public float dayShadowStrength = 0.85f;
+    [Range(0f, 1f)] public float nightShadowStrength = 0.65f;
     [Range(0f, 0.2f)] public float shadowBias = 0.05f;
     [Range(0f, 1f)] public float shadowNormalBias = 0.4f;
     [Range(0.01f, 1f)] public float shadowNearPlane = 0.2f;
@@ -98,25 +98,25 @@ public class DayNightSkyboxController : MonoBehaviour
     [Header("Ambient & Fog")]
     public bool controlAmbient = true;
     [Tooltip("For PBR consistency use Trilight. Flat ambient can remove directional cues.")]
-    public bool useTrilightAmbient = true;
+    public bool useTrilightAmbient = false;
 
-    public Color dayAmbientSky = new Color(0.24f, 0.29f, 0.34f, 1f);
-    public Color dayAmbientEquator = new Color(0.19f, 0.21f, 0.24f, 1f);
-    public Color dayAmbientGround = new Color(0.1f, 0.11f, 0.12f, 1f);
+    public Color dayAmbientSky = new Color(0.55f, 0.60f, 0.65f, 1f);
+    public Color dayAmbientEquator = new Color(0.40f, 0.45f, 0.50f, 1f);
+    public Color dayAmbientGround = new Color(0.30f, 0.32f, 0.35f, 1f);
 
-    public Color nightAmbientSky = new Color(0.06f, 0.07f, 0.09f, 1f);
-    public Color nightAmbientEquator = new Color(0.04f, 0.05f, 0.06f, 1f);
-    public Color nightAmbientGround = new Color(0.02f, 0.02f, 0.025f, 1f);
+    public Color nightAmbientSky = new Color(0.20f, 0.25f, 0.35f, 1f);
+    public Color nightAmbientEquator = new Color(0.15f, 0.20f, 0.28f, 1f);
+    public Color nightAmbientGround = new Color(0.10f, 0.12f, 0.15f, 1f);
 
-    [Range(0f, 2f)] public float ambientIntensity = 1f;
+    [Range(0f, 2f)] public float ambientIntensity = 1.2f;
     public bool controlFog = true;
     public Color dayFog = new Color(0.54f, 0.6f, 0.68f, 1f);
     public Color nightFog = new Color(0.015f, 0.02f, 0.035f, 1f);
 
     [Header("Reflections")]
     public bool controlReflection = true;
-    [Range(0f, 2f)] public float dayReflectionIntensity = 1f;
-    [Range(0f, 2f)] public float nightReflectionIntensity = 0.35f;
+    [Range(0f, 2f)] public float dayReflectionIntensity = 1.2f;
+    [Range(0f, 2f)] public float nightReflectionIntensity = 0.6f;
     [Min(1)] public int reflectionBounces = 1;
 
     public bool updateEnvironmentReflections = false;
@@ -634,15 +634,15 @@ public class DayNightSkyboxController : MonoBehaviour
     {
         bool changed = false;
 
-        if (renderer.lightProbeUsage != LightProbeUsage.Off)
+        if (renderer.lightProbeUsage != LightProbeUsage.BlendProbes)
         {
-            renderer.lightProbeUsage = LightProbeUsage.Off;
+            renderer.lightProbeUsage = LightProbeUsage.BlendProbes;
             changed = true;
         }
 
-        if (renderer.reflectionProbeUsage != ReflectionProbeUsage.Simple)
+        if (renderer.reflectionProbeUsage != ReflectionProbeUsage.BlendProbes)
         {
-            renderer.reflectionProbeUsage = ReflectionProbeUsage.Simple;
+            renderer.reflectionProbeUsage = ReflectionProbeUsage.BlendProbes;
             changed = true;
         }
 
