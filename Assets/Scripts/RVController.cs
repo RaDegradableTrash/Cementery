@@ -31,6 +31,27 @@ namespace RVSystem
         {
             _rb = GetComponent<Rigidbody>();
             AutoBindWheels();
+
+            // FIX: Force all renderers on the RV to properly receive Ambient Light in URP
+            // This prevents the "pitch black" issue caused by invalid GI or Lightmap settings
+            foreach (var r in GetComponentsInChildren<Renderer>(true))
+            {
+                if (r is MeshRenderer mr)
+                {
+                    mr.receiveGI = ReceiveGI.LightProbes;
+                }
+                r.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
+                r.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Simple;
+                
+                // If the material has emission but is rendering black, ensure it's using the correct URP color
+                foreach (var mat in r.materials)
+                {
+                    if (mat.HasProperty("_BaseColor") && mat.GetColor("_BaseColor") == Color.black)
+                    {
+                        mat.SetColor("_BaseColor", Color.gray);
+                    }
+                }
+            }
         }
 
         [ContextMenu("Auto Bind Wheels (Editor)")]

@@ -38,7 +38,7 @@ public class PlayerDeathFlowController : MonoBehaviour
     [SerializeField] private float buttonFadeDuration = 0.35f;
 
     [Header("UI Sequence")]
-    [SerializeField, Range(0.5f, 0.98f)] private float leftStartAtLetterboxProgress = 0.82f;
+
     [SerializeField, Range(0f, 0.9f)] private float rightStartAtLeftProgress = 0.4f;
 
     [Header("Cinematic Letterbox")]

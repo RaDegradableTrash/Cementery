@@ -55,8 +55,7 @@ public class PlayerController : NetworkBehaviour
     [Header("Climbing System")]
     [SerializeField] private float climbMaxHeight = 2.5f;
     [SerializeField] private LayerMask climbObstacleMask = ~0;
-    [SerializeField] private float climbSpeed = 3f;
-    [SerializeField] private float autoClimbLedgeHeight = 0.5f;
+
 
     [Header("Animation")]
     [SerializeField] private Animator playerAnimator;
@@ -87,7 +86,6 @@ public class PlayerController : NetworkBehaviour
     private float _groundCheckDisabledUntil;
     private bool _isGrounded;
     private float _jumpBufferedUntil;
-    private float _groundedUntil;
     private bool _isOnStairs;
     private Vector3 _stairsContactNormal = Vector3.up;
 
@@ -728,7 +726,6 @@ public class PlayerController : NetworkBehaviour
             _isGrounded = false;
             _isOnStairs = false;
             _jumpBufferedUntil = 0f;
-            _groundedUntil = 0f;
             _canClimbThisJump = false;
 
             if (mouseLook != null)
