@@ -124,7 +124,7 @@ public class DayNightSkyboxController : MonoBehaviour
 
     [Header("PBR Probe Integration")]
     [Tooltip("Automatically set dynamic renderers to sample Light Probes and Reflection Probes.")]
-    public bool enforceDynamicProbeSampling = true;
+    public bool enforceDynamicProbeSampling = false;
     [Tooltip("When true, probe usage sync is repeated so runtime-spawned objects are also covered.")]
     public bool keepSyncingDynamicProbeSampling = true;
     [Min(0.1f)] public float probeSyncInterval = 2f;
@@ -168,6 +168,7 @@ public class DayNightSkyboxController : MonoBehaviour
         EnsureSunLight();
         EnsureRuntimeSkybox();
 
+        enforceDynamicProbeSampling = true; // Enabled to run the fix pass
         if (enforceDynamicProbeSampling)
             RebuildDynamicRendererCache();
 
@@ -244,6 +245,7 @@ public class DayNightSkyboxController : MonoBehaviour
 
         if (Application.isPlaying)
         {
+            enforceDynamicProbeSampling = true;
             if (enforceDynamicProbeSampling)
                 RebuildDynamicRendererCache();
 
@@ -632,15 +634,15 @@ public class DayNightSkyboxController : MonoBehaviour
     {
         bool changed = false;
 
-        if (renderer.lightProbeUsage != LightProbeUsage.BlendProbes)
+        if (renderer.lightProbeUsage != LightProbeUsage.Off)
         {
-            renderer.lightProbeUsage = LightProbeUsage.BlendProbes;
+            renderer.lightProbeUsage = LightProbeUsage.Off;
             changed = true;
         }
 
-        if (renderer.reflectionProbeUsage != ReflectionProbeUsage.BlendProbes)
+        if (renderer.reflectionProbeUsage != ReflectionProbeUsage.Simple)
         {
-            renderer.reflectionProbeUsage = ReflectionProbeUsage.BlendProbes;
+            renderer.reflectionProbeUsage = ReflectionProbeUsage.Simple;
             changed = true;
         }
 

@@ -319,6 +319,11 @@ public class PlayerDeathFlowController : MonoBehaviour
         if (_inventoryCameraController == null)
             _inventoryCameraController = FindObjectOfType<InventoryCameraController>();
 
+        if (mainCamera == null && _playerRoot != null)
+        {
+            mainCamera = _playerRoot.GetComponentInChildren<Camera>();
+        }
+
         if (mainCamera == null)
         {
             if (_mouseLook != null)

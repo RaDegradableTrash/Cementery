@@ -25,23 +25,6 @@ public class NetworkUI : MonoBehaviour
     {
         // 初始UI状态
         UpdateUIState(false);
-        
-        try 
-        {
-            await UnityServices.InitializeAsync();
-
-            if (!AuthenticationService.Instance.IsSignedIn)
-            {
-                await AuthenticationService.Instance.SignInAnonymouslyAsync();
-            }
-            
-            statusText.text = "Services ready";
-        }
-        catch (System.Exception e)
-        {
-            statusText.text = "Services init failed";
-            Debug.LogError(e);
-        }
 
         // 缓存玩家预制体并取消自动生成，以便我们手动接管生成逻辑
         if (NetworkManager.Singleton != null && NetworkManager.Singleton.NetworkConfig.PlayerPrefab != null)
@@ -54,45 +37,52 @@ public class NetworkUI : MonoBehaviour
         var existingPlayer = FindObjectOfType<PlayerController>();
         if (existingPlayer == null && cachedPlayerPrefab != null)
         {
-            GameObject localPlayer = Instantiate(cachedPlayerPrefab, new Vector3(0, -5f, 0), Quaternion.identity);
+            // Spawn at a safe height to prevent falling out of world
+            GameObject localPlayer = Instantiate(cachedPlayerPrefab, new Vector3(0, 2f, 0), Quaternion.identity);
             
-            Camera mainCam = Camera.main;
-            if (mainCam != null)
+            // Ensure the player is not stuck in the sky due to prefab saved state
+            Rigidbody rb = localPlayer.GetComponent<Rigidbody>();
+            if (rb != null) rb.isKinematic = false;
+            
+            // Since the prefab is fully working on its own, we do not interfere with its camera hierarchy.
+            // We just disable any leftover standalone cameras in the scene to avoid conflicts.
+            Camera[] allCams = FindObjectsOfType<Camera>();
+            foreach (Camera cam in allCams)
             {
-                MouseLook mouseLook = mainCam.GetComponent<MouseLook>();
-                if (mouseLook != null)
+                if (cam != null && cam.transform.root != localPlayer.transform)
                 {
-                    Transform cameraHolder = null;
-                    Transform[] allChildren = localPlayer.GetComponentsInChildren<Transform>(true);
-                    foreach(var t in allChildren) {
-                        if (t.name == "CameraHolderEmpty") {
-                            cameraHolder = t;
-                            break;
-                        }
-                    }
-
-                    if (cameraHolder != null)
-                    {
-                        mouseLook.SetupCamera(localPlayer.transform, cameraHolder);
-                        
-                        // 清理预制体自带的额外摄像机/AudioListener，防止冲突
-                        Camera prefabCam = cameraHolder.GetComponentInChildren<Camera>();
-                        if (prefabCam != null && prefabCam != mainCam)
-                        {
-                            Destroy(prefabCam.gameObject);
-                        }
-                    }
+                    cam.gameObject.SetActive(false);
                 }
             }
         }
 
         // 注册客户端连接回调
-        NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
+        if (NetworkManager.Singleton != null)
+        {
+            NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
+        }
 
         // 绑定按钮事件
-        hostButton.onClick.AddListener(UI_CreateHost);
-        joinButton.onClick.AddListener(UI_JoinClient);
-        disconnectButton.onClick.AddListener(UI_Disconnect);
+        if (hostButton != null) hostButton.onClick.AddListener(UI_CreateHost);
+        if (joinButton != null) joinButton.onClick.AddListener(UI_JoinClient);
+        if (disconnectButton != null) disconnectButton.onClick.AddListener(UI_Disconnect);
+        
+        try 
+        {
+            await UnityServices.InitializeAsync();
+
+            if (!AuthenticationService.Instance.IsSignedIn)
+            {
+                await AuthenticationService.Instance.SignInAnonymouslyAsync();
+            }
+            
+            if (statusText != null) statusText.text = "Services ready";
+        }
+        catch (System.Exception e)
+        {
+            if (statusText != null) statusText.text = "Services init failed";
+            Debug.LogError(e);
+        }
     }
 
     private void Update()

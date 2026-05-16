@@ -52,9 +52,17 @@ public class PlayerController : NetworkBehaviour
     /// </summary>
     public float SpeedMultiplier { get; set; } = 1f;
 
-    [Header("Climbing")]
+    [Header("Climbing System")]
     [SerializeField] private float climbMaxHeight = 2.5f;
     [SerializeField] private LayerMask climbObstacleMask = ~0;
+    [SerializeField] private float climbSpeed = 3f;
+    [SerializeField] private float autoClimbLedgeHeight = 0.5f;
+
+    [Header("Animation")]
+    [SerializeField] private Animator playerAnimator;
+    [SerializeField] private string idleAnimState = "Idle";
+    [SerializeField] private string forwardMoveAnimState = "MoveForward";
+    private bool _isMovingForwardAnim = false;
     [SerializeField] private MouseLook mouseLook;
 
     private Collider _climbCandidateCol;
@@ -206,6 +214,28 @@ public class PlayerController : NetworkBehaviour
         HandleHeadBob();
         // UpdateDebugCollisionLog(); // Commented out per user request
         TrackJumpPeak();
+        HandleAnimation();
+    }
+
+    private void HandleAnimation()
+    {
+        if (playerAnimator == null) return;
+
+        // Skip animation logic if dead or menu is open
+        if (hp <= 0 || GameMenuManager.IsMenuOpen) return;
+
+        bool isMovingForward = _inputMove.y > 0.1f && _isGrounded;
+        
+        if (isMovingForward && !_isMovingForwardAnim)
+        {
+            _isMovingForwardAnim = true;
+            playerAnimator.CrossFadeInFixedTime(forwardMoveAnimState, 0.2f);
+        }
+        else if (!isMovingForward && _isMovingForwardAnim)
+        {
+            _isMovingForwardAnim = false;
+            playerAnimator.CrossFadeInFixedTime(idleAnimState, 0.2f);
+        }
     }
 
     private float _currentJumpPeakY = -Mathf.Infinity;
@@ -300,6 +330,12 @@ public class PlayerController : NetworkBehaviour
             transform.rotation = Quaternion.Euler(0f, transform.eulerAngles.y, 0f);
         }
         _jumpCount = 0;
+
+        if (playerAnimator != null)
+        {
+            _isMovingForwardAnim = false;
+            playerAnimator.Play(idleAnimState, 0, 0f);
+        }
     }
 
     public void TakeDamage(int amount, Vector3 sourcePos = default)
@@ -348,6 +384,9 @@ public class PlayerController : NetworkBehaviour
         
         CharacterController cc = corpse.GetComponent<CharacterController>();
         if (cc != null) Destroy(cc);
+
+        Animator anim = corpse.GetComponent<Animator>();
+        if (anim != null) Destroy(anim);
 
         var netObj = corpse.GetComponent<NetworkObject>();
         if (netObj != null) Destroy(netObj);
