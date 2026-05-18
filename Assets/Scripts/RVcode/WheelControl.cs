@@ -11,6 +11,8 @@ public class WheelControl : MonoBehaviour
     // Editor Inspector window)
     public bool steerable;
     public bool motorized;
+    public bool isFrontLeft;
+    public bool isFrontRight;
 
     Vector3 position;
     Quaternion rotation;
