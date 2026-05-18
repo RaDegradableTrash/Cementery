@@ -1,8 +1,8 @@
 using UnityEngine;
 
-public abstract class GearButtonBase : MonoBehaviour
+public abstract class GearButtonBase : MonoBehaviour, ICockpitInteractable
 {
-    [SerializeField] private CarControl carControl;
+    [SerializeField] protected CarControl carControl;
     [SerializeField] private Renderer targetRenderer;
     [SerializeField] private Color activeEmissionColor = new Color(0.2f, 0.6f, 1f, 1f);
     [SerializeField] private bool glowWhenActive = true;
@@ -47,7 +47,7 @@ public abstract class GearButtonBase : MonoBehaviour
 
     private void HandleGearChanged(CarControl.GearMode gear)
     {
-        UpdateVisual(gear == Gear);
+        UpdateVisual(carControl != null && carControl.CurrentGear == Gear);
     }
 
     public void Interact()

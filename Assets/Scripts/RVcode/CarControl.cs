@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using TMPro;
 
@@ -8,7 +9,10 @@ public class CarControl : MonoBehaviour
         Park,
         Reverse,
         Neutral,
-        Drive
+        Drive,
+        Sport,
+        H6,
+        L6
     }
 
     [Header("Gear")]
@@ -17,8 +21,19 @@ public class CarControl : MonoBehaviour
     public GearMode CurrentGear => currentGear;
     public event System.Action<GearMode> OnGearChanged;
 
-    public float motorTorque = 2000;
-    public float brakeTorque = 2000;
+    [Header("Modes")]
+    [SerializeField] private float sportTorque = 50000f;
+    [SerializeField] private float sixLockTorque = 50000f;
+    [SerializeField] private float h6MaxSpeedKmh = 75f;
+    [SerializeField] private float l6MaxSpeedKmh = 35f;
+    [SerializeField] private float driveMaxSpeedKmh = 160f;
+    [SerializeField] private float reverseMaxSpeedKmh = 30f;
+    [SerializeField] private float sixLockSwitchMaxSpeedKmh = 0.01f;
+    [SerializeField] private float speedLimiterBrake = 0.2f;
+    [SerializeField] private WheelControl[] sixLockWheels = new WheelControl[6];
+
+    public float motorTorque = 35000;
+    public float brakeTorque = 400000;
     public float eBrakeTorque = 10000000f;
     public float maxSpeed = 20;
     public float steeringRange = 30;
@@ -36,6 +51,14 @@ public class CarControl : MonoBehaviour
     [SerializeField] private float steeringReturnMinSpeedKmh = 1f;
     [SerializeField] private float innerSteerAngle = 37f; // degrees
     [SerializeField] private float outerSteerAngle = 25f; // degrees
+    [SerializeField] private float l6ThrottleRise = 0.4f; // per second
+    [SerializeField] private float l6ThrottleFall = 0.8f; // per second
+    [SerializeField] private AnimationCurve l6TorqueBySpeed = new AnimationCurve(
+        new Keyframe(0f, 1f),
+        new Keyframe(10f, 1f),
+        new Keyframe(25f, 0.85f),
+        new Keyframe(35f, 0.7f)
+    );
     [SerializeField] private AnimationCurve steeringReturnBySpeed = new AnimationCurve(
         new Keyframe(0f, 0f),
         new Keyframe(10f, 0.3f),
@@ -57,6 +80,9 @@ public class CarControl : MonoBehaviour
     WheelControl[] wheels;
     Rigidbody rigidBody;
     private float currentSteerAngle;
+    private float currentSpeedKmh;
+    private float l6ThrottleCurrent;
+    private readonly HashSet<WheelControl> sixLockWheelSet = new HashSet<WheelControl>();
 
     public void SetGear(GearMode gear)
     {
@@ -70,8 +96,45 @@ public class CarControl : MonoBehaviour
             return;
         }
 
+        if (!force && !CanSwitchGear(gear))
+        {
+            return;
+        }
+
         currentGear = gear;
         OnGearChanged?.Invoke(currentGear);
+    }
+
+    private bool CanSwitchGear(GearMode targetGear)
+    {
+        bool currentSix = IsSixLockGear(currentGear);
+        bool targetSix = IsSixLockGear(targetGear);
+        if (currentSix || targetSix)
+        {
+            return currentSpeedKmh <= sixLockSwitchMaxSpeedKmh;
+        }
+        return true;
+    }
+
+    private static bool IsSixLockGear(GearMode gear)
+    {
+        return gear == GearMode.H6 || gear == GearMode.L6;
+    }
+
+    private void BuildSixLockWheelSet()
+    {
+        sixLockWheelSet.Clear();
+        if (sixLockWheels == null)
+        {
+            return;
+        }
+        foreach (WheelControl wheel in sixLockWheels)
+        {
+            if (wheel != null)
+            {
+                sixLockWheelSet.Add(wheel);
+            }
+        }
     }
 
     // Start is called before the first frame update
@@ -84,6 +147,7 @@ public class CarControl : MonoBehaviour
 
         // Find all child GameObjects that have the WheelControl script attached
         wheels = GetComponentsInChildren<WheelControl>();
+        BuildSixLockWheelSet();
         // Record initial local rotation of steering wheel (if assigned)
         if (steeringWheel != null)
         {
@@ -105,6 +169,7 @@ public class CarControl : MonoBehaviour
 
         // Update speed display in km/h
         float displaySpeed = Mathf.Abs(forwardSpeed) * 3.6f * speedMultiplier;
+        currentSpeedKmh = displaySpeed;
         if (speedDisplay != null)
         {
             speedDisplay.text = Mathf.Round(displaySpeed).ToString() + " km/h";
@@ -113,8 +178,23 @@ public class CarControl : MonoBehaviour
         // Calculate motor torque factor using Unity's forwardSpeed (m/s)
         float speedFactorMotor = Mathf.InverseLerp(0, maxSpeed, forwardSpeed);
 
+        float requestedMotorTorque = motorTorque;
+        if (currentGear == GearMode.Sport)
+        {
+            requestedMotorTorque = sportTorque;
+        }
+        else if (currentGear == GearMode.H6 || currentGear == GearMode.L6)
+        {
+            requestedMotorTorque = sixLockTorque;
+        }
+
+        if (currentGear == GearMode.L6)
+        {
+            requestedMotorTorque *= Mathf.Clamp01(l6TorqueBySpeed.Evaluate(displaySpeed));
+        }
+
         // Use that to calculate how much torque is available (zero torque at top speed)
-        float currentMotorTorque = Mathf.Lerp(motorTorque, 0, speedFactorMotor);
+        float currentMotorTorque = Mathf.Lerp(requestedMotorTorque, 0, speedFactorMotor);
 
         // Calculate steering limit multiplier from speed (km/h)
         // Higher speed means a smaller allowed steering angle.
@@ -146,6 +226,9 @@ public class CarControl : MonoBehaviour
                 brakeInput = wantsBackward ? Mathf.Abs(rawVertical) : 0f;
                 break;
             case GearMode.Drive:
+            case GearMode.Sport:
+            case GearMode.H6:
+            case GearMode.L6:
                 if (wantsForward)
                 {
                     throttleInput = -rawVertical;
@@ -165,6 +248,45 @@ public class CarControl : MonoBehaviour
                     brakeInput = Mathf.Abs(rawVertical);
                 }
                 break;
+        }
+
+        float appliedThrottleInput = throttleInput;
+        if (currentGear == GearMode.L6)
+        {
+            float rate = Mathf.Abs(throttleInput) > Mathf.Abs(l6ThrottleCurrent) ? l6ThrottleRise : l6ThrottleFall;
+            l6ThrottleCurrent = Mathf.MoveTowards(l6ThrottleCurrent, throttleInput, rate * Time.deltaTime);
+            appliedThrottleInput = l6ThrottleCurrent;
+        }
+        else
+        {
+            l6ThrottleCurrent = throttleInput;
+        }
+
+        float speedLimitKmh = 0f;
+        switch (currentGear)
+        {
+            case GearMode.H6:
+                speedLimitKmh = h6MaxSpeedKmh;
+                break;
+            case GearMode.L6:
+                speedLimitKmh = l6MaxSpeedKmh;
+                break;
+            case GearMode.Drive:
+            case GearMode.Sport:
+                speedLimitKmh = driveMaxSpeedKmh;
+                break;
+            case GearMode.Reverse:
+                speedLimitKmh = reverseMaxSpeedKmh;
+                break;
+        }
+
+        if (speedLimitKmh > 0f && displaySpeed > speedLimitKmh)
+        {
+            appliedThrottleInput = 0f;
+            if (currentGear == GearMode.L6)
+            {
+                l6ThrottleCurrent = Mathf.MoveTowards(l6ThrottleCurrent, 0f, l6ThrottleFall * Time.deltaTime);
+            }
         }
 
         bool steerInputActive = Mathf.Abs(hInputRaw) > 0.01f;
@@ -222,9 +344,12 @@ public class CarControl : MonoBehaviour
             else
             {
                 wheel.WheelCollider.brakeTorque = brakeInput * brakeTorque;
-                if (wheel.motorized)
+                bool isSixLock = IsSixLockGear(currentGear);
+                bool allowSixLockDrive = isSixLock && sixLockWheelSet.Contains(wheel);
+                bool isMotorized = isSixLock ? allowSixLockDrive : wheel.motorized;
+                if (isMotorized)
                 {
-                    wheel.WheelCollider.motorTorque = throttleInput * currentMotorTorque;
+                    wheel.WheelCollider.motorTorque = appliedThrottleInput * currentMotorTorque;
                 }
                 else
                 {

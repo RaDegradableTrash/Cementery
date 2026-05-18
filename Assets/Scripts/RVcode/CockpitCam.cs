@@ -113,7 +113,7 @@ public class CockpitCam : MonoBehaviour
 			UpdateLook();
 		}
 
-		GearButtonBase target = GetLookTarget();
+		ICockpitInteractable target = GetLookTarget();
 		UpdateRayDebug();
 		if (target != null && Input.GetKeyDown(interactKey))
 		{
@@ -171,7 +171,7 @@ public class CockpitCam : MonoBehaviour
 		Cursor.lockState = value ? CursorLockMode.Locked : CursorLockMode.None;
 	}
 
-	private GearButtonBase GetLookTarget()
+	private ICockpitInteractable GetLookTarget()
 	{
 		if (!TryBuildRay(out Ray ray))
 		{
@@ -192,7 +192,7 @@ public class CockpitCam : MonoBehaviour
 
 		float nearestAnyHit = float.MaxValue;
 		float bestDistance = float.MaxValue;
-		GearButtonBase bestTarget = null;
+		ICockpitInteractable bestTarget = null;
 
 		foreach (RaycastHit hit in hits)
 		{
@@ -213,7 +213,7 @@ public class CockpitCam : MonoBehaviour
 				continue;
 			}
 
-			GearButtonBase candidate = hit.collider.GetComponentInParent<GearButtonBase>();
+			ICockpitInteractable candidate = hit.collider.GetComponentInParent<ICockpitInteractable>();
 			if (candidate != null)
 			{
 				bestDistance = hit.distance;
