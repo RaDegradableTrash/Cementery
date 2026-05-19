@@ -127,10 +127,21 @@ public class CockpitCam : MonoBehaviour
 		UpdateHighlight(highlight);
 		UpdateRayDebug();
 
+		// 🌟 检测车内视线是否看着车门 (Furniture_SlideDoor)
+		Furniture_SlideDoor doorTarget = GetDoorLookTarget();
+
+		// 🌟 实时刷新车内的 UI 交互提示文字
+		UpdateVehicleUiPrompt(target, doorTarget);
+
 		// Right Click (MouseButton 1) is the core triggering logic for any camera!
 		if (target != null && (Input.GetMouseButtonDown(1) || Input.GetKeyDown(interactKey)))
 		{
 			target.Interact();
+		}
+		else if (doorTarget != null && (Input.GetMouseButtonDown(1) || Input.GetKeyDown(interactKey)))
+		{
+			// 🌟 车内直接开/关车门！
+			doorTarget.Interact();
 		}
 	}
 
@@ -493,6 +504,12 @@ public class CockpitCam : MonoBehaviour
 		activePlayer = null;
 		cockpitCamera = null;
 		originalCameraParent = null;
+
+		// 🌟 退出驾驶模式时，彻底清空车内交互 UI 提示，保证主角行走模式状态纯净
+		if (InteractionSystem.Instance != null)
+		{
+			InteractionSystem.Instance.SetExternalInteractPrompt("", false);
+		}
 	}
 
 	private static float NormalizeAngle(float angle)
@@ -502,5 +519,80 @@ public class CockpitCam : MonoBehaviour
 			angle -= 360f;
 		}
 		return angle;
+	}
+
+	// 🌟 检测视线正前方是否有车门组件 (Furniture_SlideDoor)
+	private Furniture_SlideDoor GetDoorLookTarget()
+	{
+		Camera activeCam = cockpitCamera;
+		if (activeCam == null) activeCam = Camera.main;
+		if (activeCam == null) return null;
+
+		Ray ray = new Ray(activeCam.transform.position, activeCam.transform.forward);
+		
+		// 使用 Physics.Raycast 在驾驶座视距内寻找挂载了 Furniture_SlideDoor 的车门
+		if (Physics.Raycast(ray, out RaycastHit hit, interactDistance))
+		{
+			Furniture_SlideDoor door = hit.collider.GetComponentInParent<Furniture_SlideDoor>();
+			if (door != null)
+			{
+				return door;
+			}
+		}
+		return null;
+	}
+
+	// 🌟 更新车内视角的 UI 交互提示
+	private void UpdateVehicleUiPrompt(ICockpitInteractable target, Furniture_SlideDoor doorTarget)
+	{
+		if (InteractionSystem.Instance == null) return;
+
+		if (target != null)
+		{
+			// 用各个按钮分别的名字代替提示的右键交互信息
+			string btnName = GetFriendlyButtonName(target);
+			string promptText = $"[右键] {btnName}";
+			InteractionSystem.Instance.SetExternalInteractPrompt(promptText, true);
+		}
+		else if (doorTarget != null)
+		{
+			// 面向车门也有提示可以开关车门
+			string promptText = "[右键] 开关车门";
+			InteractionSystem.Instance.SetExternalInteractPrompt(promptText, true);
+		}
+		else
+		{
+			// 视线中没有可交互目标，隐藏提示文字
+			InteractionSystem.Instance.SetExternalInteractPrompt("", false);
+		}
+	}
+
+	// 🌟 智能个性化中文名映射，为每个排档按钮、引擎、电瓶按钮输出大气的 UI 提示字眼！
+	private string GetFriendlyButtonName(ICockpitInteractable target)
+	{
+		if (target == null) return "按钮";
+		MonoBehaviour mb = target as MonoBehaviour;
+		if (mb == null) return "按钮";
+
+		string name = mb.gameObject.name;
+		string className = mb.GetType().Name;
+
+		if (className.Contains("EngineStart") || name.Contains("EngineStart")) return "发动引擎";
+		if (className.Contains("Battery1") || name.Contains("Battery1")) return "接通电瓶 1";
+		if (className.Contains("Battery2") || name.Contains("Battery2")) return "接通电瓶 2";
+		if (className.Contains("ReadingLight") || name.Contains("ReadingLight")) return "开关阅读灯";
+		if (className.Contains("Wiper") || name.Contains("Wiper")) return "开关雨刮器";
+		
+		if (className.Contains("PButton") || name == "P" || name == "PButton") return "P 档 (驻车)";
+		if (className.Contains("RButton") || name == "R" || name == "RButton") return "R 档 (倒车)";
+		if (className.Contains("NButton") || name == "N" || name == "NButton") return "N 档 (空档)";
+		if (className.Contains("DButton") || name == "D" || name == "DButton") return "D 档 (前进)";
+		if (className.Contains("SButton") || name == "S" || name == "SButton") return "S 档 (运动)";
+		if (className.Contains("H6Button") || name == "H6" || name == "H6Button") return "H6 档 (高速四驱)";
+		if (className.Contains("L6Button") || name == "L6" || name == "L6Button") return "L6 档 (低速四驱)";
+
+		// 友好兜底
+		name = name.Replace("Button", "").Replace("button", "").Trim();
+		return name + " 按钮";
 	}
 }

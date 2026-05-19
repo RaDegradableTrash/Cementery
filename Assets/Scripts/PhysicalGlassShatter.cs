@@ -28,6 +28,7 @@ public class PhysicalGlassShatter : MonoBehaviour
     private Camera shatterCamera;
 
     private List<Rigidbody> shardRigidbodies = new List<Rigidbody>();
+    private List<Collider> shardColliders = new List<Collider>();
     private bool isCracked = false;
 
     public void TriggerShatter()
@@ -124,7 +125,12 @@ public class PhysicalGlassShatter : MonoBehaviour
             shatterRoot.transform.localRotation = Quaternion.identity;
             shatterRoot.transform.SetParent(null, true);
 
-            // 4. 解冻物理，引爆！
+            // 4. 重新启用碰撞器，解冻物理，引爆！
+            foreach (Collider col in shardColliders)
+            {
+                if (col != null) col.enabled = true;
+            }
+
             Vector3 impactCenter = Vector3.zero; // Local zero
             Vector3 explosionPos = shatterRoot.transform.TransformPoint(new Vector3(impactCenter.x, impactCenter.y, 0.3f)); 
             
@@ -192,6 +198,7 @@ public class PhysicalGlassShatter : MonoBehaviour
         shatterRoot.transform.localRotation = Quaternion.identity;
 
         shardRigidbodies.Clear();
+        shardColliders.Clear();
 
         for (int i = 0; i < boundaryPoints.Count; i++)
         {
@@ -299,6 +306,8 @@ public class PhysicalGlassShatter : MonoBehaviour
         BoxCollider bc = frag.AddComponent<BoxCollider>();
         bc.center = mesh.bounds.center;
         bc.size = mesh.bounds.size;
+        bc.enabled = false; // Disable initially to prevent blocking UI raycasts/clicks!
+        shardColliders.Add(bc);
 
         Rigidbody rb = frag.AddComponent<Rigidbody>();
         rb.mass = mesh.bounds.size.magnitude; 

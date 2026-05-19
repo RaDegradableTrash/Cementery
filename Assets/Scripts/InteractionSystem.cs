@@ -752,18 +752,62 @@ public class InteractionSystem : MonoBehaviour
         if (hits == null || hits.Length == 0)
             return false;
 
-        // When multiple objects are hit, prefer the one most aligned with the exact
-        // screen-center ray (smallest angular deviation), with distance as tiebreaker.
-        float bestScore = float.PositiveInfinity;
+        // 1. Gather all valid hits (ignoring player or ignored carry colliders)
+        List<RaycastHit> validHits = new List<RaycastHit>();
         for (int i = 0; i < hits.Length; i++)
         {
             RaycastHit hit = hits[i];
             Collider c = hit.collider;
             if (c == null) continue;
             if (IsIgnoredCarryHitCollider(c)) continue;
+            validHits.Add(hit);
+        }
+
+        if (validHits.Count == 0)
+            return false;
+
+        // 2. Separate into qualifying hits that possess a WorldObject component (directly or in parents)
+        List<RaycastHit> qualifyingHits = new List<RaycastHit>();
+        for (int i = 0; i < validHits.Count; i++)
+        {
+            RaycastHit hit = validHits[i];
+            if (hit.collider.GetComponentInParent<WorldObject>() != null)
+            {
+                qualifyingHits.Add(hit);
+            }
+        }
+
+        // 3. If multiple qualifying targets are hit, prioritize the one the raycast touches first (minimum distance)!
+        if (qualifyingHits.Count >= 1)
+        {
+            float minDistance = float.MaxValue;
+            RaycastHit closestHit = default;
+            bool found = false;
+            for (int i = 0; i < qualifyingHits.Count; i++)
+            {
+                RaycastHit hit = qualifyingHits[i];
+                if (hit.distance < minDistance)
+                {
+                    minDistance = hit.distance;
+                    closestHit = hit;
+                    found = true;
+                }
+            }
+            if (found)
+            {
+                bestHit = closestHit;
+                return true;
+            }
+        }
+
+        // 4. Otherwise (no qualifying WorldObjects hit), fallback to original scoring based on screen alignment
+        float bestScore = float.PositiveInfinity;
+        for (int i = 0; i < validHits.Count; i++)
+        {
+            RaycastHit hit = validHits[i];
+            Collider c = hit.collider;
 
             // Unity SphereCast returns (0,0,0) and distance 0 if the sphere overlaps the collider at the start.
-            // This causes straight-on views to fail because distance to origin is evaluated instead of distance to ray.
             Vector3 pointToEvaluate = hit.point;
             if (hit.distance == 0f && hit.point == Vector3.zero)
             {
@@ -788,7 +832,6 @@ public class InteractionSystem : MonoBehaviour
             float lateralDist = Vector3.Distance(pointToEvaluate, projected);
             
             // Score: prioritize center alignment, use distance as secondary factor
-            // lateralDist weighted heavily so centered objects always win
             float score = lateralDist * 10f + hit.distance * 0.1f;
 
             if (score < bestScore)
@@ -1324,8 +1367,33 @@ public class InteractionSystem : MonoBehaviour
             label.gameObject.SetActive(active);
     }
 
+    public void ClearPrompts()
+    {
+        SetLabel(carryLabel, false);
+        SetLabel(interactLabel, false);
+        SetLabel(collectLabel, false);
+        if (infoLabel != null) infoLabel.gameObject.SetActive(false);
+        if (carryDistanceLimitLabel != null) carryDistanceLimitLabel.gameObject.SetActive(false);
+    }
+
+    // 🌟 外界专属接口：支持车内或其它外部模块强行设置交互提示文字并显示/隐藏它！
+    public void SetExternalInteractPrompt(string text, bool active)
+    {
+        if (interactLabel != null)
+        {
+            interactLabel.text = text;
+            interactLabel.gameObject.SetActive(active);
+        }
+    }
+
+    private void OnDisable()
+    {
+        ClearPrompts();
+    }
+
     public GameObject GetLookedAtTarget()
     {
+        if (!enabled) return null; // 🌟 交互系统被禁用时，立刻清除 hover 目标，防止死亡时白框残留！
         if (_isPlacementMode) return null;
         if (_lookedAt != null && _lookedAt.interactable)
             return _lookedAt.gameObject;
@@ -1334,6 +1402,7 @@ public class InteractionSystem : MonoBehaviour
 
     public GameObject GetCarryTarget()
     {
+        if (!enabled) return null; // 🌟 交互系统被禁用时，清除抱持目标，消除白框残留！
         if (_isPlacementMode) return null;
         if (_carryCandidateRb != null)
             return _carryCandidateRb.gameObject;

@@ -146,10 +146,15 @@ public class DroneController : MonoBehaviour
         if (aimingAtCorpse && Input.GetKey(KeyCode.F))
         {
             _holdTimer += Time.deltaTime;
+            float progress = Mathf.Clamp01(_holdTimer / requiredHoldTime);
+            UpdateSlider(progress, true); // 🌟 实时把进度同步给玩家新做的 Slider 并显示它！
+
             if (_holdTimer >= requiredHoldTime)
             {
                 _hasSoul = true;
                 _holdTimer = 0f;
+                UpdateSlider(0f, false); // 🌟 完成吸取，自动隐去 Slider！
+                
                 // Destroy or hide the corpse once retrieved
                 if (_targetCorpse != null)
                 {
@@ -160,6 +165,7 @@ public class DroneController : MonoBehaviour
         else
         {
             _holdTimer = 0f;
+            UpdateSlider(0f, false); // 🌟 没有在长按吸取或没有瞄准，自动隐藏 Slider！
         }
     }
 
@@ -176,10 +182,35 @@ public class DroneController : MonoBehaviour
     void CheckHitRV(Collider other)
     {
         if (!_hasSoul) return;
+        if (other == null) return;
 
-        // Check if we hit the RV
-        RVController rv = other.GetComponentInParent<RVController>();
-        if (rv != null)
+        // 必须碰到的非 isTrigger 的实体碰撞箱！
+        if (other.isTrigger) return;
+
+        // 向上搜寻挂载了 UV/RV 的较高级母物体
+        Transform current = other.transform;
+        RVController foundRv = null;
+        Transform foundParent = null;
+
+        while (current != null)
+        {
+            RVController rv = current.GetComponent<RVController>();
+            if (rv != null)
+            {
+                foundRv = rv;
+                foundParent = current;
+            }
+
+            string nameUpper = current.name.ToUpperInvariant();
+            if (nameUpper.Contains("RV") || nameUpper.Contains("UV"))
+            {
+                foundParent = current;
+            }
+
+            current = current.parent;
+        }
+
+        if (foundRv != null || foundParent != null)
         {
             if (_flowController != null)
             {
@@ -188,30 +219,40 @@ public class DroneController : MonoBehaviour
         }
     }
 
-    void OnGUI()
+    private Slider _cachedSlider;
+    private void UpdateSlider(float progress, bool active)
     {
-        if (_droneCamera == null) return;
-
-        if (_hasSoul)
+        if (_cachedSlider == null)
         {
-            GUI.Label(new Rect(Screen.width / 2 - 100, Screen.height / 2 + 50, 200, 30), "<color=cyan>Soul Retrieved! Return to RV.</color>");
-            return;
+            // 自动检索场景 Canvases 中名称带有 Revive/Soul/Progress 关键字的 Slider，或者兜底获取任意 Slider
+            Slider[] sliders = Resources.FindObjectsOfTypeAll<Slider>();
+            foreach (Slider s in sliders)
+            {
+                if (s.gameObject.scene.name == null) continue; // 排除预制体，只搜寻场景实例
+                
+                string nameUpper = s.name.ToUpperInvariant();
+                if (nameUpper.Contains("REVIVE") || nameUpper.Contains("SOUL") || nameUpper.Contains("PROGRESS") || nameUpper.Contains("DEATH"))
+                {
+                    _cachedSlider = s;
+                    break;
+                }
+            }
+            if (_cachedSlider == null && sliders.Length > 0)
+            {
+                // 实在没有关键字匹配，就默认绑定场景中的第一个 Slider 物体
+                _cachedSlider = sliders[0];
+            }
         }
 
-        Ray ray = new Ray(_droneCamera.transform.position, _droneCamera.transform.forward);
-        if (Physics.Raycast(ray, out RaycastHit hit, interactDistance))
+        if (_cachedSlider != null)
         {
-            if (hit.collider.transform.root.name.Contains("PlayerCorpse"))
+            // 在起效时显示，其他时间自动休眠，保证 UI 界面高度整洁
+            _cachedSlider.gameObject.SetActive(active);
+            if (active)
             {
-                if (_holdTimer > 0)
-                {
-                    float progress = _holdTimer / requiredHoldTime * 100f;
-                    GUI.Label(new Rect(Screen.width / 2 - 100, Screen.height / 2 + 50, 200, 30), $"<color=yellow>Retrieving... {progress:F0}%</color>");
-                }
-                else
-                {
-                    GUI.Label(new Rect(Screen.width / 2 - 100, Screen.height / 2 + 50, 200, 30), "<color=white>[Hold F] Retrieve Corpse</color>");
-                }
+                _cachedSlider.minValue = 0f;
+                _cachedSlider.maxValue = 1f;
+                _cachedSlider.value = progress;
             }
         }
     }

@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -267,6 +268,8 @@ public class PlayerDeathFlowController : MonoBehaviour
         IsPlayerDead = true;
         _isDead = true;
 
+        EnsureUi(); // Force resolve and bind UI elements upon entering death!
+
         if (mainCamera != null)
         {
             _frozenCameraPos = mainCamera.transform.position;
@@ -299,9 +302,8 @@ public class PlayerDeathFlowController : MonoBehaviour
     {
         Debug.Log("[PlayerDeathFlow] OnReviveClicked fired.");
         PhysicalGlassShatter physicalShatter = FindObjectOfType<PhysicalGlassShatter>();
-        bool isTrapDeath = _trapDeathState != TrapDeathState.None;
 
-        if (physicalShatter != null && !isTrapDeath)
+        if (physicalShatter != null)
         {
             // 点击复活时，触发真正的物理坠落。将 RevivePlayer 作为截屏定格后的回调执行
             physicalShatter.TriggerFall(() => 
@@ -480,6 +482,12 @@ public class PlayerDeathFlowController : MonoBehaviour
         PlayerController[] players = FindObjectsOfType<PlayerController>();
         foreach (PlayerController p in players)
         {
+            if (p == null) continue;
+
+            // 🌟 排除场景中的“玩家尸体”克隆体，防止将血量错加在尸体上！
+            if (p.gameObject.name.Contains("Corpse") || p.gameObject.name.Contains("corpse"))
+                continue;
+
             bool isNetworkActive = Unity.Netcode.NetworkManager.Singleton != null && Unity.Netcode.NetworkManager.Singleton.IsListening;
             if (isNetworkActive)
             {
@@ -491,8 +499,13 @@ public class PlayerDeathFlowController : MonoBehaviour
             }
             else
             {
-                localPlayer = p;
-                break;
+                // 单机模式下，绝对优先将 localPlayer 定位为当前脚本挂载的真实玩家！
+                if (p.gameObject == this.gameObject)
+                {
+                    localPlayer = p;
+                    break;
+                }
+                localPlayer = p; // 兜底
             }
         }
 
@@ -504,6 +517,10 @@ public class PlayerDeathFlowController : MonoBehaviour
         {
             _playerRoot = targetPlayerRoot;
             _playerController = targetPlayerRoot.GetComponent<PlayerController>();
+            
+            // 🌟 强力重新寻址并绑定新主角上的交互系统和背包相机系统，防止因为对象失效导致复活后白框和交互系统“失灵”！
+            _interactionSystem = targetPlayerRoot.GetComponentInChildren<InteractionSystem>(true);
+            _inventoryCameraController = targetPlayerRoot.GetComponentInChildren<InventoryCameraController>(true);
             _mouseLook = mainCamera != null ? mainCamera.GetComponent<MouseLook>() : null;
 
             // Re-enable Player components
@@ -514,8 +531,12 @@ public class PlayerDeathFlowController : MonoBehaviour
             {
                 _playerController.SetPlayerVisible(true);
                 _playerController.ResetVelocity();
-                _playerController.hp = 10;
+                _playerController.hp = 10; // 🌟 重新设为满血 (10)
             }
+
+            // 双重安全保障：确保死亡全局标志完全重置为 false，玩家可再次正常受击！
+            IsPlayerDead = false;
+            _isDead = false;
 
             Transform playerBody = FindChildByName(targetPlayerRoot, "PlayerBodyCapsule");
             lookTarget = playerBody != null ? playerBody : targetPlayerRoot;
@@ -603,32 +624,63 @@ public class PlayerDeathFlowController : MonoBehaviour
             _canvas.renderMode = RenderMode.ScreenSpaceOverlay;
         }
 
-        if (_leftRt == null || _rightRt == null || _leftCg == null || _rightCg == null)
-            yield break;
-
         if (!_capturedUiLayout)
             CaptureUiLayout();
 
-        _leftRt.gameObject.SetActive(true);
-        _rightRt.gameObject.SetActive(true);
+        if (_leftRt != null) _leftRt.gameObject.SetActive(true);
+        if (_rightRt != null) _rightRt.gameObject.SetActive(true);
         if (_hintRt != null)
             _hintRt.gameObject.SetActive(false);
         if (_buttonRt != null)
             _buttonRt.gameObject.SetActive(false);
 
-        Vector2 leftStart = _leftFinalAnchoredPos + Vector2.left * sideStartOffsetX;
-        Vector2 rightStart = _rightFinalAnchoredPos + Vector2.right * sideStartOffsetX;
+        Vector2 leftStart = Vector2.zero;
+        Vector2 rightStart = Vector2.zero;
+        if (_leftRt != null) leftStart = _leftFinalAnchoredPos + Vector2.left * sideStartOffsetX;
+        if (_rightRt != null) rightStart = _rightFinalAnchoredPos + Vector2.right * sideStartOffsetX;
 
         // Reset text positions initially
-        ApplySideReveal(_leftRt, _leftCg, leftStart, _leftFinalAnchoredPos, _leftMaterial, _leftBaseFaceDilate, _leftBaseOutlineSoftness, _leftBaseOutlineWidth, _leftBaseUnderlayDilate, _leftBaseUnderlaySoftness, _leftBaseUnderlayColor, 0f);
-        ApplySideReveal(_rightRt, _rightCg, rightStart, _rightFinalAnchoredPos, _rightMaterial, _rightBaseFaceDilate, _rightBaseOutlineSoftness, _rightBaseOutlineWidth, _rightBaseUnderlayDilate, _rightBaseUnderlaySoftness, _rightBaseUnderlayColor, 0f);
+        if (_leftRt != null && _leftCg != null)
+            ApplySideReveal(_leftRt, _leftCg, leftStart, _leftFinalAnchoredPos, _leftMaterial, _leftBaseFaceDilate, _leftBaseOutlineSoftness, _leftBaseOutlineWidth, _leftBaseUnderlayDilate, _leftBaseUnderlaySoftness, _leftBaseUnderlayColor, 0f);
+        if (_rightRt != null && _rightCg != null)
+            ApplySideReveal(_rightRt, _rightCg, rightStart, _rightFinalAnchoredPos, _rightMaterial, _rightBaseFaceDilate, _rightBaseOutlineSoftness, _rightBaseOutlineWidth, _rightBaseUnderlayDilate, _rightBaseUnderlaySoftness, _rightBaseUnderlayColor, 0f);
 
         // 1. Capture screen WITHOUT letterbox
         PhysicalGlassShatter physicalShatter = FindObjectOfType<PhysicalGlassShatter>();
-        bool isTrapDeath = _trapDeathState != TrapDeathState.None;
-
-        if (physicalShatter != null && !isTrapDeath)
+        if (physicalShatter == null)
         {
+            // Try searching inactive game objects in the scene too!
+            PhysicalGlassShatter[] allShatters = Resources.FindObjectsOfTypeAll<PhysicalGlassShatter>();
+            foreach (var sh in allShatters)
+            {
+                if (sh.hideFlags == HideFlags.None && sh.gameObject.scene.name != null)
+                {
+                    physicalShatter = sh;
+                    physicalShatter.gameObject.SetActive(true);
+                    Debug.Log("[PlayerDeathFlow] Found and activated inactive PhysicalGlassShatter in scene!");
+                    break;
+                }
+            }
+        }
+
+        if (physicalShatter == null)
+        {
+            Camera cam = mainCamera != null ? mainCamera : Camera.main;
+            if (cam != null)
+            {
+                physicalShatter = cam.gameObject.AddComponent<PhysicalGlassShatter>();
+                Debug.Log("[PlayerDeathFlow] PhysicalGlassShatter was missing from scene. Automatically added it to: " + cam.name);
+            }
+        }
+
+        if (physicalShatter != null)
+        {
+            // Ensure its camera reference is set correctly before shattering!
+            if (physicalShatter.mainCamera == null)
+            {
+                physicalShatter.mainCamera = mainCamera != null ? mainCamera : Camera.main;
+            }
+
             physicalShatter.TriggerShatter();
             // Wait for it to capture the screen (1 frame)
             yield return new WaitForEndOfFrame();
@@ -653,7 +705,7 @@ public class PlayerDeathFlowController : MonoBehaviour
         yield return new WaitForSecondsRealtime(0.1f);
 
         // 4. Trigger glass shatter (Crack)
-        if (physicalShatter != null && !isTrapDeath)
+        if (physicalShatter != null)
         {
             physicalShatter.Crack();
         }
@@ -675,11 +727,23 @@ public class PlayerDeathFlowController : MonoBehaviour
             float leftProgress = Ease01(t / leftDuration);
             float rightProgress = Ease01((t - rightStartTime) / rightDuration);
 
-            ApplySideReveal(_leftRt, _leftCg, leftStart, _leftFinalAnchoredPos, _leftMaterial, _leftBaseFaceDilate, _leftBaseOutlineSoftness, _leftBaseOutlineWidth, _leftBaseUnderlayDilate, _leftBaseUnderlaySoftness, _leftBaseUnderlayColor, leftProgress);
-            ApplySideReveal(_rightRt, _rightCg, rightStart, _rightFinalAnchoredPos, _rightMaterial, _rightBaseFaceDilate, _rightBaseOutlineSoftness, _rightBaseOutlineWidth, _rightBaseUnderlayDilate, _rightBaseUnderlaySoftness, _rightBaseUnderlayColor, rightProgress);
+            if (_leftRt != null && _leftCg != null)
+                ApplySideReveal(_leftRt, _leftCg, leftStart, _leftFinalAnchoredPos, _leftMaterial, _leftBaseFaceDilate, _leftBaseOutlineSoftness, _leftBaseOutlineWidth, _leftBaseUnderlayDilate, _leftBaseUnderlaySoftness, _leftBaseUnderlayColor, leftProgress);
+            if (_rightRt != null && _rightCg != null)
+                ApplySideReveal(_rightRt, _rightCg, rightStart, _rightFinalAnchoredPos, _rightMaterial, _rightBaseFaceDilate, _rightBaseOutlineSoftness, _rightBaseOutlineWidth, _rightBaseUnderlayDilate, _rightBaseUnderlaySoftness, _rightBaseUnderlayColor, rightProgress);
 
-            // Start hint and buttons earlier (when right text is 50% done)
-            if (!hintStarted && rightProgress > 0.5f)
+            // Start hint and buttons earlier (when right text is 50% done, or instantly if right text doesn't exist!)
+            bool triggerHintAndButton = false;
+            if (_rightRt != null)
+            {
+                if (rightProgress > 0.5f) triggerHintAndButton = true;
+            }
+            else
+            {
+                if (t > 0.15f) triggerHintAndButton = true;
+            }
+
+            if (!hintStarted && triggerHintAndButton)
             {
                 hintStarted = true;
                 if (_hintRt != null && _hintCg != null)
@@ -691,8 +755,10 @@ public class PlayerDeathFlowController : MonoBehaviour
             yield return null;
         }
 
-        ApplySideReveal(_leftRt, _leftCg, leftStart, _leftFinalAnchoredPos, _leftMaterial, _leftBaseFaceDilate, _leftBaseOutlineSoftness, _leftBaseOutlineWidth, _leftBaseUnderlayDilate, _leftBaseUnderlaySoftness, _leftBaseUnderlayColor, 1f);
-        ApplySideReveal(_rightRt, _rightCg, rightStart, _rightFinalAnchoredPos, _rightMaterial, _rightBaseFaceDilate, _rightBaseOutlineSoftness, _rightBaseOutlineWidth, _rightBaseUnderlayDilate, _rightBaseUnderlaySoftness, _rightBaseUnderlayColor, 1f);
+        if (_leftRt != null && _leftCg != null)
+            ApplySideReveal(_leftRt, _leftCg, leftStart, _leftFinalAnchoredPos, _leftMaterial, _leftBaseFaceDilate, _leftBaseOutlineSoftness, _leftBaseOutlineWidth, _leftBaseUnderlayDilate, _leftBaseUnderlaySoftness, _leftBaseUnderlayColor, 1f);
+        if (_rightRt != null && _rightCg != null)
+            ApplySideReveal(_rightRt, _rightCg, rightStart, _rightFinalAnchoredPos, _rightMaterial, _rightBaseFaceDilate, _rightBaseOutlineSoftness, _rightBaseOutlineWidth, _rightBaseUnderlayDilate, _rightBaseUnderlaySoftness, _rightBaseUnderlayColor, 1f);
 
         // Ensure hint/buttons start if they somehow didn't
         if (!hintStarted)
@@ -948,35 +1014,108 @@ public class PlayerDeathFlowController : MonoBehaviour
 
     private void EnsureUi()
     {
-        if (_canvas == null)
-            _canvas = FindObjectOfType<Canvas>();
-        if (_canvas == null)
-            return;
+        // 🌟 Ensure EventSystem exists in the scene so UI click events can be processed!
+        if (FindObjectOfType<UnityEngine.EventSystems.EventSystem>() == null)
+        {
+            GameObject esObj = new GameObject("EventSystem_Dynamic");
+            esObj.AddComponent<UnityEngine.EventSystems.EventSystem>();
+            esObj.AddComponent<UnityEngine.EventSystems.StandaloneInputModule>();
+            Debug.Log("[PlayerDeathFlow] EventSystem was missing from the scene. Dynamic EventSystem successfully created!");
+        }
 
+        // 1. Gather all Canvases in the active scene (both active and inactive!)
+        List<Canvas> allCanvases = new List<Canvas>();
+        Canvas[] canvasesInScene = Resources.FindObjectsOfTypeAll<Canvas>();
+        foreach (var c in canvasesInScene)
+        {
+            if (c.hideFlags == HideFlags.None && c.gameObject.scene.name != null)
+            {
+                allCanvases.Add(c);
+            }
+        }
+
+        // 2. Try to find the labels and button by searching all canvases
         _leftLabel = leftDeathTMP;
         _rightLabel = rightDeathTMP;
         _hintLabel = deathHintTMP;
         _reviveButton = reviveButton;
 
-        if (_leftLabel == null)
-            _leftLabel = FindTextByAnyName(_canvas.transform, "DeathLeftTMP", "DeadLeftTMP", "LeftDeathTMP");
-        if (_leftLabel == null)
-            _leftLabel = FindTextByExactContent(_canvas.transform, "死");
+        foreach (Canvas canvas in allCanvases)
+        {
+            if (_leftLabel == null)
+                _leftLabel = FindTextByAnyName(canvas.transform, "DeathLeftTMP", "DeadLeftTMP", "LeftDeathTMP");
+            if (_leftLabel == null)
+                _leftLabel = FindTextByExactContent(canvas.transform, "死");
 
-        if (_rightLabel == null)
-            _rightLabel = FindTextByAnyName(_canvas.transform, "DeathRightTMP", "DeadRightTMP", "RightDeathTMP");
-        if (_rightLabel == null)
-            _rightLabel = FindTextByExactContent(_canvas.transform, "亡");
+            if (_rightLabel == null)
+                _rightLabel = FindTextByAnyName(canvas.transform, "DeathRightTMP", "DeadRightTMP", "RightDeathTMP");
+            if (_rightLabel == null)
+                _rightLabel = FindTextByExactContent(canvas.transform, "亡");
 
-        if (_hintLabel == null)
-            _hintLabel = FindTextByAnyName(_canvas.transform, "DeathHintTMP", "DeathTipTMP", "DeathPromptTMP");
-        if (_hintLabel == null)
-            _hintLabel = FindTextContaining(_canvas.transform, "死亡");
+            if (_hintLabel == null)
+                _hintLabel = FindTextByAnyName(canvas.transform, "DeathHintTMP", "DeathTipTMP", "DeathPromptTMP");
+            if (_hintLabel == null)
+                _hintLabel = FindTextContaining(canvas.transform, "死亡");
 
-        if (_reviveButton == null)
-            _reviveButton = FindButtonByAnyName(_canvas.transform, "ReviveButton", "RespawnButton", "DeathReviveButton");
-        if (_reviveButton == null)
-            _reviveButton = FindButtonByChildTextContaining(_canvas.transform, "复活");
+            // 🌟 1. Prioritize text-based search (Case-insensitive) as it is extremely specific and unique!
+            if (_reviveButton == null)
+                _reviveButton = FindButtonByChildTextContaining(canvas.transform, "PROXY");
+            if (_reviveButton == null)
+                _reviveButton = FindButtonByChildTextContaining(canvas.transform, "ACTIVATE");
+            if (_reviveButton == null)
+                _reviveButton = FindButtonByChildTextContaining(canvas.transform, "Proxy");
+            if (_reviveButton == null)
+                _reviveButton = FindButtonByChildTextContaining(canvas.transform, "Activate");
+            if (_reviveButton == null)
+                _reviveButton = FindButtonByChildTextContaining(canvas.transform, "复活");
+            if (_reviveButton == null)
+                _reviveButton = FindButtonByChildTextContaining(canvas.transform, "重生");
+
+            // 🌟 2. Search by unique/specific names
+            if (_reviveButton == null)
+                _reviveButton = FindButtonByAnyName(canvas.transform, "ReviveButton", "RespawnButton", "DeathReviveButton", "ProxyButton", "ProxyActivateButton", "ActivateButton", "ActionButton");
+
+            // 🌟 3. Only fall back to default name "Button"
+            if (_reviveButton == null)
+                _reviveButton = FindButtonByAnyName(canvas.transform, "Button");
+
+            // Absolute Bulletproof Fallback: if we still haven't found the button, grab the first button in this Canvas!
+            if (_reviveButton == null)
+            {
+                Button[] buttons = canvas.GetComponentsInChildren<Button>(true);
+                if (buttons.Length > 0)
+                {
+                    _reviveButton = buttons[0];
+                    Debug.Log($"[PlayerDeathFlow] Fallback triggered: bound the first button '{_reviveButton.name}' found on Canvas '{canvas.name}'.");
+                }
+            }
+            
+            // If we found the revive button, this is the correct canvas!
+            if (_reviveButton != null)
+            {
+                _canvas = canvas;
+            }
+        }
+
+        if (_canvas == null && allCanvases.Count > 0)
+        {
+            _canvas = allCanvases[0];
+        }
+
+        if (_reviveButton != null)
+        {
+            _reviveButton.onClick.RemoveListener(OnReviveClicked);
+            _reviveButton.onClick.AddListener(OnReviveClicked);
+
+            // CRITICAL FIX: Ensure the button and all parent canvas groups are fully active, interactable, and block raycasts!
+            _reviveButton.interactable = true;
+            CanvasGroup[] parentCgs = _reviveButton.GetComponentsInParent<CanvasGroup>(true);
+            foreach (var cg in parentCgs)
+            {
+                cg.interactable = true;
+                cg.blocksRaycasts = true;
+            }
+        }
 
         if (_leftLabel == null || _rightLabel == null || _hintLabel == null || _reviveButton == null)
         {
@@ -1292,6 +1431,7 @@ public class PlayerDeathFlowController : MonoBehaviour
         if (root == null || string.IsNullOrEmpty(textFragment))
             return null;
 
+        string targetUpper = textFragment.ToUpperInvariant();
         Button[] buttons = root.GetComponentsInChildren<Button>(true);
         for (int i = 0; i < buttons.Length; i++)
         {
@@ -1300,7 +1440,11 @@ public class PlayerDeathFlowController : MonoBehaviour
                 continue;
 
             TextMeshProUGUI label = b.GetComponentInChildren<TextMeshProUGUI>(true);
-            if (label != null && !string.IsNullOrEmpty(label.text) && label.text.Contains(textFragment))
+            if (label != null && !string.IsNullOrEmpty(label.text) && label.text.ToUpperInvariant().Contains(targetUpper))
+                return b;
+
+            UnityEngine.UI.Text legacyText = b.GetComponentInChildren<UnityEngine.UI.Text>(true);
+            if (legacyText != null && !string.IsNullOrEmpty(legacyText.text) && legacyText.text.ToUpperInvariant().Contains(targetUpper))
                 return b;
         }
 
