@@ -92,26 +92,16 @@ public class CockpitCam : MonoBehaviour
 
 	private void Update()
 	{
-		if (!IsCameraActive())
+		if (!isDriving)
 		{
-			if (isLooking)
-			{
-				SetLook(false);
-			}
 			SetRayLineActive(false);
 			return;
 		}
 
 		if (Input.GetMouseButtonDown(0))
 		{
-			if (toggleLookWithClick)
-			{
-				SetLook(!isLooking);
-			}
-			else
-			{
-				SetLook(true);
-			}
+			// Left click only locks the cursor, never releases/unlocks it!
+			SetLook(true);
 		}
 
 		if (Input.GetKeyDown(exitLookKey))
@@ -136,7 +126,9 @@ public class CockpitCam : MonoBehaviour
 		ICockpitInteractable target = GetLookTarget(out highlight);
 		UpdateHighlight(highlight);
 		UpdateRayDebug();
-		if (target != null && Input.GetKeyDown(interactKey))
+
+		// Right Click (MouseButton 1) is the core triggering logic for any camera!
+		if (target != null && (Input.GetMouseButtonDown(1) || Input.GetKeyDown(interactKey)))
 		{
 			target.Interact();
 		}
@@ -195,7 +187,15 @@ public class CockpitCam : MonoBehaviour
 	private ICockpitInteractable GetLookTarget(out ICockpitHighlightable highlight)
 	{
 		highlight = null;
-		if (!TryBuildRay(out Ray ray))
+
+		// Dynamically fetch the current active camera in the scene to ensure interaction works regardless of camera!
+		Camera activeCam = cockpitCamera;
+		if (activeCam == null || !activeCam.gameObject.activeInHierarchy || !activeCam.enabled)
+		{
+			activeCam = Camera.main;
+		}
+
+		if (!TryBuildRay(out Ray ray, activeCam))
 		{
 			return null;
 		}
@@ -266,7 +266,7 @@ public class CockpitCam : MonoBehaviour
 		}
 	}
 
-	private bool TryBuildRay(out Ray ray)
+	private bool TryBuildRay(out Ray ray, Camera activeCam)
 	{
 		switch (rayMode)
 		{
@@ -279,20 +279,28 @@ public class CockpitCam : MonoBehaviour
 				ray = new Ray(rayOrigin.position, rayOrigin.forward);
 				return true;
 			case RaycastMode.CameraForward:
-				if (cockpitCamera == null)
+				if (activeCam == null)
 				{
 					ray = default;
 					return false;
 				}
-				ray = new Ray(cockpitCamera.transform.position, cockpitCamera.transform.forward);
+				ray = new Ray(activeCam.transform.position, activeCam.transform.forward);
 				return true;
 			case RaycastMode.ScreenCenter:
-				if (cockpitCamera == null)
+				if (activeCam == null)
 				{
 					ray = default;
 					return false;
 				}
-				ray = cockpitCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
+				// Viewport center when locked looking around, or ScreenPoint to mousePosition when cursor is unlocked to click!
+				if (isLooking)
+				{
+					ray = activeCam.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
+				}
+				else
+				{
+					ray = activeCam.ScreenPointToRay(Input.mousePosition);
+				}
 				return true;
 			default:
 				ray = default;
@@ -441,7 +449,14 @@ public class CockpitCam : MonoBehaviour
 		if (!isDriving) return;
 
 		isDriving = false;
-		SetLook(false);
+		
+		// Force lock the cursor upon exiting driving mode so walking first-person view works immediately!
+		if (manageCursor)
+		{
+			Cursor.lockState = CursorLockMode.Locked;
+			Cursor.visible = false;
+		}
+		isLooking = false;
 
 		// Disable vehicle control
 		if (carControl != null)
