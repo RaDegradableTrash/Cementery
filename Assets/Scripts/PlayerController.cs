@@ -227,7 +227,8 @@ public class PlayerController : NetworkBehaviour
                 Debug.Log("[Jump Debug] Executing FIRST JUMP!");
                 ExecuteJump();
             }
-            // 2. SECOND JUMP (Strictly for climbing walls/ledges)
+            // 2. SECOND JUMP (Strictly for climbing walls/ledges) - Temporarily disabled per user request
+            /*
             else if (_jumpCount == 1 && _jumpCount < maxJumps)
             {
                 Debug.Log("[Jump Debug] Trying CLIMB/SECOND JUMP!");
@@ -240,6 +241,7 @@ public class PlayerController : NetworkBehaviour
                     Debug.Log("[Jump Debug] Climb/Double Jump failed!");
                 }
             }
+            */
         }
 
         GatherInput();
