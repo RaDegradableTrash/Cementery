@@ -549,15 +549,15 @@ public class CockpitCam : MonoBehaviour
 
 		if (target != null)
 		{
-			// 用各个按钮分别的名字代替提示的右键交互信息
+			// 用各个按钮分别的名字代替提示的右键交互信息，始终以"[ RMB ] "开头
 			string btnName = GetFriendlyButtonName(target);
-			string promptText = $"[右键] {btnName}";
+			string promptText = $"[ RMB ] {btnName}";
 			InteractionSystem.Instance.SetExternalInteractPrompt(promptText, true);
 		}
 		else if (doorTarget != null)
 		{
-			// 面向车门也有提示可以开关车门
-			string promptText = "[右键] 开关车门";
+			// 面向车门提示可以开关车门，始终以"[ RMB ] "开头
+			string promptText = "[ RMB ] Toggle Door";
 			InteractionSystem.Instance.SetExternalInteractPrompt(promptText, true);
 		}
 		else
@@ -567,32 +567,32 @@ public class CockpitCam : MonoBehaviour
 		}
 	}
 
-	// 🌟 智能个性化中文名映射，为每个排档按钮、引擎、电瓶按钮输出大气的 UI 提示字眼！
+	// 🌟 智能个性化英文名映射，为每个排档按钮、引擎、电瓶按钮输出简短英文！
 	private string GetFriendlyButtonName(ICockpitInteractable target)
 	{
-		if (target == null) return "按钮";
+		if (target == null) return "Button";
 		MonoBehaviour mb = target as MonoBehaviour;
-		if (mb == null) return "按钮";
+		if (mb == null) return "Button";
 
 		string name = mb.gameObject.name;
 		string className = mb.GetType().Name;
 
-		if (className.Contains("EngineStart") || name.Contains("EngineStart")) return "发动引擎";
-		if (className.Contains("Battery1") || name.Contains("Battery1")) return "接通电瓶 1";
-		if (className.Contains("Battery2") || name.Contains("Battery2")) return "接通电瓶 2";
-		if (className.Contains("ReadingLight") || name.Contains("ReadingLight")) return "开关阅读灯";
-		if (className.Contains("Wiper") || name.Contains("Wiper")) return "开关雨刮器";
+		if (className.Contains("EngineStart") || name.Contains("EngineStart")) return "Start Engine";
+		if (className.Contains("Battery1") || name.Contains("Battery1")) return "Battery 1";
+		if (className.Contains("Battery2") || name.Contains("Battery2")) return "Battery 2";
+		if (className.Contains("ReadingLight") || name.Contains("ReadingLight")) return "Reading Light";
+		if (className.Contains("Wiper") || name.Contains("Wiper")) return "Wiper";
 		
-		if (className.Contains("PButton") || name == "P" || name == "PButton") return "P 档 (驻车)";
-		if (className.Contains("RButton") || name == "R" || name == "RButton") return "R 档 (倒车)";
-		if (className.Contains("NButton") || name == "N" || name == "NButton") return "N 档 (空档)";
-		if (className.Contains("DButton") || name == "D" || name == "DButton") return "D 档 (前进)";
-		if (className.Contains("SButton") || name == "S" || name == "SButton") return "S 档 (运动)";
-		if (className.Contains("H6Button") || name == "H6" || name == "H6Button") return "H6 档 (高速四驱)";
-		if (className.Contains("L6Button") || name == "L6" || name == "L6Button") return "L6 档 (低速四驱)";
+		if (className.Contains("PButton") || name == "P" || name == "PButton") return "P Gear";
+		if (className.Contains("RButton") || name == "R" || name == "RButton") return "R Gear";
+		if (className.Contains("NButton") || name == "N" || name == "NButton") return "N Gear";
+		if (className.Contains("DButton") || name == "D" || name == "DButton") return "D Gear";
+		if (className.Contains("SButton") || name == "S" || name == "SButton") return "S Gear";
+		if (className.Contains("H6Button") || name == "H6" || name == "H6Button") return "H6 Gear";
+		if (className.Contains("L6Button") || name == "L6" || name == "L6Button") return "L6 Gear";
 
 		// 友好兜底
 		name = name.Replace("Button", "").Replace("button", "").Trim();
-		return name + " 按钮";
+		return name;
 	}
 }

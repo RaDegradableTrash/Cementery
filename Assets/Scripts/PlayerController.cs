@@ -449,6 +449,13 @@ public class PlayerController : NetworkBehaviour
             corpseRb.angularVelocity = _rb.angularVelocity;
         }
 
+        // 🌟 强力修复：因为克隆自活着的玩家（那时是 ShadowsOnly），尸体必须显化出完全实体并投射阴影！
+        foreach (Renderer r in corpse.GetComponentsInChildren<Renderer>())
+        {
+            r.enabled = true;
+            r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
+        }
+
         SetPlayerVisible(false);
         return corpse.transform;
     }
@@ -456,7 +463,19 @@ public class PlayerController : NetworkBehaviour
     public void SetPlayerVisible(bool visible)
     {
         foreach (Renderer r in GetComponentsInChildren<Renderer>())
-            r.enabled = visible;
+        {
+            if (visible)
+            {
+                r.enabled = true;
+                // 🌟 核心创意：存活时，玩家肉身对摄像机完全透明（ShadowsOnly），但是依然能透视/投射真实的阴影！
+                r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.ShadowsOnly;
+            }
+            else
+            {
+                // 死亡或在车内驾驶隐藏时，Renderer 完全关闭
+                r.enabled = false;
+            }
+        }
         
         if (_col != null) _col.enabled = visible;
         if (_rb != null)
