@@ -163,6 +163,32 @@ public class InteractionSystem : MonoBehaviour
         _playerCol = GetComponent<CapsuleCollider>();
         ResolveAttractAimPointIfNeeded();
         InitializePlacementMaterials();
+        AutoBindUI();
+    }
+
+    void AutoBindUI()
+    {
+        if (interactLabel != null && carryLabel != null && collectLabel != null) return;
+
+        GameObject uiParent = GameObject.Find("FacingNotificationEmpty");
+        if (uiParent != null)
+        {
+            if (interactLabel == null)
+            {
+                Transform t = uiParent.transform.Find("InteractTMP");
+                if (t != null) interactLabel = t.GetComponent<TextMeshProUGUI>();
+            }
+            if (carryLabel == null)
+            {
+                Transform t = uiParent.transform.Find("CarryTMP");
+                if (t != null) carryLabel = t.GetComponent<TextMeshProUGUI>();
+            }
+            if (collectLabel == null)
+            {
+                Transform t = uiParent.transform.Find("CollectTMP");
+                if (t != null) collectLabel = t.GetComponent<TextMeshProUGUI>();
+            }
+        }
     }
 
     void ApplyCarryNoFriction()
@@ -718,7 +744,14 @@ public class InteractionSystem : MonoBehaviour
             Vector3 pointToEvaluate = hit.point;
             if (hit.distance == 0f && hit.point == Vector3.zero)
             {
-                pointToEvaluate = c.ClosestPoint(ray.origin);
+                if (c is MeshCollider mc && !mc.convex)
+                {
+                    pointToEvaluate = ray.origin; // ClosestPoint fails on non-convex mesh colliders
+                }
+                else
+                {
+                    pointToEvaluate = c.ClosestPoint(ray.origin);
+                }
             }
 
             // Angular deviation: how far the hit point is from the ray center line
@@ -1253,10 +1286,13 @@ public class InteractionSystem : MonoBehaviour
 
     void UpdatePrompt()
     {
-        SetLabel(carryLabel, _carryCandidateRb != null);
-        SetLabel(interactLabel, _lookedAt != null && _lookedAt.interactable);
-        SetLabel(collectLabel, _carriedWo != null && _carriedWo.collectable);
-        SetLabel(collectLabel, _carriedWo != null && _carriedWo.collectable);
+        bool showCarry = _carryCandidateRb != null;
+        bool showInteract = _lookedAt != null && _lookedAt.interactable;
+        bool showCollect = _carriedWo != null && _carriedWo.collectable;
+
+        SetLabel(carryLabel, showCarry);
+        SetLabel(interactLabel, showInteract);
+        SetLabel(collectLabel, showCollect);
     }
 
     void SetLabel(TextMeshProUGUI label, bool active)

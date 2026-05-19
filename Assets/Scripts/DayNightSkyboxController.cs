@@ -266,27 +266,58 @@ public class DayNightSkyboxController : MonoBehaviour
 
     private void EnsureSunLight()
     {
-        if (sunLight != null)
-            return;
-
-        if (RenderSettings.sun != null)
+        if (sunLight == null)
         {
-            sunLight = RenderSettings.sun;
-            return;
+            if (RenderSettings.sun != null)
+            {
+                sunLight = RenderSettings.sun;
+            }
+            else
+            {
+                Light[] lights = FindObjectsByType<Light>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+                
+                // 1. Prioritize directional lights with "sun" in the name
+                for (int i = 0; i < lights.Length; i++)
+                {
+                    if (lights[i] != null && lights[i].type == LightType.Directional && lights[i].name.ToLower().Contains("sun"))
+                    {
+                        sunLight = lights[i];
+                        break;
+                    }
+                }
+
+                // 2. Fallback to any directional light
+                if (sunLight == null)
+                {
+                    for (int i = 0; i < lights.Length; i++)
+                    {
+                        if (lights[i] != null && lights[i].type == LightType.Directional)
+                        {
+                            sunLight = lights[i];
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (sunLight != null && RenderSettings.sun == null)
+                RenderSettings.sun = sunLight;
         }
 
-        Light[] lights = FindObjectsByType<Light>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
-        for (int i = 0; i < lights.Length; i++)
+        // 3. Auto-disable any other active directional lights at runtime to prevent double-sun conflicts
+        if (sunLight != null && Application.isPlaying)
         {
-            if (lights[i] != null && lights[i].type == LightType.Directional)
+            Light[] lights = FindObjectsByType<Light>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            for (int i = 0; i < lights.Length; i++)
             {
-                sunLight = lights[i];
-                break;
+                Light l = lights[i];
+                if (l != null && l.type == LightType.Directional && l != sunLight && l.enabled)
+                {
+                    Debug.LogWarning($"[DayNightSkyboxController] Auto-disabled duplicate Directional Light '{l.name}' to prevent lighting conflict.");
+                    l.enabled = false;
+                }
             }
         }
-
-        if (sunLight != null && RenderSettings.sun == null)
-            RenderSettings.sun = sunLight;
     }
 
     private void EnsureRuntimeSkybox()

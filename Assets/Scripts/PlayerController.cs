@@ -111,6 +111,7 @@ public class PlayerController : NetworkBehaviour
 
         _rb.freezeRotation = true;
         _rb.useGravity = true;
+        _rb.isKinematic = false; // Force non-kinematic initialization to ensure physics simulation is active!
         _rb.interpolation = RigidbodyInterpolation.Interpolate;
         _rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
 
@@ -151,6 +152,11 @@ public class PlayerController : NetworkBehaviour
                 if (listener != null) listener.enabled = false;
             }
         }
+        else
+        {
+            // Ensure local owner's rigidbody is 100% active and affected by gravity!
+            if (_rb != null) _rb.isKinematic = false;
+        }
     }
 
     void Update()
@@ -158,6 +164,14 @@ public class PlayerController : NetworkBehaviour
         // 逻辑修正：如果网络管理器没启动（单机测试），或者网络已启动且你是房主/本地玩家，才允许执行逻辑
         bool isNetworkActive = NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening;
         if (isNetworkActive && (!IsSpawned || !IsOwner)) return;
+
+        // 如果玩家死亡，屏蔽所有输入与动作
+        if (hp <= 0 || PlayerDeathFlowController.IsPlayerDead)
+        {
+            _inputMove = Vector2.zero;
+            BobOffset = Vector3.Lerp(BobOffset, Vector3.zero, Time.deltaTime * 12f);
+            return;
+        }
 
         // 如果暂停菜单打开，屏蔽所有输入
         if (GameMenuManager.IsMenuOpen)
@@ -205,7 +219,27 @@ public class PlayerController : NetworkBehaviour
         bool jumpPressed = Input.GetButtonDown("Jump") || Input.GetKeyDown(KeyCode.Space);
         if (jumpPressed)
         {
-            _jumpBufferedUntil = Time.time + JumpBufferTime;
+            Debug.Log($"[Jump Debug] Space pressed! isGrounded: {_isGrounded} | jumpCount: {_jumpCount} | canClimb: {_canClimbThisJump} | groundCheckDisabled: {(Time.time <= _groundCheckDisabledUntil)}");
+            
+            // 1. FIRST JUMP (Only from ground)
+            if (_jumpCount == 0 && _isGrounded)
+            {
+                Debug.Log("[Jump Debug] Executing FIRST JUMP!");
+                ExecuteJump();
+            }
+            // 2. SECOND JUMP (Strictly for climbing walls/ledges)
+            else if (_jumpCount == 1 && _jumpCount < maxJumps)
+            {
+                Debug.Log("[Jump Debug] Trying CLIMB/SECOND JUMP!");
+                if (TryStartClimb())
+                {
+                    Debug.Log("[Jump Debug] Climb/Double Jump success!");
+                }
+                else
+                {
+                    Debug.Log("[Jump Debug] Climb/Double Jump failed!");
+                }
+            }
         }
 
         GatherInput();
@@ -294,13 +328,16 @@ public class PlayerController : NetworkBehaviour
         bool isNetworkActive = NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening;
         if (isNetworkActive && (!IsSpawned || !IsOwner)) return;
 
+        // 如果玩家死亡，停止物理处理和常规移动
+        if (hp <= 0 || PlayerDeathFlowController.IsPlayerDead) return;
+
         // 如果暂停菜单打开，停止物理处理
         if (GameMenuManager.IsMenuOpen) return;
 
         if (IsInventoryModeActive()) return;
 
         HandleMovement();
-        HandleJump();
+        // HandleJump(); // Now fully handled immediately in Update to prevent input loss
         
         // Clear collision state for the upcoming physics step
         _isTouchingWall = false;
@@ -559,17 +596,48 @@ public class PlayerController : NetworkBehaviour
         
         // Start the spherecast slightly above the bottom so it doesn't start already clipped into the ground
         Vector3 origin = worldBottom + Vector3.up * (radius + 0.05f);
-        float castDist = 0.15f; 
+        float castDist = 0.28f; // Increased from 0.15f to support uneven terrains and skin-width contact offsets
         
         _isGrounded = false;
-        if (Physics.SphereCast(origin, radius, Vector3.down, out RaycastHit hit, castDist, groundMask, QueryTriggerInteraction.Ignore))
+        
+        // 1. Primary check: Use SphereCastAll to query all colliders in the sweep path using the Inspector-defined mask.
+        // This is crucial because a single SphereCast will get blocked if it starts inside the player's own collider!
+        RaycastHit[] hits = Physics.SphereCastAll(origin, radius, Vector3.down, castDist, groundMask, QueryTriggerInteraction.Ignore);
+        
+        RaycastHit bestHit = default;
+        bool foundValidGround = false;
+        
+        for (int i = 0; i < hits.Length; i++)
         {
-            // Only count if it's NOT part of the player
-            if (hit.transform.root != transform.root)
+            RaycastHit hit = hits[i];
+            if (hit.transform != null && hit.transform.root != transform.root)
             {
-                _isGrounded = true;
-                _activePlatform = hit.rigidbody;
+                bestHit = hit;
+                foundValidGround = true;
+                break; // SphereCastAll automatically orders by distance, so first non-player hit is the closest ground!
             }
+        }
+        
+        // 2. Dual-Pass Fallback: If primary check fails, query all layers (~0) as fallback to prevent layer misconfiguration bugs
+        if (!foundValidGround)
+        {
+            RaycastHit[] fallbackHits = Physics.SphereCastAll(origin, radius, Vector3.down, castDist, ~0, QueryTriggerInteraction.Ignore);
+            for (int i = 0; i < fallbackHits.Length; i++)
+            {
+                RaycastHit hit = fallbackHits[i];
+                if (hit.transform != null && hit.transform.root != transform.root)
+                {
+                    bestHit = hit;
+                    foundValidGround = true;
+                    break;
+                }
+            }
+        }
+        
+        if (foundValidGround)
+        {
+            _isGrounded = true;
+            _activePlatform = bestHit.rigidbody;
         }
         else
         {

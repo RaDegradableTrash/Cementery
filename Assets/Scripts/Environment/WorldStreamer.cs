@@ -9,17 +9,105 @@ namespace EnvironmentSystem
     {
         public static WorldStreamer Instance { get; private set; }
 
-        [Header("Settings")]
-        public float unloadDelay = 5f; // Delay before unloading to prevent hitching if the player dances on the border
+        [Header("General Settings")]
+        [Tooltip("Delay in seconds before unloading a chunk to prevent thrashing at boundaries.")]
+        public float unloadDelay = 5f;
+        [Tooltip("Set to true to use automatic 3x3 grid coordinate-based loading (Option B). Set to false to use legacy ChunkTriggers.")]
+        public bool useGridStreaming = true;
+
+        [Header("Grid Auto Streamer (Option B)")]
+        [Tooltip("The Transform to track. If left empty, it will automatically search for the Player, the RV, or the Main Camera.")]
+        public Transform trackingTarget;
+        [Tooltip("Time interval in seconds between grid coordinate checks.")]
+        public float checkInterval = 0.5f;
+        [Tooltip("The width of each chunk mesh in world units (width * cellSize).")]
+        public float chunkSizeX = 256f;
+        [Tooltip("The depth of each chunk mesh in world units (depth * cellSize).")]
+        public float chunkSizeZ = 256f;
+        [Tooltip("The prefix of the baked chunk scenes, e.g. Desert_Chunk_X_Z")]
+        public string sceneNamePrefix = "Desert_Chunk";
 
         private HashSet<string> _requestedChunks = new HashSet<string>();
         private HashSet<string> _loadedChunks = new HashSet<string>();
         private Dictionary<string, Coroutine> _unloadRoutines = new Dictionary<string, Coroutine>();
 
+        private float _nextCheckTime;
+        private int _lastGridX = int.MinValue;
+        private int _lastGridZ = int.MinValue;
+
         private void Awake()
         {
             if (Instance == null) Instance = this;
             else Destroy(gameObject);
+        }
+
+        private void Start()
+        {
+            // Initial trigger will be fired automatically in the first Update frame
+            _nextCheckTime = 0f;
+        }
+
+        private void Update()
+        {
+            if (Time.time < _nextCheckTime) return;
+            _nextCheckTime = Time.time + checkInterval;
+
+            // 1. Auto-detect target if none assigned
+            if (trackingTarget == null)
+            {
+                GameObject player = GameObject.FindGameObjectWithTag("Player");
+                if (player != null)
+                {
+                    trackingTarget = player.transform;
+                }
+                else
+                {
+                    var rv = FindObjectOfType<RVSystem.RVController>();
+                    if (rv != null)
+                    {
+                        trackingTarget = rv.transform;
+                    }
+                    else if (Camera.main != null)
+                    {
+                        trackingTarget = Camera.main.transform;
+                    }
+                }
+            }
+
+            // 2. Perform grid projection and load 3x3 surrounding chunks
+            if (trackingTarget != null)
+            {
+                Vector3 pos = trackingTarget.position;
+                int gridX = Mathf.RoundToInt(pos.x / chunkSizeX);
+                int gridZ = Mathf.RoundToInt(pos.z / chunkSizeZ);
+
+                if (gridX != _lastGridX || gridZ != _lastGridZ)
+                {
+                    _lastGridX = gridX;
+                    _lastGridZ = gridZ;
+                    UpdateGridChunks(gridX, gridZ);
+                }
+            }
+        }
+
+        private void UpdateGridChunks(int centerGridX, int centerGridZ)
+        {
+            List<string> requiredList = new List<string>();
+
+            // Generate surrounding 3x3 grid coordinates
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                for (int dz = -1; dz <= 1; dz++)
+                {
+                    int gx = centerGridX + dx;
+                    int gz = centerGridZ + dz;
+                    string sceneName = $"{sceneNamePrefix}_{gx}_{gz}";
+                    requiredList.Add(sceneName);
+                }
+            }
+
+            Debug.Log($"<color=#38bdf8><b>[WorldStreamer]</b></color> Grid projection updated! Centered at grid ({centerGridX}, {centerGridZ}). Gathering 3x3 dynamic scenes.");
+            RequestChunks(requiredList);
         }
 
         public void RequestChunks(List<string> chunkSceneNames)

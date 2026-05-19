@@ -23,6 +23,9 @@ namespace EnvironmentSystem
             {
                 if (WorldStreamer.Instance != null)
                 {
+                    // Under Option B (Grid coordinate-based streaming), legacy triggers are bypassed!
+                    if (WorldStreamer.Instance.useGridStreaming) return;
+
                     WorldStreamer.Instance.RequestChunks(requiredChunks);
                 }
                 else

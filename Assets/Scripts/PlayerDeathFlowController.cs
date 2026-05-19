@@ -58,6 +58,10 @@ public class PlayerDeathFlowController : MonoBehaviour
     [SerializeField] private float blurStartUnderlaySoftness = 0.85f;
     [SerializeField] private float blurStartUnderlayAlpha = 0.34f;
 
+    [Header("Proxy Drone")]
+    public GameObject proxyDronePrefab;
+    private GameObject _activeDrone;
+
     private Transform _playerRoot;
     private Vector3 _spawnPos;
     private Quaternion _spawnRot;
@@ -66,6 +70,7 @@ public class PlayerDeathFlowController : MonoBehaviour
     private float _reviveProtectionTimer = 0f;
     private Vector3 _cameraOriginalLocalPos;
     private Quaternion _cameraOriginalLocalRot;
+    private Transform _cameraOriginalParent;
     private Coroutine _uiCo;
 
     private enum TrapDeathState { None, Falling, Extracting }
@@ -202,96 +207,8 @@ public class PlayerDeathFlowController : MonoBehaviour
 
     private void LateUpdate()
     {
-        if (!_isDead || mainCamera == null)
-            return;
-
-        if (_trapDeathState == TrapDeathState.Falling)
-        {
-            _trapDeathTimer += Time.deltaTime;
-            
-            // 【阶段 1：玩家实体倒下】
-            // 此时真实玩家刚体解锁了冻结，正在摔倒。
-            // 摄像机仍然是玩家的子物体，所以它会自动平滑跟随真实玩家一起摔倒。
-            // 不再强制修改 position 和 rotation。
-
-            // 判断真实的身体是否已经完全倒下
-            bool hasFallen = (_playerRoot != null && Vector3.Dot(_playerRoot.up, Vector3.up) < 0.5f);
-            
-            // 倒下或超时后脱离
-            if (hasFallen || _trapDeathTimer > 3f)
-            {
-                _trapDeathState = TrapDeathState.Extracting;
-                _trapDeathTimer = 0f;
-                
-                // 1. 生成尸体，并隐藏真实玩家。返回尸体用来注视
-                if (_playerController != null)
-                {
-                    lookTarget = _playerController.SpawnCorpseAndHide();
-                }
-
-                // 2. 将旧的摄像机替换为新的死亡摄像机，开始灵魂抽离
-                GameObject deathCamObj = new GameObject("DeathCamera");
-                _deathCamera = deathCamObj.AddComponent<Camera>();
-                _deathCamera.CopyFrom(mainCamera);
-                
-                if (mainCamera.GetComponent<AudioListener>() != null)
-                {
-                    deathCamObj.AddComponent<AudioListener>();
-                    mainCamera.GetComponent<AudioListener>().enabled = false;
-                }
-
-                _trapDeathCameraStartPos = mainCamera.transform.position;
-                _trapDeathCameraTargetPos = _trapDeathCameraStartPos + Vector3.up * 1.5f - mainCamera.transform.forward * 2.5f;
-
-                _deathCamera.transform.position = _trapDeathCameraStartPos;
-                _deathCamera.transform.rotation = mainCamera.transform.rotation;
-                
-                // 禁用旧的真实摄像机，准备在复活后销毁死亡摄像机并恢复
-                mainCamera.enabled = false;
-            }
-        }
-        else if (_trapDeathState == TrapDeathState.Extracting)
-        {
-            // 【阶段 2：灵魂抽离】
-            _trapDeathTimer += Time.deltaTime;
-            
-            float t = Mathf.Clamp01(_trapDeathTimer / 3f);
-            float smoothT = t * t * (3f - 2f * t);
-            
-            if (_deathCamera != null)
-            {
-                // 在 3 秒内将摄像机从尸体头部平滑移动到半空中的目标点
-                _deathCamera.transform.position = Vector3.Lerp(_trapDeathCameraStartPos, _trapDeathCameraTargetPos, smoothT);
-
-                // 无论摄像机怎么退后，始终确保它紧紧盯着尸体（不接受任何鼠标输入）
-                if (lookTarget != null)
-                {
-                    Vector3 center = lookTarget.position + lookTarget.up * 1f;
-                    Vector3 dir = center - _deathCamera.transform.position;
-                    if (dir.sqrMagnitude > 0.001f)
-                    {
-                        Quaternion targetRot = Quaternion.LookRotation(dir.normalized, Vector3.up);
-                        _deathCamera.transform.rotation = Quaternion.Slerp(_deathCamera.transform.rotation, targetRot, Time.deltaTime * cameraLookSpeed);
-                    }
-                }
-            }
-        }
-        else
-        {
-            // 【普通的坠落深渊死亡逻辑】
-            if (lockCameraPositionOnDeath)
-                mainCamera.transform.position = _frozenCameraPos;
-
-            if (lookTarget != null)
-            {
-                Vector3 dir = lookTarget.position - mainCamera.transform.position;
-                if (dir.sqrMagnitude > 0.0001f)
-                {
-                    Quaternion targetRot = Quaternion.LookRotation(dir.normalized, Vector3.up);
-                    mainCamera.transform.rotation = Quaternion.Slerp(mainCamera.transform.rotation, targetRot, Time.deltaTime * cameraLookSpeed);
-                }
-            }
-        }
+        // 🌟 Keep MainCamera in the player's perspective (attached to the player's head) until they press "Respawn"
+        // No custom position freezing or camera detaching during the death state
     }
 
     private void OnDestroy()
@@ -353,6 +270,7 @@ public class PlayerDeathFlowController : MonoBehaviour
         if (mainCamera != null)
         {
             _frozenCameraPos = mainCamera.transform.position;
+            _cameraOriginalParent = mainCamera.transform.parent;
             _cameraOriginalLocalPos = mainCamera.transform.localPosition;
             _cameraOriginalLocalRot = mainCamera.transform.localRotation;
             
@@ -422,6 +340,15 @@ public class PlayerDeathFlowController : MonoBehaviour
             if (cc != null)
                 cc.enabled = false;
 
+            // 🌟 Spawn the corpse at the player's current fallen position/rotation before teleporting them back to spawn
+            if (_trapDeathState == TrapDeathState.Falling)
+            {
+                if (_playerController != null)
+                {
+                    lookTarget = _playerController.SpawnCorpseAndHide();
+                }
+            }
+
             Debug.Log("[PlayerDeathFlow] Teleporting player...");
             _playerRoot.SetPositionAndRotation(_spawnPos, _spawnRot);
             if (_playerRb != null)
@@ -442,48 +369,43 @@ public class PlayerDeathFlowController : MonoBehaviour
                 _deathCamera = null;
             }
 
-            Debug.Log("[PlayerDeathFlow] Re-enabling mainCamera...");
-            if (mainCamera != null)
+            Debug.Log("[PlayerDeathFlow] Spawning Proxy Drone...");
+            if (proxyDronePrefab != null)
             {
-                mainCamera.enabled = true;
-                if (mainCamera.GetComponent<AudioListener>() != null)
+                _activeDrone = Instantiate(proxyDronePrefab, _spawnPos, _spawnRot);
+                DroneController dc = _activeDrone.GetComponent<DroneController>();
+                if (dc == null) dc = _activeDrone.AddComponent<DroneController>();
+                
+                // Re-enable mainCamera but pass it to Drone
+                if (mainCamera != null)
                 {
-                    mainCamera.GetComponent<AudioListener>().enabled = true;
+                    mainCamera.enabled = true;
+                    if (mainCamera.GetComponent<AudioListener>() != null)
+                        mainCamera.GetComponent<AudioListener>().enabled = true;
+                    
+                    dc.Initialize(mainCamera, this);
                 }
-                mainCamera.transform.localPosition = _cameraOriginalLocalPos;
-                mainCamera.transform.localRotation = _cameraOriginalLocalRot;
             }
             else
             {
-                Debug.LogError("[PlayerDeathFlow] mainCamera is NULL during revive! Visuals will be frozen!");
+                Debug.LogError("[PlayerDeathFlow] ProxyDronePrefab is missing! Please assign it in the Inspector.");
             }
 
-            Debug.Log("[PlayerDeathFlow] Enabling CC...");
-            if (cc != null)
-                cc.enabled = true;
-
-            Debug.Log("[PlayerDeathFlow] Resetting PlayerController...");
+            // Keep player hidden and CC disabled during Drone phase
             if (_playerController != null)
             {
-                _playerController.SetPlayerVisible(true);
-                _playerController.ResetVelocity();
-                _playerController.hp = 10;
+                _playerController.SetPlayerVisible(false);
             }
-
-            Debug.Log("[PlayerDeathFlow] Resetting LookTarget...");
-            if (_playerRoot != null)
-            {
-                Transform playerBody = FindChildByName(_playerRoot, "PlayerBodyCapsule");
-                lookTarget = playerBody != null ? playerBody : _playerRoot;
-            }
+            if (cc != null)
+                cc.enabled = false;
 
             IsPlayerDead = false;
             _isDead = false;
             _trapDeathState = TrapDeathState.None;
             _reviveProtectionTimer = 0.2f; 
             
-            Debug.Log("[PlayerDeathFlow] Setting NonMovementSystemsEnabled...");
-            SetNonMovementSystemsEnabled(true);
+            Debug.Log("[PlayerDeathFlow] Setting NonMovementSystemsEnabled (false for drone)...");
+            SetNonMovementSystemsEnabled(false);
             
             Debug.Log("[PlayerDeathFlow] Hiding Death UI Texts...");
             HideDeathUiTextsImmediate();
@@ -501,13 +423,151 @@ public class PlayerDeathFlowController : MonoBehaviour
             
             Debug.Log("[PlayerDeathFlow] Unlocking Cursor...");
             Cursor.lockState = CursorLockMode.Locked;
-            Cursor.visible = false;
-            Debug.Log("[PlayerDeathFlow] RevivePlayer fully finished.");
+            Debug.Log("[PlayerDeathFlow] Proxy Revive Phase 1 finished.");
         }
         catch (System.Exception e)
         {
             Debug.LogError($"[PlayerDeathFlow] RevivePlayer CRASHED: {e.Message}\n{e.StackTrace}");
         }
+    }
+
+    public void CompleteRevive()
+    {
+        Debug.Log("[PlayerDeathFlow] CompleteRevive triggered by Drone.");
+        StartCoroutine(CompleteReviveSequence());
+    }
+
+    private IEnumerator CompleteReviveSequence()
+    {
+        // Fade to black
+        GameObject fadeObj = new GameObject("ReviveFader");
+        Canvas fadeCanvas = fadeObj.AddComponent<Canvas>();
+        fadeCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        fadeCanvas.sortingOrder = 999;
+        Image fadeImage = fadeObj.AddComponent<Image>();
+        fadeImage.color = new Color(0, 0, 0, 0);
+        
+        float t = 0;
+        while (t < 1f)
+        {
+            t += Time.deltaTime * 2f;
+            fadeImage.color = new Color(0, 0, 0, t);
+            yield return null;
+        }
+
+        Debug.Log($"[CompleteRevive Diagnostics] Starting camera detachment and restoration. mainCamera: {(mainCamera != null ? mainCamera.name : "null")}");
+
+        // 1. 先把摄像头分离下来 (Detach camera from Drone completely to root first!)
+        if (mainCamera != null)
+        {
+            Debug.Log($"[CompleteRevive Diagnostics] Detaching camera. Parent before: {(mainCamera.transform.parent != null ? mainCamera.transform.parent.name : "null")}");
+            mainCamera.transform.SetParent(null);
+        }
+
+        // 2. 再销毁 Drone (Safely destroy Drone)
+        if (_activeDrone != null)
+        {
+            Debug.Log("[CompleteRevive Diagnostics] Destroying Drone...");
+            Destroy(_activeDrone);
+            _activeDrone = null;
+        }
+
+        // 等待一帧，确保 Drone 被完全销毁并且所有物理周期更新完毕
+        yield return null;
+
+        // 3. 寻找并更新场景中当前激活的本地玩家 (Find the newly active/instantiated local player)
+        PlayerController localPlayer = null;
+        PlayerController[] players = FindObjectsOfType<PlayerController>();
+        foreach (PlayerController p in players)
+        {
+            bool isNetworkActive = Unity.Netcode.NetworkManager.Singleton != null && Unity.Netcode.NetworkManager.Singleton.IsListening;
+            if (isNetworkActive)
+            {
+                if (p.IsOwner)
+                {
+                    localPlayer = p;
+                    break;
+                }
+            }
+            else
+            {
+                localPlayer = p;
+                break;
+            }
+        }
+
+        // 优先使用新寻找到的本地 Player，如果没有则回退到 _playerRoot
+        Transform targetPlayerRoot = localPlayer != null ? localPlayer.transform : _playerRoot;
+        Debug.Log($"[CompleteRevive Diagnostics] Found Target Player: {(targetPlayerRoot != null ? targetPlayerRoot.name : "null")}");
+
+        if (targetPlayerRoot != null)
+        {
+            _playerRoot = targetPlayerRoot;
+            _playerController = targetPlayerRoot.GetComponent<PlayerController>();
+            _mouseLook = mainCamera != null ? mainCamera.GetComponent<MouseLook>() : null;
+
+            // Re-enable Player components
+            CharacterController cc = targetPlayerRoot.GetComponent<CharacterController>();
+            if (cc != null) cc.enabled = true;
+
+            if (_playerController != null)
+            {
+                _playerController.SetPlayerVisible(true);
+                _playerController.ResetVelocity();
+                _playerController.hp = 10;
+            }
+
+            Transform playerBody = FindChildByName(targetPlayerRoot, "PlayerBodyCapsule");
+            lookTarget = playerBody != null ? playerBody : targetPlayerRoot;
+
+            // 4. 将摄像头挂载到新/旧 Player 下面 (Attach camera under the Player's holder)
+            if (mainCamera != null)
+            {
+                Transform holder = FindChildByName(targetPlayerRoot, "CameraHolderEmpty");
+                if (holder == null) holder = FindChildByName(targetPlayerRoot, "Head");
+                if (holder == null) holder = targetPlayerRoot; // final fallback
+
+                Debug.Log($"[CompleteRevive Diagnostics] Parenting camera to: {holder.name}");
+                if (_mouseLook != null)
+                {
+                    _mouseLook.SetupCamera(targetPlayerRoot, holder);
+                    _mouseLook.enabled = true;
+                }
+                else
+                {
+                    mainCamera.transform.SetParent(holder);
+                    mainCamera.transform.localPosition = _cameraOriginalLocalPos;
+                    mainCamera.transform.localRotation = _cameraOriginalLocalRot;
+                }
+
+                mainCamera.enabled = true;
+                AudioListener listener = mainCamera.GetComponent<AudioListener>();
+                if (listener != null) listener.enabled = true;
+
+                Debug.Log($"[CompleteRevive Diagnostics] Camera successfully restored to Player! Parent = {mainCamera.transform.parent.name} | Camera.enabled = {mainCamera.enabled} | ActiveInHierarchy = {mainCamera.gameObject.activeInHierarchy}");
+            }
+        }
+        else
+        {
+            Debug.LogError("[CompleteRevive Diagnostics] No player found to restore the camera to!");
+        }
+
+        SetNonMovementSystemsEnabled(true);
+
+        Cursor.lockState = CursorLockMode.Locked;
+        Cursor.visible = false;
+
+        // Fade back in
+        t = 1f;
+        while (t > 0f)
+        {
+            t -= Time.deltaTime * 2f;
+            fadeImage.color = new Color(0, 0, 0, t);
+            yield return null;
+        }
+
+        Destroy(fadeObj);
+        Debug.Log("[PlayerDeathFlow] CompleteRevive fully finished.");
     }
 
     private IEnumerator RemoveLetterboxSmoothly()
