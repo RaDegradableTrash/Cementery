@@ -251,6 +251,10 @@ public class CarControl : MonoBehaviour
         if (startProcedure != null)
         {
             SetElectricalPower(startProcedure.HasAnyBatteryOn());
+            if (engineOn != startProcedure.EngineOn)
+            {
+                SetEngineOn(startProcedure.EngineOn);
+            }
         }
         float rawVertical = activeControl ? Input.GetAxis("Vertical") : 0f;
         float hInputRaw = activeControl ? Input.GetAxisRaw("Horizontal") : 0f;
@@ -446,7 +450,7 @@ public class CarControl : MonoBehaviour
             {
                 wheel.WheelCollider.brakeTorque = brakeInput * brakeTorque;
                 bool isSixLock = IsSixLockGear(currentGear);
-                bool allowSixLockDrive = isSixLock && sixLockWheelSet.Contains(wheel);
+                bool allowSixLockDrive = isSixLock && (sixLockWheelSet.Count == 0 || sixLockWheelSet.Contains(wheel));
                 bool isMotorized = isSixLock ? allowSixLockDrive : wheel.motorized;
                 if (isMotorized)
                 {
