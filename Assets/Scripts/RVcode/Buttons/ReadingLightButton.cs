@@ -1,26 +1,24 @@
 using UnityEngine;
 
-public abstract class GearButtonBase : MonoBehaviour, ICockpitInteractable, ICockpitHighlightable
+public class ReadingLightButton : MonoBehaviour, ICockpitInteractable, ICockpitHighlightable
 {
-    [SerializeField] protected CarControl carControl;
+    [SerializeField] private ReadingLightSystem system;
+    [SerializeField] private int lightIndex = 0;
     [SerializeField] private Renderer targetRenderer;
     [SerializeField] private Color activeEmissionColor = new Color(0.2f, 0.6f, 1f, 1f);
-    [SerializeField] private bool glowWhenActive = true;
     [SerializeField] private Color highlightEmissionColor = new Color(0.95f, 0.95f, 0.95f, 1f);
     [SerializeField] private float highlightEmissionHdr = -4.5f;
 
     private Color inactiveEmissionColor = Color.black;
     private bool hasEmission;
-    private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
     private bool isHighlighted;
-
-    protected abstract CarControl.GearMode Gear { get; }
+    private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
 
     private void Awake()
     {
-        if (carControl == null)
+        if (system == null)
         {
-            carControl = FindObjectOfType<CarControl>();
+            system = FindObjectOfType<ReadingLightSystem>();
         }
 
         if (targetRenderer == null)
@@ -29,51 +27,44 @@ public abstract class GearButtonBase : MonoBehaviour, ICockpitInteractable, ICoc
         }
 
         CacheEmissionColor();
-        UpdateVisual(ShouldGlow(carControl));
+        UpdateVisual();
     }
 
     private void OnEnable()
     {
-        if (carControl != null)
+        if (system != null)
         {
-            carControl.OnGearChanged += HandleGearChanged;
-            carControl.OnEngineStateChanged += HandleEngineStateChanged;
+            system.OnStateChanged += UpdateVisual;
         }
     }
 
     private void OnDisable()
     {
-        if (carControl != null)
+        if (system != null)
         {
-            carControl.OnGearChanged -= HandleGearChanged;
-            carControl.OnEngineStateChanged -= HandleEngineStateChanged;
+            system.OnStateChanged -= UpdateVisual;
         }
-    }
-
-    private void HandleGearChanged(CarControl.GearMode gear)
-    {
-        UpdateVisual(ShouldGlow(carControl));
-    }
-
-    private void HandleEngineStateChanged(bool isOn)
-    {
-        UpdateVisual(ShouldGlow(carControl));
     }
 
     public void Interact()
     {
-        if (carControl != null && carControl.EngineOn)
+        if (system == null)
         {
-            carControl.SetGear(Gear);
+            return;
         }
+
+        system.ToggleLight(lightIndex);
     }
 
-    private bool ShouldGlow(CarControl control)
+    public void SetHighlighted(bool highlighted)
     {
-        return control != null
-            && control.EngineOn
-            && control.ElectricalPowerOn
-            && control.CurrentGear == Gear;
+        if (isHighlighted == highlighted)
+        {
+            return;
+        }
+
+        isHighlighted = highlighted;
+        UpdateVisual();
     }
 
     private void CacheEmissionColor()
@@ -91,25 +82,18 @@ public abstract class GearButtonBase : MonoBehaviour, ICockpitInteractable, ICoc
         }
     }
 
-    public void SetHighlighted(bool highlighted)
-    {
-        if (isHighlighted == highlighted)
-        {
-            return;
-        }
-        isHighlighted = highlighted;
-        UpdateVisual(ShouldGlow(carControl));
-    }
-
-    private void UpdateVisual(bool isActive)
+    private void UpdateVisual()
     {
         if (targetRenderer == null || !hasEmission)
         {
             return;
         }
 
+        bool hasPower = system == null || system.HasPower;
+        bool isOn = system != null && system.IsLightOn(lightIndex) && hasPower;
+
         Material mat = targetRenderer.material;
-        if (glowWhenActive && isActive)
+        if (isOn)
         {
             mat.EnableKeyword("_EMISSION");
             mat.SetColor(EmissionColorId, activeEmissionColor);

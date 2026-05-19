@@ -51,6 +51,7 @@ public class CockpitCam : MonoBehaviour
 	private Vector3 lastRayDirection;
 	private float lastRayDistance;
 	private Vector3 lastRayHitPoint;
+	private ICockpitHighlightable currentHighlight;
 
 	private void Awake()
 	{
@@ -113,7 +114,9 @@ public class CockpitCam : MonoBehaviour
 			UpdateLook();
 		}
 
-		ICockpitInteractable target = GetLookTarget();
+		ICockpitHighlightable highlight;
+		ICockpitInteractable target = GetLookTarget(out highlight);
+		UpdateHighlight(highlight);
 		UpdateRayDebug();
 		if (target != null && Input.GetKeyDown(interactKey))
 		{
@@ -171,8 +174,9 @@ public class CockpitCam : MonoBehaviour
 		Cursor.lockState = value ? CursorLockMode.Locked : CursorLockMode.None;
 	}
 
-	private ICockpitInteractable GetLookTarget()
+	private ICockpitInteractable GetLookTarget(out ICockpitHighlightable highlight)
 	{
+		highlight = null;
 		if (!TryBuildRay(out Ray ray))
 		{
 			return null;
@@ -218,10 +222,30 @@ public class CockpitCam : MonoBehaviour
 			{
 				bestDistance = hit.distance;
 				bestTarget = candidate;
+				highlight = hit.collider.GetComponentInParent<ICockpitHighlightable>();
 			}
 		}
 
 		return bestTarget;
+	}
+
+	private void UpdateHighlight(ICockpitHighlightable highlight)
+	{
+		if (currentHighlight == highlight)
+		{
+			return;
+		}
+
+		if (currentHighlight != null)
+		{
+			currentHighlight.SetHighlighted(false);
+		}
+
+		currentHighlight = highlight;
+		if (currentHighlight != null)
+		{
+			currentHighlight.SetHighlighted(true);
+		}
 	}
 
 	private bool TryBuildRay(out Ray ray)

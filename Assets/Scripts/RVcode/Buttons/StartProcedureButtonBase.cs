@@ -1,11 +1,14 @@
 using UnityEngine;
 
-public abstract class GearButtonBase : MonoBehaviour, ICockpitInteractable, ICockpitHighlightable
+public abstract class StartProcedureButtonBase : MonoBehaviour, ICockpitInteractable, ICockpitHighlightable
 {
-    [SerializeField] protected CarControl carControl;
+    [SerializeField] protected StartProcedure startProcedure;
     [SerializeField] private Renderer targetRenderer;
     [SerializeField] private Color activeEmissionColor = new Color(0.2f, 0.6f, 1f, 1f);
     [SerializeField] private bool glowWhenActive = true;
+    [SerializeField] private bool showIdleGlow = false;
+    [SerializeField] private Color idleEmissionColor = new Color(0.9f, 0.9f, 0.9f, 1f);
+    [SerializeField] private float idleEmissionHdr = -5.5f;
     [SerializeField] private Color highlightEmissionColor = new Color(0.95f, 0.95f, 0.95f, 1f);
     [SerializeField] private float highlightEmissionHdr = -4.5f;
 
@@ -14,13 +17,14 @@ public abstract class GearButtonBase : MonoBehaviour, ICockpitInteractable, ICoc
     private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
     private bool isHighlighted;
 
-    protected abstract CarControl.GearMode Gear { get; }
+    protected abstract bool IsOn(StartProcedure procedure);
+    protected abstract void Toggle(StartProcedure procedure);
 
-    private void Awake()
+    protected virtual void Awake()
     {
-        if (carControl == null)
+        if (startProcedure == null)
         {
-            carControl = FindObjectOfType<CarControl>();
+            startProcedure = FindObjectOfType<StartProcedure>();
         }
 
         if (targetRenderer == null)
@@ -29,51 +33,53 @@ public abstract class GearButtonBase : MonoBehaviour, ICockpitInteractable, ICoc
         }
 
         CacheEmissionColor();
-        UpdateVisual(ShouldGlow(carControl));
+        UpdateVisual();
+    }
+
+    protected void SetIdleGlow(bool enabled, Color color, float hdr)
+    {
+        showIdleGlow = enabled;
+        idleEmissionColor = color;
+        idleEmissionHdr = hdr;
+    }
+
+    public void SetHighlighted(bool highlighted)
+    {
+        if (isHighlighted == highlighted)
+        {
+            return;
+        }
+        isHighlighted = highlighted;
+        UpdateVisual();
     }
 
     private void OnEnable()
     {
-        if (carControl != null)
+        if (startProcedure != null)
         {
-            carControl.OnGearChanged += HandleGearChanged;
-            carControl.OnEngineStateChanged += HandleEngineStateChanged;
+            startProcedure.OnStateChanged += HandleStateChanged;
         }
     }
 
     private void OnDisable()
     {
-        if (carControl != null)
+        if (startProcedure != null)
         {
-            carControl.OnGearChanged -= HandleGearChanged;
-            carControl.OnEngineStateChanged -= HandleEngineStateChanged;
+            startProcedure.OnStateChanged -= HandleStateChanged;
         }
-    }
-
-    private void HandleGearChanged(CarControl.GearMode gear)
-    {
-        UpdateVisual(ShouldGlow(carControl));
-    }
-
-    private void HandleEngineStateChanged(bool isOn)
-    {
-        UpdateVisual(ShouldGlow(carControl));
     }
 
     public void Interact()
     {
-        if (carControl != null && carControl.EngineOn)
+        if (startProcedure != null)
         {
-            carControl.SetGear(Gear);
+            Toggle(startProcedure);
         }
     }
 
-    private bool ShouldGlow(CarControl control)
+    private void HandleStateChanged()
     {
-        return control != null
-            && control.EngineOn
-            && control.ElectricalPowerOn
-            && control.CurrentGear == Gear;
+        UpdateVisual();
     }
 
     private void CacheEmissionColor()
@@ -91,17 +97,7 @@ public abstract class GearButtonBase : MonoBehaviour, ICockpitInteractable, ICoc
         }
     }
 
-    public void SetHighlighted(bool highlighted)
-    {
-        if (isHighlighted == highlighted)
-        {
-            return;
-        }
-        isHighlighted = highlighted;
-        UpdateVisual(ShouldGlow(carControl));
-    }
-
-    private void UpdateVisual(bool isActive)
+    private void UpdateVisual()
     {
         if (targetRenderer == null || !hasEmission)
         {
@@ -109,7 +105,9 @@ public abstract class GearButtonBase : MonoBehaviour, ICockpitInteractable, ICoc
         }
 
         Material mat = targetRenderer.material;
-        if (glowWhenActive && isActive)
+        bool hasPower = startProcedure == null || startProcedure.HasAnyBatteryOn();
+        bool isActive = glowWhenActive && IsOn(startProcedure) && hasPower;
+        if (isActive)
         {
             mat.EnableKeyword("_EMISSION");
             mat.SetColor(EmissionColorId, activeEmissionColor);
@@ -119,6 +117,12 @@ public abstract class GearButtonBase : MonoBehaviour, ICockpitInteractable, ICoc
             mat.EnableKeyword("_EMISSION");
             float intensity = Mathf.Pow(2f, highlightEmissionHdr);
             mat.SetColor(EmissionColorId, highlightEmissionColor * intensity);
+        }
+        else if (showIdleGlow)
+        {
+            mat.EnableKeyword("_EMISSION");
+            float intensity = Mathf.Pow(2f, idleEmissionHdr);
+            mat.SetColor(EmissionColorId, idleEmissionColor * intensity);
         }
         else
         {

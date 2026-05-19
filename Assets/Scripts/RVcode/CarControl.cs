@@ -20,6 +20,14 @@ public class CarControl : MonoBehaviour
     [SerializeField] private GearMode currentGear = GearMode.Park;
     public GearMode CurrentGear => currentGear;
     public event System.Action<GearMode> OnGearChanged;
+    [SerializeField] private bool engineOn = false;
+    public bool EngineOn => engineOn;
+    public event System.Action<bool> OnEngineStateChanged;
+    [SerializeField] private bool electricalPowerOn = true;
+    public bool ElectricalPowerOn => electricalPowerOn;
+    public event System.Action<bool> OnElectricalPowerChanged;
+    [Header("Start Procedure")]
+    [SerializeField] private StartProcedure startProcedure;
 
     [Header("Modes")]
     [SerializeField] private float sportTorque = 50000f;
@@ -28,7 +36,7 @@ public class CarControl : MonoBehaviour
     [SerializeField] private float l6MaxSpeedKmh = 35f;
     [SerializeField] private float driveMaxSpeedKmh = 160f;
     [SerializeField] private float reverseMaxSpeedKmh = 30f;
-    [SerializeField] private float sixLockSwitchMaxSpeedKmh = 0.01f;
+    [SerializeField] private float sixLockSwitchMaxWheelRpm = 0.01f;
     [SerializeField] private float speedLimiterBrake = 0.2f;
     [SerializeField] private WheelControl[] sixLockWheels = new WheelControl[6];
 
@@ -89,6 +97,28 @@ public class CarControl : MonoBehaviour
         SetGearInternal(gear, false);
     }
 
+    public void SetEngineOn(bool value)
+    {
+        if (engineOn == value)
+        {
+            return;
+        }
+
+        engineOn = value;
+        OnEngineStateChanged?.Invoke(engineOn);
+    }
+
+    public void SetElectricalPower(bool value)
+    {
+        if (electricalPowerOn == value)
+        {
+            return;
+        }
+
+        electricalPowerOn = value;
+        OnElectricalPowerChanged?.Invoke(electricalPowerOn);
+    }
+
     private void SetGearInternal(GearMode gear, bool force)
     {
         if (!force && currentGear == gear)
@@ -111,7 +141,7 @@ public class CarControl : MonoBehaviour
         bool targetSix = IsSixLockGear(targetGear);
         if (currentSix || targetSix)
         {
-            return currentSpeedKmh <= sixLockSwitchMaxSpeedKmh;
+            return GetMaxWheelRpm() <= sixLockSwitchMaxWheelRpm;
         }
         return true;
     }
@@ -137,10 +167,55 @@ public class CarControl : MonoBehaviour
         }
     }
 
+    private float GetMaxWheelRpm()
+    {
+        float maxRpm = 0f;
+        if (sixLockWheelSet.Count > 0)
+        {
+            foreach (WheelControl wheel in sixLockWheelSet)
+            {
+                if (wheel == null || wheel.WheelCollider == null)
+                {
+                    continue;
+                }
+                float rpm = Mathf.Abs(wheel.WheelCollider.rpm);
+                if (rpm > maxRpm)
+                {
+                    maxRpm = rpm;
+                }
+            }
+            return maxRpm;
+        }
+
+        if (wheels == null)
+        {
+            return maxRpm;
+        }
+
+        foreach (WheelControl wheel in wheels)
+        {
+            if (wheel == null || wheel.WheelCollider == null)
+            {
+                continue;
+            }
+            float rpm = Mathf.Abs(wheel.WheelCollider.rpm);
+            if (rpm > maxRpm)
+            {
+                maxRpm = rpm;
+            }
+        }
+        return maxRpm;
+    }
+
     // Start is called before the first frame update
     void Start()
     {
         rigidBody = GetComponent<Rigidbody>();
+
+        if (startProcedure == null)
+        {
+            startProcedure = FindObjectOfType<StartProcedure>();
+        }
 
         // Adjust center of mass vertically, to help prevent the car from rolling
         rigidBody.centerOfMass += Vector3.up * centreOfGravityOffset;
@@ -155,11 +230,24 @@ public class CarControl : MonoBehaviour
         }
 
         SetGearInternal(startGear, true);
+        SetEngineOn(engineOn);
+        if (startProcedure != null)
+        {
+            SetElectricalPower(startProcedure.HasAnyBatteryOn());
+        }
+        else
+        {
+            SetElectricalPower(true);
+        }
     }
 
     // Update is called once per frame
     void Update()
     {
+        if (startProcedure != null)
+        {
+            SetElectricalPower(startProcedure.HasAnyBatteryOn());
+        }
         float rawVertical = Input.GetAxis("Vertical");
         float hInputRaw = Input.GetAxisRaw("Horizontal");
 
@@ -249,6 +337,15 @@ public class CarControl : MonoBehaviour
                 }
                 break;
         }
+
+            if (!engineOn)
+            {
+                throttleInput = 0f;
+            }
+            else if (startProcedure != null && !startProcedure.HasAnyPumpOn())
+            {
+                throttleInput = 0f;
+            }
 
         float appliedThrottleInput = throttleInput;
         if (currentGear == GearMode.L6)
