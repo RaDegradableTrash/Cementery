@@ -24,6 +24,7 @@ public class CockpitCam : MonoBehaviour
 	[SerializeField] private bool manageCursor = true;
 
 	[Header("Interaction")]
+	[SerializeField] private WorldObject interactTarget;
 	[SerializeField] private Transform rayOrigin;
 	[SerializeField] private float interactDistance = 3f;
 	[SerializeField] private LayerMask interactMask = ~0;
@@ -53,6 +54,14 @@ public class CockpitCam : MonoBehaviour
 	private Vector3 lastRayHitPoint;
 	private ICockpitHighlightable currentHighlight;
 
+	private GameObject activePlayer;
+	private bool isDriving;
+	private CarControl carControl;
+
+	private Transform originalCameraParent;
+	private Vector3 originalCameraLocalPos;
+	private Quaternion originalCameraLocalRot;
+
 	private void Awake()
 	{
 		if (cockpitCamera == null)
@@ -73,6 +82,7 @@ public class CockpitCam : MonoBehaviour
 		CacheAngles();
 		SetupLineRenderer();
 		SetLook(false);
+		carControl = GetComponentInParent<CarControl>();
 	}
 
 	private void OnEnable()
@@ -104,9 +114,17 @@ public class CockpitCam : MonoBehaviour
 			}
 		}
 
-		if (isLooking && Input.GetKeyDown(exitLookKey))
+		if (Input.GetKeyDown(exitLookKey))
 		{
-			SetLook(false);
+			if (isLooking)
+			{
+				SetLook(false);
+			}
+		}
+
+		if (isDriving && Input.GetKeyDown(KeyCode.BackQuote))
+		{
+			ExitDrivingMode();
 		}
 
 		if (isLooking)
@@ -347,6 +365,119 @@ public class CockpitCam : MonoBehaviour
 		Debug.DrawLine(point - Vector3.right * half, point + Vector3.right * half, color, 0f, false);
 		Debug.DrawLine(point - Vector3.up * half, point + Vector3.up * half, color, 0f, false);
 		Debug.DrawLine(point - Vector3.forward * half, point + Vector3.forward * half, color, 0f, false);
+	}
+
+	private void Start()
+	{
+		if (interactTarget != null)
+		{
+			interactTarget.onInteract.AddListener(OnPlayerInteract);
+		}
+		else
+		{
+			WorldObject wo = GetComponent<WorldObject>();
+			if (wo == null)
+			{
+				wo = gameObject.AddComponent<WorldObject>();
+				wo.interactable = true;
+				wo.interactMessage = "Drive RV";
+			}
+			interactTarget = wo;
+			interactTarget.onInteract.AddListener(OnPlayerInteract);
+		}
+	}
+
+	private void OnPlayerInteract(GameObject actor)
+	{
+		if (isDriving || actor == null) return;
+
+		activePlayer = actor;
+
+		// 1. Strictly find the Camera component inside the Player GameObject!
+		Camera mainCam = activePlayer.GetComponentInChildren<Camera>(true);
+
+		if (mainCam != null)
+		{
+			// 2. Save original parent and transform values
+			originalCameraParent = mainCam.transform.parent;
+			originalCameraLocalPos = mainCam.transform.localPosition;
+			originalCameraLocalRot = mainCam.transform.localRotation;
+
+			// 3. Temporarily disable the MouseLook script on the main camera to stop it reading player mouse input
+			MouseLook ml = mainCam.GetComponent<MouseLook>();
+			if (ml != null)
+			{
+				ml.enabled = false;
+			}
+
+			// 4. Reparent the unique Main Camera to our cockpit rotation root so it moves/rotates with the cockpit
+			mainCam.transform.SetParent(rotationRoot);
+			mainCam.transform.localPosition = Vector3.zero;
+			mainCam.transform.localRotation = Quaternion.identity;
+
+			// Keep reference to main camera as our active cockpit camera
+			cockpitCamera = mainCam;
+		}
+
+		// 5. Hide player (no need to parent to vehicle to avoid Netcode NotListeningException)
+		activePlayer.SetActive(false);
+
+		// Give vehicle control
+		if (carControl == null)
+		{
+			carControl = GetComponentInParent<CarControl>();
+		}
+		if (carControl != null)
+		{
+			carControl.ActiveControl = true;
+		}
+
+		isDriving = true;
+		SetLook(true);
+	}
+
+	private void ExitDrivingMode()
+	{
+		if (!isDriving) return;
+
+		isDriving = false;
+		SetLook(false);
+
+		// Disable vehicle control
+		if (carControl != null)
+		{
+			carControl.ActiveControl = false;
+		}
+
+		// 1. Restore the Main Camera back to the player
+		if (cockpitCamera != null)
+		{
+			// Re-enable the MouseLook script
+			MouseLook ml = cockpitCamera.GetComponent<MouseLook>();
+			if (ml != null)
+			{
+				ml.enabled = true;
+			}
+
+			if (originalCameraParent != null)
+			{
+				cockpitCamera.transform.SetParent(originalCameraParent);
+				cockpitCamera.transform.localPosition = originalCameraLocalPos;
+				cockpitCamera.transform.localRotation = originalCameraLocalRot;
+			}
+		}
+
+		// 2. Reactivate player and set their position to the vehicle's current position
+		if (activePlayer != null)
+		{
+			// Move player slightly back to step out of the driver's seat into the RV living cabin space!
+			activePlayer.transform.position = transform.position - transform.forward * 1.0f + transform.up * 0.1f;
+			activePlayer.SetActive(true);
+		}
+
+		activePlayer = null;
+		cockpitCamera = null;
+		originalCameraParent = null;
 	}
 
 	private static float NormalizeAngle(float angle)

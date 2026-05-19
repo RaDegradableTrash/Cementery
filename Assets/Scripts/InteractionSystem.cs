@@ -547,6 +547,29 @@ public class InteractionSystem : MonoBehaviour
         return false;
     }
 
+    bool IsGroundCollider(Collider c)
+    {
+        if (c == null) return false;
+        
+        // 1. Check if it's a TerrainCollider
+        if (c is TerrainCollider) return true;
+        
+        // 2. Check if it has the DesertTerrainChunk component
+        if (c.GetComponentInParent<EnvironmentSystem.DesertTerrainChunk>() != null) return true;
+        
+        // 3. Check name patterns
+        string name = c.gameObject.name.ToLower();
+        if (name.Contains("terrain") || name.Contains("chunk") || name.Contains("desert") || name.Contains("ground") || name.Contains("floor"))
+            return true;
+            
+        // 4. Check layer
+        int terrainLayer = LayerMask.NameToLayer("Terrain");
+        if (terrainLayer != -1 && c.gameObject.layer == terrainLayer)
+            return true;
+            
+        return false;
+    }
+
     float ComputeCarriedRadius()
     {
         if (_carriedCols == null || _carriedCols.Length == 0)
@@ -1467,7 +1490,7 @@ public class InteractionSystem : MonoBehaviour
         Ray ray = new Ray(GetInteractionRayOrigin(), GetInteractionRayDirection(GetInteractionRayOrigin()));
         EnsurePlayerCollidersCached();
         
-        float maxReach = GetEffectiveCarryRangeFromCamera();
+        float maxReach = placementRayRange; // Let the placement mode leverage the full configured ray range (10m) instead of capping at pickup range (3m)!
         RaycastHit[] hits = Physics.RaycastAll(ray, placementRayRange, placementMask, QueryTriggerInteraction.Ignore);
         
         // Find the nearest valid hit (any surface)
@@ -1797,6 +1820,7 @@ public class InteractionSystem : MonoBehaviour
             {
                 if (IsIgnoredCarryHitCollider(c)) continue;
                 if (c.transform.IsChildOf(_placementGhost.transform)) continue;
+                if (IsGroundCollider(c)) continue; // Crucial: Ignore sloped or uneven ground meshes to prevent red warning hologram!
                 
                 _isPlacementValid = false;
                 break;

@@ -47,6 +47,10 @@ public class CarControl : MonoBehaviour
     public float steeringRange = 30;
     public float steeringRangeAtMaxSpeed = 10;
     public float centreOfGravityOffset = -1f;
+
+    [Header("Control Override")]
+    [SerializeField] private bool activeControl = false;
+    public bool ActiveControl { get => activeControl; set => activeControl = value; }
     
     [SerializeField] private TextMeshProUGUI speedDisplay;
     [SerializeField] private float speedMultiplier = 1f;
@@ -248,8 +252,8 @@ public class CarControl : MonoBehaviour
         {
             SetElectricalPower(startProcedure.HasAnyBatteryOn());
         }
-        float rawVertical = Input.GetAxis("Vertical");
-        float hInputRaw = Input.GetAxisRaw("Horizontal");
+        float rawVertical = activeControl ? Input.GetAxis("Vertical") : 0f;
+        float hInputRaw = activeControl ? Input.GetAxisRaw("Horizontal") : 0f;
 
         // Calculate current speed in relation to the forward direction of the car
         // (this returns a negative number when traveling backwards)
@@ -398,7 +402,7 @@ public class CarControl : MonoBehaviour
             currentSteerAngle = Mathf.MoveTowards(currentSteerAngle, 0f, returnSpeed * Time.deltaTime);
         }
 
-        bool isHandBraking = Input.GetKey(KeyCode.Space);
+        bool isHandBraking = activeControl && Input.GetKey(KeyCode.Space);
 
         foreach (var wheel in wheels)
         {
