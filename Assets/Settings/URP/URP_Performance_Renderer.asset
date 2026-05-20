@@ -13,9 +13,6 @@ MonoBehaviour:
   m_Name: ScreenShatterRendererFeature
   m_EditorClassIdentifier: 
   m_Active: 1
-  settings:
-    shatterMaterial: {fileID: 2100000, guid: 6cf8b9b64a94e4f228bff611d3af00e6, type: 2}
-    renderPassEvent: 600
 --- !u!114 &11400000
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -34,7 +31,8 @@ MonoBehaviour:
   m_RendererFeatures:
   - {fileID: 1077259839986911734}
   - {fileID: -637732606529901988}
-  m_RendererFeatureMap: f6c936ed1d32f30e5cea19be925126f7
+  - {fileID: 88497103668132068}
+  m_RendererFeatureMap: f6c936ed1d32f30e5cea19be925126f7e438ca9ba5673a01
   m_UseNativeRenderPass: 0
   postProcessData: {fileID: 11400000, guid: 41439944d30ece34e96484bdb6645b55, type: 2}
   xrSystemData: {fileID: 11400000, guid: 60e1133243b97e347b653163a8c01b64, type: 2}
@@ -73,9 +71,38 @@ MonoBehaviour:
   m_ShadowTransparentReceive: 1
   m_RenderingMode: 0
   m_DepthPrimingMode: 0
-  m_CopyDepthMode: 1
+  m_CopyDepthMode: 0
   m_AccurateGbufferNormals: 0
   m_IntermediateTextureMode: 1
+--- !u!114 &88497103668132068
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8b1011c251357468a944327eebb3c7d7, type: 3}
+  m_Name: VolumetricCloudFeature
+  m_EditorClassIdentifier: 
+  m_Active: 1
+  settings:
+    minHeight: 800
+    maxHeight: 2400
+    densityScale: 10
+    threshold: 0.822
+    baseNoiseScale: 0.0005
+    detailNoiseScale: 0.00008
+    detailInfluence: 0.392
+    lightAbsorption: 8.63
+    shadowColor: {r: 0.8370417, g: 0.8370419, b: 0.8490566, a: 1}
+    maxLightColor: {r: 1, g: 1, b: 1, a: 1}
+    baseWindSpeed: {x: 0.02, y: 0, z: 0.01}
+    detailWindSpeed: {x: 0.001, y: 0.001, z: 0.001}
+    maxSteps: 32
+    shadowSampleDistance: 10
+    cloudShader: {fileID: 4800000, guid: 089923f24a6434d358a87d8a72945d85, type: 3}
 --- !u!114 &1077259839986911734
 MonoBehaviour:
   m_ObjectHideFlags: 0
