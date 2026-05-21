@@ -157,59 +157,69 @@ namespace EnvironmentSystem
                         string chunkName = $"Desert_Chunk_{x}_{z}";
                         EditorUtility.DisplayProgressBar("Baking Desert Chunks", $"Generating {chunkName} ({currentCount}/{totalChunks})", (float)currentCount / totalChunks);
 
-                        // 1. Create a fresh new additive single scene
-                        Scene chunkScene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
-
-                        // 2. Spawn the chunk GameObject
-                        GameObject chunkGo = new GameObject(chunkName);
-                        DesertTerrainChunk chunk = chunkGo.AddComponent<DesertTerrainChunk>();
-
-                        // 3. Copy settings from the editor window
-                        CopyChunkSettings(settings, chunk);
-
-                        // Position offset in the grid
-                        float worldOffsetX = x * chunk.width * chunk.cellSize;
-                        float worldOffsetZ = z * chunk.depth * chunk.cellSize;
-                        chunkGo.transform.position = new Vector3(worldOffsetX, 0, worldOffsetZ);
-
-                        // 4. Generate seamless terrain mesh
-                        Mesh mesh = chunk.GenerateMesh();
-                        mesh.name = $"Mesh_{chunkName}";
-
-                        // 5. Serialize and save mesh asset
-                        string meshAssetPath = Path.Combine(meshesPath, $"Mesh_{chunkName}.asset");
-                        AssetDatabase.CreateAsset(mesh, meshAssetPath);
-                        AssetDatabase.SaveAssets();
-
-                        // Bind mesh asset to components
-                        if (chunkGo.TryGetComponent<MeshFilter>(out var filter))
+                        try
                         {
-                            filter.sharedMesh = mesh;
-                        }
+                            // 1. Create a fresh new additive single scene
+                            Scene chunkScene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
-                        if (chunkGo.TryGetComponent<MeshCollider>(out var col))
-                        {
-                            col.sharedMesh = mesh;
-                        }
+                            // 2. Spawn the chunk GameObject
+                            GameObject chunkGo = new GameObject(chunkName);
+                            DesertTerrainChunk chunk = chunkGo.AddComponent<DesertTerrainChunk>();
 
-                        if (chunkGo.TryGetComponent<MeshRenderer>(out var mr))
-                        {
-                            if (chunk.terrainMaterial != null)
+                            // 3. Copy settings from the editor window
+                            CopyChunkSettings(settings, chunk);
+
+                            // Position offset in the grid
+                            float worldOffsetX = x * chunk.width * chunk.cellSize;
+                            float worldOffsetZ = z * chunk.depth * chunk.cellSize;
+                            chunkGo.transform.position = new Vector3(worldOffsetX, 0, worldOffsetZ);
+
+                            // 4. Generate seamless terrain mesh
+                            Mesh mesh = chunk.GenerateMesh();
+                            mesh.name = $"Mesh_{chunkName}";
+
+                            // 5. Serialize and save mesh asset
+                            string meshAssetPath = Path.Combine(meshesPath, $"Mesh_{chunkName}.asset");
+                            AssetDatabase.CreateAsset(mesh, meshAssetPath);
+                            AssetDatabase.SaveAssets();
+
+                            // Bind mesh asset to components
+                            if (chunkGo.TryGetComponent<MeshFilter>(out var filter))
                             {
-                                mr.sharedMaterial = chunk.terrainMaterial;
+                                filter.sharedMesh = mesh;
                             }
-                            else
-                            {
-                                mr.sharedMaterial = new Material(Shader.Find("Universal Render Pipeline/Lit"));
-                            }
-                        }
 
-                        // Save the generated chunk scene file
-                        string sceneFileName = $"{chunkName}.unity";
-                        string sceneFileFullPath = Path.Combine(scenesPath, sceneFileName);
-                        EditorSceneManager.SaveScene(chunkScene, sceneFileFullPath);
-                        
-                        generatedScenePaths.Add(sceneFileFullPath);
+                            if (chunkGo.TryGetComponent<MeshCollider>(out var col))
+                            {
+                                col.sharedMesh = mesh;
+                            }
+
+                            if (chunkGo.TryGetComponent<MeshRenderer>(out var mr))
+                            {
+                                if (chunk.terrainMaterial != null)
+                                {
+                                    mr.sharedMaterial = chunk.terrainMaterial;
+                                }
+                                else
+                                {
+                                    mr.sharedMaterial = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+                                }
+                            }
+
+                            // Save the generated chunk scene file
+                            string sceneFileName = $"{chunkName}.unity";
+                            string sceneFileFullPath = Path.Combine(scenesPath, sceneFileName);
+                            EditorSceneManager.SaveScene(chunkScene, sceneFileFullPath);
+                            
+                            generatedScenePaths.Add(sceneFileFullPath);
+                        }
+                        catch (System.Exception ex)
+                        {
+                            Debug.LogError($"[DesertTerrainEditor] Fatal exception baking chunk '{chunkName}' at grid ({x}, {z}):\n{ex}");
+                            EditorUtility.DisplayDialog("Bake Chunk Exception!", 
+                                $"An error occurred while baking chunk '{chunkName}' at coordinate ({x},{z}).\n\nError details:\n{ex.Message}\n\nPlease check console for stack trace.", "Understood");
+                            throw; // Re-throw to halt the progress bar and abort the batch safely
+                        }
                     }
                 }
             }

@@ -77,6 +77,14 @@ namespace EnvironmentSystem
             // 2. Perform grid projection and load 3x3 surrounding chunks
             if (trackingTarget != null)
             {
+                // Dynamically retrieve spacing metrics from active chunk to keep projection perfectly in sync!
+                var activeChunk = FindObjectOfType<DesertTerrainChunk>();
+                if (activeChunk != null)
+                {
+                    chunkSizeX = activeChunk.width * activeChunk.cellSize;
+                    chunkSizeZ = activeChunk.depth * activeChunk.cellSize;
+                }
+
                 Vector3 pos = trackingTarget.position;
                 int gridX = Mathf.RoundToInt(pos.x / chunkSizeX);
                 int gridZ = Mathf.RoundToInt(pos.z / chunkSizeZ);

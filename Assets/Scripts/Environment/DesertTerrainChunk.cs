@@ -75,6 +75,34 @@ namespace EnvironmentSystem
             {
                 Build();
             }
+            EnsureShaderMigration();
+        }
+
+        private void EnsureShaderMigration()
+        {
+            if (Application.isPlaying && TryGetComponent<MeshRenderer>(out var mr) && mr.sharedMaterial != null)
+            {
+                if (mr.sharedMaterial.shader.name != "Environment/URPTriplanarEnvironment")
+                {
+                    Shader customTriplanar = Shader.Find("Environment/URPTriplanarEnvironment");
+                    if (customTriplanar != null)
+                    {
+                        Material runtimeMat = new Material(customTriplanar);
+                        
+                        if (mr.sharedMaterial.HasProperty("_BaseMap")) runtimeMat.SetTexture("_MainTex", mr.sharedMaterial.GetTexture("_BaseMap"));
+                        else if (mr.sharedMaterial.HasProperty("_MainTex")) runtimeMat.SetTexture("_MainTex", mr.sharedMaterial.GetTexture("_MainTex"));
+                        
+                        if (mr.sharedMaterial.HasProperty("_BumpMap")) runtimeMat.SetTexture("_NormalMap", mr.sharedMaterial.GetTexture("_BumpMap"));
+                        else if (mr.sharedMaterial.HasProperty("_NormalMap")) runtimeMat.SetTexture("_NormalMap", mr.sharedMaterial.GetTexture("_NormalMap"));
+                        
+                        if (mr.sharedMaterial.HasProperty("_Color")) runtimeMat.SetColor("_Color", mr.sharedMaterial.GetColor("_Color"));
+                        else if (mr.sharedMaterial.HasProperty("_BaseColor")) runtimeMat.SetColor("_Color", mr.sharedMaterial.GetColor("_BaseColor"));
+                        
+                        mr.sharedMaterial = runtimeMat;
+                        Debug.Log($"[DesertTerrainChunk] Auto-migrated terrain chunk material to triplanar shader on scene start.");
+                    }
+                }
+            }
         }
 
         private void OnEnable()
@@ -815,7 +843,37 @@ namespace EnvironmentSystem
 
                     if (needsFallback)
                     {
-                        mr.sharedMaterial = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+                        Shader customTriplanar = Shader.Find("Environment/URPTriplanarEnvironment");
+                        if (customTriplanar != null)
+                        {
+                            mr.sharedMaterial = new Material(customTriplanar);
+                        }
+                        else
+                        {
+                            mr.sharedMaterial = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+                        }
+                    }
+                }
+
+                // 🌟 First Insurance: Force migrate any assigned material to the custom Triplanar sand shader in Play Mode.
+                // Keeps their existing textures (Albedo, Bump/Normal) and color tint completely intact!
+                if (Application.isPlaying && mr.sharedMaterial != null && mr.sharedMaterial.shader.name != "Environment/URPTriplanarEnvironment")
+                {
+                    Shader customTriplanar = Shader.Find("Environment/URPTriplanarEnvironment");
+                    if (customTriplanar != null)
+                    {
+                        Material runtimeMat = new Material(customTriplanar);
+                        
+                        if (mr.sharedMaterial.HasProperty("_BaseMap")) runtimeMat.SetTexture("_MainTex", mr.sharedMaterial.GetTexture("_BaseMap"));
+                        else if (mr.sharedMaterial.HasProperty("_MainTex")) runtimeMat.SetTexture("_MainTex", mr.sharedMaterial.GetTexture("_MainTex"));
+                        
+                        if (mr.sharedMaterial.HasProperty("_BumpMap")) runtimeMat.SetTexture("_NormalMap", mr.sharedMaterial.GetTexture("_BumpMap"));
+                        else if (mr.sharedMaterial.HasProperty("_NormalMap")) runtimeMat.SetTexture("_NormalMap", mr.sharedMaterial.GetTexture("_NormalMap"));
+                        
+                        if (mr.sharedMaterial.HasProperty("_Color")) runtimeMat.SetColor("_Color", mr.sharedMaterial.GetColor("_Color"));
+                        else if (mr.sharedMaterial.HasProperty("_BaseColor")) runtimeMat.SetColor("_Color", mr.sharedMaterial.GetColor("_BaseColor"));
+                        
+                        mr.sharedMaterial = runtimeMat;
                     }
                 }
             }
