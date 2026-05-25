@@ -2,6 +2,11 @@ using UnityEngine;
 
 public class SimpleLight : MonoBehaviour
 {
+    [Header("Power")]
+    [SerializeField] private StartProcedure startProcedure;
+    [SerializeField] private bool requiresPower = true;
+    [SerializeField] private bool defaultOn = false;
+
     [Header("Targets")]
     [SerializeField] private Renderer targetRenderer;
     [SerializeField] private Light targetLight;
@@ -17,13 +22,19 @@ public class SimpleLight : MonoBehaviour
     [SerializeField] private float offIntensity = 0f;
     [SerializeField] private float onIntensity = 35f;
 
-    private bool isOn;
+    private bool desiredOn;
+    private bool lastEffectiveOn;
     private Color[] baseEmissionColors;
     private bool[] hasEmission;
     private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
 
     private void Awake()
     {
+        if (startProcedure == null)
+        {
+            startProcedure = FindObjectOfType<StartProcedure>();
+        }
+
         if (targetRenderers == null || targetRenderers.Length == 0)
         {
             if (targetRenderer == null)
@@ -42,28 +53,45 @@ public class SimpleLight : MonoBehaviour
             targetLights = targetLight != null ? new[] { targetLight } : new Light[0];
         }
 
+        desiredOn = defaultOn;
         CacheEmissionColor();
-        ApplyState(false);
+        bool effectiveOn = GetEffectiveOn();
+        ApplyState(effectiveOn);
+        lastEffectiveOn = effectiveOn;
+    }
+
+    private void Update()
+    {
+        bool effectiveOn = GetEffectiveOn();
+        if (effectiveOn != lastEffectiveOn)
+        {
+            lastEffectiveOn = effectiveOn;
+            ApplyState(effectiveOn);
+        }
     }
 
     public void Toggle()
     {
-        SetOn(!isOn);
+        SetOn(!desiredOn);
     }
 
     public void SetOn(bool value)
     {
-        if (isOn == value)
+        if (desiredOn == value)
         {
             return;
         }
-        isOn = value;
-        ApplyState(isOn);
+        desiredOn = value;
     }
 
     public bool IsOn()
     {
-        return isOn;
+        return GetEffectiveOn();
+    }
+
+    public bool IsDesiredOn()
+    {
+        return desiredOn;
     }
 
     private void CacheEmissionColor()
@@ -129,6 +157,12 @@ public class SimpleLight : MonoBehaviour
                 }
             }
         }
+    }
+
+    private bool GetEffectiveOn()
+    {
+        bool hasPower = !requiresPower || startProcedure == null || startProcedure.HasAnyBatteryOn();
+        return desiredOn && hasPower;
     }
 
     private static Color NormalizeColor(Color color)

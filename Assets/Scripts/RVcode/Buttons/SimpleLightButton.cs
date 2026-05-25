@@ -5,6 +5,8 @@ public class SimpleLightButton : MonoBehaviour, ICockpitInteractable, ICockpitHi
     [SerializeField] private SimpleLight lightTarget;
     [SerializeField] private SimpleLight[] lightTargets;
     [SerializeField] private Renderer targetRenderer;
+    [SerializeField] private Color activeEmissionColor = new Color(0.2f, 0.6f, 1f, 1f);
+    [SerializeField] private float activeEmissionHdr = 0f;
     [SerializeField] private Color highlightEmissionColor = new Color(0.95f, 0.95f, 0.95f, 1f);
     [SerializeField] private float highlightEmissionHdr = -4.5f;
 
@@ -29,7 +31,12 @@ public class SimpleLightButton : MonoBehaviour, ICockpitInteractable, ICockpitHi
         }
 
         CacheEmissionColor();
-        UpdateHighlight();
+        UpdateVisual();
+    }
+
+    private void Update()
+    {
+        UpdateVisual();
     }
 
     public void Interact()
@@ -42,7 +49,7 @@ public class SimpleLightButton : MonoBehaviour, ICockpitInteractable, ICockpitHi
         bool anyOff = false;
         for (int i = 0; i < lightTargets.Length; i++)
         {
-            if (lightTargets[i] != null && !lightTargets[i].IsOn())
+            if (lightTargets[i] != null && !lightTargets[i].IsDesiredOn())
             {
                 anyOff = true;
                 break;
@@ -66,7 +73,7 @@ public class SimpleLightButton : MonoBehaviour, ICockpitInteractable, ICockpitHi
             return;
         }
         isHighlighted = highlighted;
-        UpdateHighlight();
+        UpdateVisual();
     }
 
     private void CacheEmissionColor()
@@ -84,7 +91,7 @@ public class SimpleLightButton : MonoBehaviour, ICockpitInteractable, ICockpitHi
         }
     }
 
-    private void UpdateHighlight()
+    private void UpdateVisual()
     {
         if (targetRenderer == null || !hasEmission)
         {
@@ -92,7 +99,13 @@ public class SimpleLightButton : MonoBehaviour, ICockpitInteractable, ICockpitHi
         }
 
         Material mat = targetRenderer.material;
-        if (isHighlighted)
+        if (IsAnyLightOn())
+        {
+            mat.EnableKeyword("_EMISSION");
+            float intensity = Mathf.Pow(2f, activeEmissionHdr);
+            mat.SetColor(EmissionColorId, activeEmissionColor * intensity);
+        }
+        else if (isHighlighted)
         {
             mat.EnableKeyword("_EMISSION");
             float intensity = Mathf.Pow(2f, highlightEmissionHdr);
@@ -106,5 +119,22 @@ public class SimpleLightButton : MonoBehaviour, ICockpitInteractable, ICockpitHi
                 mat.DisableKeyword("_EMISSION");
             }
         }
+    }
+
+    private bool IsAnyLightOn()
+    {
+        if (lightTargets == null || lightTargets.Length == 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < lightTargets.Length; i++)
+        {
+            if (lightTargets[i] != null && lightTargets[i].IsOn())
+            {
+                return true;
+            }
+        }
+        return false;
     }
 }
