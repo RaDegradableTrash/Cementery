@@ -12474,6 +12474,7 @@ GameObject:
   - component: {fileID: 1168830482561716438}
   - component: {fileID: 675510783308660189}
   - component: {fileID: 3263823646246416591}
+  - component: {fileID: 2644215071961812276}
   m_Layer: 0
   m_Name: HeadLightFix
   m_TagString: Untagged
@@ -12547,6 +12548,27 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!114 &2644215071961812276
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2125979418188093620}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9ec09303dc1fbdb4cad2d11e2172cabf, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  targetRenderer: {fileID: 3263823646246416591}
+  targetLight: {fileID: 4472703821904564461}
+  targetRenderers: []
+  targetLights: []
+  emissionColor: {r: 1, g: 1, b: 1, a: 1}
+  offEmissionHdr: -10
+  onEmissionHdr: 0
+  offIntensity: 0
+  onIntensity: 35
 --- !u!1 &2164578038089399840
 GameObject:
   m_ObjectHideFlags: 0
@@ -19230,6 +19252,8 @@ GameObject:
   - component: {fileID: 4016190693467995622}
   - component: {fileID: 3256045608807030661}
   - component: {fileID: 648616340963416427}
+  - component: {fileID: 6504561582296353465}
+  - component: {fileID: 3575198035332128498}
   m_Layer: 0
   m_Name: Cube.091
   m_TagString: Untagged
@@ -19302,6 +19326,45 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!114 &6504561582296353465
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3131836501310271674}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d48bac26dcc291045b5c4ed4e5395ff2, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  lightTarget: {fileID: 0}
+  lightTargets:
+  - {fileID: 2644215071961812276}
+  targetRenderer: {fileID: 0}
+  highlightEmissionColor: {r: 0.95, g: 0.95, b: 0.95, a: 1}
+  highlightEmissionHdr: -4.5
+--- !u!65 &3575198035332128498
+BoxCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3131836501310271674}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 1
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Size: {x: 0.0007717102, y: 0.0005690248, z: 0.00083577365}
+  m_Center: {x: 0.0000000012369128, y: 0.0000147653745, z: -0.000009323905}
 --- !u!1 &3158396707233444578
 GameObject:
   m_ObjectHideFlags: 0
@@ -48258,7 +48321,7 @@ GameObject:
   - component: {fileID: 3293960147255264121}
   - component: {fileID: 9175876842781277611}
   m_Layer: 0
-  m_Name: Camera (1)
+  m_Name: CameraThirdPerson1
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -54462,6 +54525,7 @@ GameObject:
   - component: {fileID: 7888881523463461687}
   - component: {fileID: 6082538235604414238}
   - component: {fileID: 5463389367349479104}
+  - component: {fileID: 5064352624905039435}
   m_Layer: 0
   m_Name: Cube.092
   m_TagString: Untagged
@@ -54534,6 +54598,27 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!65 &5064352624905039435
+BoxCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8484235901687849820}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 1
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Size: {x: 0.0007717102, y: 0.0005690248, z: 0.00083577365}
+  m_Center: {x: 0.0000000012369128, y: 0.0000147653745, z: -0.000009323905}
 --- !u!1 &8530934420187122438
 GameObject:
   m_ObjectHideFlags: 0
@@ -56742,7 +56827,7 @@ GameObject:
   - component: {fileID: 8980803187181502891}
   - component: {fileID: 2739605110350101244}
   m_Layer: 0
-  m_Name: Camera (2)
+  m_Name: CameraThirdPerson2
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
