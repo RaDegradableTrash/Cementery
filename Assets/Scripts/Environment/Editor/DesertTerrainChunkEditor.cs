@@ -132,7 +132,7 @@ namespace EnvironmentSystem
                 else
                 {
                     // Brand new or read-only/FBX mesh, save to meshes directory as a new writeable asset!
-                    string folderPath = "Assets/Scenes/DesertChunks/Meshes";
+                    string folderPath = "Assets/Scenes/Chunks/Meshes";
                     if (!System.IO.Directory.Exists(folderPath))
                     {
                         System.IO.Directory.CreateDirectory(folderPath);

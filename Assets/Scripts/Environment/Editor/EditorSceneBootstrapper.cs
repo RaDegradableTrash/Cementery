@@ -31,8 +31,8 @@ namespace EnvironmentSystem
                 Scene activeScene = SceneManager.GetActiveScene();
                 string path = activeScene.path;
 
-                // Only redirect to Main_Persistent if the active scene is located inside Chunks or DesertChunks folder
-                bool isChunkScene = path.Contains("/DesertChunks/") || path.Contains("/Chunks/") || System.IO.Path.GetFileNameWithoutExtension(path).Contains("Chunk");
+                // Only redirect to Main_Persistent if the active scene is located inside Chunks folder
+                bool isChunkScene = path.Contains("/Chunks/") || System.IO.Path.GetFileNameWithoutExtension(path).Contains("Chunk");
 
                 if (path != PersistentScenePath && isChunkScene)
                 {

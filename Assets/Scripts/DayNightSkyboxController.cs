@@ -389,12 +389,36 @@ public class DayNightSkyboxController : MonoBehaviour
             horizonAttenuation = Mathf.Lerp(horizonIntensityFloor, 1f, Mathf.Pow(sunAboveHorizon01, horizonIntensityPower));
         }
 
-        sunLight.intensity = Mathf.Lerp(minIntensity, maxIntensity, daylight) * horizonAttenuation;
+        // --- DYNAMIC CLOUD OCCLUSION DIMMING ---
+        // Dynamically queries the globally set cloud variables to evaluate overall coverage.
+        // Lower thresholds and higher densities represent overcast conditions, which dims and cools the main light source.
+        float cloudLightOcclusion = 1.0f;
+        float cloudCoverageFactor = 0.0f;
+        
+        float globalThreshold = Shader.GetGlobalFloat("_CloudThreshold");
+        float globalDensityScale = Shader.GetGlobalFloat("_CloudDensityScale");
+        if (globalDensityScale > 0.001f)
+        {
+            // High coverage corresponds to low threshold settings (0 = overcast, 1 = clear)
+            cloudCoverageFactor = Mathf.Clamp01(1.0f - globalThreshold);
+            // Let the sun intensity dim by up to 68% under heavy overcast skies
+            cloudLightOcclusion = Mathf.Lerp(1.0f, 0.32f, cloudCoverageFactor * Mathf.Clamp01(globalDensityScale * 0.4f));
+        }
+
+        sunLight.intensity = Mathf.Lerp(minIntensity, maxIntensity, daylight) * horizonAttenuation * cloudLightOcclusion;
 
         Color baseSunColor = Color.Lerp(nightSunColor, daySunColor, daylight);
         Color twilightColor = Color.Lerp(baseSunColor, sunriseSunColor, twilight);
         float redDiskBlend = Mathf.Clamp01(twilight * (1f - Mathf.Clamp01((sunElevation + 0.05f) / 0.9f)) * 1.35f * sunriseRedBoost);
-        sunLight.color = Color.Lerp(twilightColor, sunriseRedColor, redDiskBlend);
+        Color finalSunColor = Color.Lerp(twilightColor, sunriseRedColor, redDiskBlend);
+
+        // Shift color towards cool sky reflection shadows under heavy cloud cover
+        if (cloudCoverageFactor > 0.01f)
+        {
+            Color cloudShadowTint = new Color(0.75f, 0.82f, 0.94f); // Cool ambient skylight refraction
+            finalSunColor = Color.Lerp(finalSunColor, finalSunColor * cloudShadowTint, cloudCoverageFactor * 0.45f);
+        }
+        sunLight.color = finalSunColor;
 
         if (!forceRealtimeShadows)
             return;

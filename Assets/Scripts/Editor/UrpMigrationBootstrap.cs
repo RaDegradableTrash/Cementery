@@ -128,6 +128,7 @@ public static class UrpMigrationBootstrap
         }
 
         changed |= ConvertHdrpMaterialsToUrpLit();
+        RegisterChunkScenesInBuildSettings();
 
         if (changed)
         {
@@ -139,6 +140,43 @@ public static class UrpMigrationBootstrap
         }
 
         return true;
+    }
+
+    private static void RegisterChunkScenesInBuildSettings()
+    {
+        string[] sceneGuids = AssetDatabase.FindAssets("t:Scene", new[] { "Assets/Scenes/Chunks", "Assets/Scenes/DesertChunks" });
+        if (sceneGuids.Length == 0) return;
+
+        var currentScenes = EditorBuildSettings.scenes;
+        var newSceneList = new System.Collections.Generic.List<EditorBuildSettingsScene>(currentScenes);
+
+        bool changed = false;
+        foreach (string guid in sceneGuids)
+        {
+            string path = AssetDatabase.GUIDToAssetPath(guid);
+            
+            bool exists = false;
+            foreach (var ebsScene in currentScenes)
+            {
+                if (ebsScene.path.Equals(path, StringComparison.OrdinalIgnoreCase))
+                {
+                    exists = true;
+                    break;
+                }
+            }
+
+            if (!exists)
+            {
+                newSceneList.Add(new EditorBuildSettingsScene(path, true));
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            EditorBuildSettings.scenes = newSceneList.ToArray();
+            Debug.Log($"[URP Migration] Successfully registered {newSceneList.Count - currentScenes.Length} streamable chunk scenes in Editor Build Settings!");
+        }
     }
 
     private static void EnsureFolder(string folderPath)

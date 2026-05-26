@@ -80,27 +80,46 @@ namespace EnvironmentSystem
 
         private void EnsureShaderMigration()
         {
-            if (Application.isPlaying && TryGetComponent<MeshRenderer>(out var mr) && mr.sharedMaterial != null)
+            if (!Application.isPlaying) return;
+
+            MeshRenderer mr = GetComponent<MeshRenderer>();
+            if (mr == null)
             {
-                if (mr.sharedMaterial.shader.name != "Environment/URPTriplanarEnvironment")
+                Debug.LogWarning($"[DesertTerrainChunk] '{gameObject.name}' has no MeshRenderer found!");
+                return;
+            }
+
+            if (mr.sharedMaterial == null)
+            {
+                Debug.LogWarning($"[DesertTerrainChunk] '{gameObject.name}' has no sharedMaterial assigned at Start!");
+                return;
+            }
+
+            string currentShaderName = mr.sharedMaterial.shader != null ? mr.sharedMaterial.shader.name : "NULL";
+            Debug.LogWarning($"[DesertTerrainChunk] '{gameObject.name}' active shader at Start is '{currentShaderName}'");
+
+            if (currentShaderName != "Environment/URPTriplanarEnvironment")
+            {
+                Shader customTriplanar = Shader.Find("Environment/URPTriplanarEnvironment");
+                if (customTriplanar != null)
                 {
-                    Shader customTriplanar = Shader.Find("Environment/URPTriplanarEnvironment");
-                    if (customTriplanar != null)
-                    {
-                        Material runtimeMat = new Material(customTriplanar);
-                        
-                        if (mr.sharedMaterial.HasProperty("_BaseMap")) runtimeMat.SetTexture("_MainTex", mr.sharedMaterial.GetTexture("_BaseMap"));
-                        else if (mr.sharedMaterial.HasProperty("_MainTex")) runtimeMat.SetTexture("_MainTex", mr.sharedMaterial.GetTexture("_MainTex"));
-                        
-                        if (mr.sharedMaterial.HasProperty("_BumpMap")) runtimeMat.SetTexture("_NormalMap", mr.sharedMaterial.GetTexture("_BumpMap"));
-                        else if (mr.sharedMaterial.HasProperty("_NormalMap")) runtimeMat.SetTexture("_NormalMap", mr.sharedMaterial.GetTexture("_NormalMap"));
-                        
-                        if (mr.sharedMaterial.HasProperty("_Color")) runtimeMat.SetColor("_Color", mr.sharedMaterial.GetColor("_Color"));
-                        else if (mr.sharedMaterial.HasProperty("_BaseColor")) runtimeMat.SetColor("_Color", mr.sharedMaterial.GetColor("_BaseColor"));
-                        
-                        mr.sharedMaterial = runtimeMat;
-                        Debug.Log($"[DesertTerrainChunk] Auto-migrated terrain chunk material to triplanar shader on scene start.");
-                    }
+                    Material runtimeMat = new Material(customTriplanar);
+                    
+                    if (mr.sharedMaterial.HasProperty("_BaseMap")) runtimeMat.SetTexture("_MainTex", mr.sharedMaterial.GetTexture("_BaseMap"));
+                    else if (mr.sharedMaterial.HasProperty("_MainTex")) runtimeMat.SetTexture("_MainTex", mr.sharedMaterial.GetTexture("_MainTex"));
+                    
+                    if (mr.sharedMaterial.HasProperty("_BumpMap")) runtimeMat.SetTexture("_NormalMap", mr.sharedMaterial.GetTexture("_BumpMap"));
+                    else if (mr.sharedMaterial.HasProperty("_NormalMap")) runtimeMat.SetTexture("_NormalMap", mr.sharedMaterial.GetTexture("_NormalMap"));
+                    
+                    if (mr.sharedMaterial.HasProperty("_Color")) runtimeMat.SetColor("_Color", mr.sharedMaterial.GetColor("_Color"));
+                    else if (mr.sharedMaterial.HasProperty("_BaseColor")) runtimeMat.SetColor("_Color", mr.sharedMaterial.GetColor("_BaseColor"));
+                    
+                    mr.sharedMaterial = runtimeMat;
+                    Debug.LogWarning($"[DesertTerrainChunk] SUCCESS: Auto-migrated '{gameObject.name}' material to custom Triplanar shader on scene start!");
+                }
+                else
+                {
+                    Debug.LogWarning($"[DesertTerrainChunk] WARNING: Custom triplanar shader 'Environment/URPTriplanarEnvironment' could not be found via Shader.Find!");
                 }
             }
         }

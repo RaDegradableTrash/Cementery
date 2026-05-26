@@ -14,6 +14,13 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
         _BaseScale ("Base Noise Scale", Float) = 0.0005
         _DetailScale ("Detail Noise Scale", Float) = 0.003
         _DetailInfluence ("Detail Influence", Range(0, 1)) = 0.3
+        _VerticalStretch ("Vertical Stretch", Float) = 3.5
+        _ConvectiveWarp ("Convective Warp", Range(0, 2)) = 0.8
+        _VerticalRandomness ("Vertical Randomness", Range(0, 1)) = 0.5
+        _Puffiness ("Puffiness", Range(0, 1)) = 0.6
+        _CloudBaseFlatness ("Cloud Base Flatness", Range(0, 1)) = 0.8
+        _EdgeSoftness ("Edge Softness", Range(0.001, 0.5)) = 0.02
+        _BacklitGlow ("Backlit Glow", Range(0, 2)) = 0.5
         
         _Absorption ("Light Absorption", Float) = 2.0
         _ShadowColor ("Shadow Color", Color) = (0.2, 0.25, 0.35, 1)
@@ -23,6 +30,7 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
         _DetailWindSpeed ("Detail Wind Speed", Vector) = (1.0, 1.0, 1.0, 0)
         
         _StepCount ("Max Ray Steps", Float) = 16
+        _JitterStrength ("Dither Jitter Strength", Range(0, 1)) = 0.2
         _LightStepDistance ("Shadow Sample Distance", Float) = 40.0
     }
 
@@ -56,12 +64,20 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
                 float _BaseScale;
                 float _DetailScale;
                 float _DetailInfluence;
+                float _VerticalStretch;
+                float _ConvectiveWarp;
+                float _VerticalRandomness;
+                float _Puffiness;
+                float _CloudBaseFlatness;
+                float _EdgeSoftness;
+                float _BacklitGlow;
                 float _Absorption;
                 float4 _ShadowColor;
                 float4 _MaxLightColor;
                 float4 _BaseWindSpeed;
                 float4 _DetailWindSpeed;
                 float _StepCount;
+                float _JitterStrength;
                 float _LightStepDistance;
             CBUFFER_END
 
@@ -130,102 +146,109 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
             // Sample cloud density at a given world position
             float SampleCloudDensity(float3 pos)
             {
-                // Height restriction mask to keep the clouds in a neat boundary
-                float heightFactor = (pos.y - _CloudMinHeight) / (_CloudMaxHeight - _CloudMinHeight);
+                // Apply vertical noise stretch to base and detail scales
+                float3 baseScaleVec = float3(_BaseScale, _BaseScale / _VerticalStretch, _BaseScale);
+                float3 detailScaleVec = float3(_DetailScale, _DetailScale / _VerticalStretch, _DetailScale);
+
+                // --- 1. PROCEDURAL VERTICAL RANDOMNESS (纵向随机弯曲与起伏) ---
+                // We sample a low-frequency noise based on horizontal coordinates to shift the vertical space.
+                // This is 100% continuous and creates organic, wavy shapes without any block seams!
+                float2 uvwVertShift = pos.xz * (_BaseScale * 0.4) + _BaseWindSpeed.xz * _Time.y * 0.15;
+                float vertShiftNoise = SAMPLE_TEXTURE3D(_BaseNoiseTex, sampler_LinearRepeat, float3(uvwVertShift.x, 0.5, uvwVertShift.y)).r;
+                
+                // Add vertical shift to pos.y (distorts height up and down by up to 500 meters)
+                float3 warpedPos = pos;
+                warpedPos.y += (vertShiftNoise - 0.5) * 500.0 * _VerticalRandomness;
+
+                // --- 2. MULTI-SCALE DYNAMIC HEIGHT ENVELOPE (宏观高度遮罩) ---
+                // Sample unwarped base noise to determine the height range of the local cloud group
+                float3 uvwBaseRaw = pos * baseScaleVec + _BaseWindSpeed.xyz * _Time.y;
+                float baseNoiseRaw = SAMPLE_TEXTURE3D(_BaseNoiseTex, sampler_LinearRepeat, uvwBaseRaw).r;
+
+                // Convective core isolation: raise to power of 2.0 to locate strong updraft cores
+                float activeUpdraft = pow(baseNoiseRaw, 2.0);
+                
+                // Dynamic cloud base and top offsets to give each cloud tower a unique height/volume
+                float localMinH = _CloudMinHeight;
+                float localMaxH = _CloudMaxHeight - (1.0 - activeUpdraft) * (_CloudMaxHeight - _CloudMinHeight) * 0.6 * _VerticalRandomness;
+
+                float heightFactor = (warpedPos.y - localMinH) / (localMaxH - localMinH + 0.01);
                 if (heightFactor < 0.0 || heightFactor > 1.0) return 0.0;
 
-                 // --- ADVANCED PROCEDURAL SPACE WARPING FIELD (动力学空间扭曲场) ---
-                 // Computes tiling-aligned convection vectors to sculpt flat blobs into towering cumulative pyramids!
-                 float3 uvwBaseRaw = pos * _BaseScale + _BaseWindSpeed.xyz * _Time.y;
-                 
-                 // Sample the raw base Perlin noise first (unwarped) to isolate the extremely active wind cores.
-                 float baseNoiseRaw = SAMPLE_TEXTURE3D(_BaseNoiseTex, sampler_LinearRepeat, uvwBaseRaw).r;
-                 
-                 // Non-linear Convective Core Isolation: pow(x, 3.2) limits vertical ballooning and roll-convection
-                 // to only the most active 5% of cloud centers! Rest of the clouds remain naturally flat & low.
-                 float activeTower = pow(baseNoiseRaw, 3.2);
-                 
-                 // 1. Procedural Radial Factor & Outward Direction based on periodic cell tiling
-                 // Aligns perfectly with the [0, 1] base noise repeating frequency
-                 float radialFactor = saturate(sin(uvwBaseRaw.x * 3.1415926) * sin(uvwBaseRaw.z * 3.1415926));
-                 float2 outwardDir = float2(cos(uvwBaseRaw.x * 3.1415926), cos(uvwBaseRaw.z * 3.1415926));
-                 
-                 // 2. Calculate spatial distortion offset in world-space meters (在世界空间下进行物理协同形变)
-                 float3 warpOffset = float3(0, 0, 0);
-                 
-                 // - Vertical Sink (方案 1): pull coordinates up at the bottom (which physically sinks/flattens the cloud base)
-                 float verticalSink = 130.0 * (1.0 - heightFactor * heightFactor);
-                 warpOffset.y += verticalSink;
-                 
-                 // - Convection Rolling (方案 3): center goes up (shift pos.y down), edges go down (shift pos.y up). Scaled by activeTower!
-                 float rollWarpY = 110.0 * (radialFactor * 2.0 - 1.0) * sin(heightFactor * 3.1415926) * activeTower;
-                 warpOffset.y -= rollWarpY;
-                 
-                 // - Outward Expansion (金字塔尖外扩): push coordinates outward at the tops to form beautiful billowy crowns. Scaled by activeTower!
-                 warpOffset.xz += outwardDir * 90.0 * (1.0 - radialFactor) * heightFactor * activeTower;
-                 
-                 // Apply warping field to get distorted sampling world positions
-                 float3 warpedPos = pos + warpOffset;
-                 
-                 // Seamless tiling wind coordinates using warped positions (完美协同形变)
-                 float3 uvwBase = warpedPos * _BaseScale + _BaseWindSpeed.xyz * _Time.y;
-                 float3 uvwDetail = warpedPos * _DetailScale + _DetailWindSpeed.xyz * _Time.y;
-                 // -----------------------------------------------------------------
+                // Envelope shapes: sharp flat bottom deck, beautifully curved top dome
+                float bottomMask = saturate(heightFactor * lerp(2.5, 12.0, _CloudBaseFlatness));
+                float topMask = saturate((1.0 - heightFactor) * 2.2);
+                float verticalEnvelope = bottomMask * topMask;
 
-                 // Sample the procedurally generated 3D Noise Textures
-                 float baseNoise = SAMPLE_TEXTURE3D(_BaseNoiseTex, sampler_LinearRepeat, uvwBase).r;
-                 float detailNoise = SAMPLE_TEXTURE3D(_DetailNoiseTex, sampler_LinearRepeat, uvwDetail).r;
-
-                // Cubic Hermite Smoothing: round off the sharp cell creases, completely erasing dark outlines.
-                float smoothDetail = smoothstep(0.0, 1.0, detailNoise);
-
-                // 1. Isolate Cloud Towers (孤立云塔): raise the Perlin noise threshold to filter out chaotic wispy sheets
-                float baseClumps = smoothstep(0.25, 0.62, baseNoise);
-
-                 // 2D Island Coverage Mask (2D 岛屿疏密宏观滤镜): group clouds into horizontal islands (晴空与云岛)
-                 float3 uvwCoverage = pos * (_BaseScale * 0.22) + _BaseWindSpeed.xyz * _Time.y * 0.15;
-                 uvwCoverage.y = 0.0; // Strictly 2D XZ plane projection to eliminate vertical stacking
-                 float coverageRaw = SAMPLE_TEXTURE3D(_BaseNoiseTex, sampler_LinearRepeat, uvwCoverage).r;
-                 float coverageMask = smoothstep(0.32, 0.58, coverageRaw);
-                 baseClumps *= coverageMask;
-
-                // 2. High-quality Towering Cumulus vertical envelope: perfectly flat bottom, vertical billowy columns
-                // The cloud ceiling (towerFactor) is kept flat and low (e.g. 0.35) for most clouds, 
-                // and only shoots up very high (e.g. 0.85) in active storm towers! (非线性高度激活)
-                float towerFactor = 0.32 + activeTower * 0.65;
-                float topMask = saturate((towerFactor - heightFactor) / (towerFactor * 0.35 + 0.01));
-                float bottomMask = saturate(heightFactor * 6.0);
-                float cumulusHeightMask = bottomMask * topMask;
+                // --- 3. 100% CONTINUOUS DOMAIN WARPING (中频空间扰动) ---
+                // Sample 3D noise continuously to construct a smooth warp vector.
+                // This is fully continuous and completely immune to grid coordinate wrapping seams!
+                float3 uvwWarp = warpedPos * (baseScaleVec * 1.5) + _BaseWindSpeed.xyz * _Time.y * 0.4;
+                float warpX = SAMPLE_TEXTURE3D(_BaseNoiseTex, sampler_LinearRepeat, uvwWarp + float3(0.1, 0.2, 0.3)).r;
+                float warpY = SAMPLE_TEXTURE3D(_BaseNoiseTex, sampler_LinearRepeat, uvwWarp + float3(0.4, 0.5, 0.6)).r;
+                float warpZ = SAMPLE_TEXTURE3D(_BaseNoiseTex, sampler_LinearRepeat, uvwWarp + float3(0.7, 0.8, 0.9)).r;
                 
-                float baseShape = baseClumps * cumulusHeightMask;
+                // Secondary smooth warping (distorts coordinates smoothly by up to 350 meters)
+                float3 secondaryWarp = float3(warpX - 0.5, warpY - 0.5, warpZ - 0.5) * 350.0;
+                warpedPos += secondaryWarp;
 
-                // 3. Popcorn Stacking (椰菜花气泡堆叠): use a low baseline and high multiplier to exaggerate
-                // round, bulging bubble domes (隆起感) and cut deep crevices for dramatic volumetric self-shadowing!
-                // 3. Subtractive Edge Carving (经典边缘侵蚀): erodes cloud borders into wispy cells, keeping core solid.
-                // This completely erases the hard "plastic/clay shell" look, creating 100% soft, breathing volumes!
-                float edgeCarve = (1.0 - smoothDetail) * (1.0 - baseShape) * _DetailInfluence * 0.48;
-                float carvedShape = saturate(baseShape - edgeCarve);
-
-                // 4. Convective bubble puff addition: soft, round bubble domes towards the top of the active towers (云顶椰菜花泡泡)
-                float bubblePuffs = smoothDetail * 0.32 * heightFactor * activeTower;
-                float cloudDensity = carvedShape + bubblePuffs * baseShape;
+                // --- 4. CELLULAR BASE SHAPE (基础 Worley 形状) ---
+                float3 uvwBase = warpedPos * baseScaleVec + _BaseWindSpeed.xyz * _Time.y;
+                float baseNoise = SAMPLE_TEXTURE3D(_BaseNoiseTex, sampler_LinearRepeat, uvwBase).r;
                 
-                // 5. Smooth density scaling with Threshold subtraction restored for inspector control
-                cloudDensity = saturate((cloudDensity - _CloudThreshold) * _CloudDensityScale);
+                // --- 5. CONVECTIVE MUSHROOM SPREADING via DYNAMIC THRESHOLD (横向无缝蔓生) ---
+                // Instead of discontinuous coordinate offsets, we use a continuous vertical gradient 
+                // to shrink the cloud base and expand the cloud top horizontally!
+                // This spreads the cloud top outwards by up to 45% of the cell radius completely seamlessly!
+                float baseSpread = (1.0 - heightFactor) * _ConvectiveWarp * 0.36;
 
-                return cloudDensity;
+                // --- 6. LOW-FREQUENCY ISLAND COVERAGE (宏观云岛分布) ---
+                float3 uvwCoverage = warpedPos * (baseScaleVec * 0.2) + _BaseWindSpeed.xyz * _Time.y * 0.1;
+                uvwCoverage.y = 0.0;
+                float coverage = SAMPLE_TEXTURE3D(_BaseNoiseTex, sampler_LinearRepeat, uvwCoverage).r;
+                float coverageMask = smoothstep(0.22, 0.48, coverage);
+
+                // --- 7. DYNAMIC RADIUS THRESHOLDING (云块体积与大小控制) ---
+                float localThreshold = _CloudThreshold + baseSpread + (1.0 - coverageMask) * 0.65;
+                
+                // Apply vertical profile envelope directly to shape
+                float baseShape = baseNoise * verticalEnvelope;
+                float cloudVal = baseShape - localThreshold;
+
+                if (cloudVal <= 0.0) return 0.0;
+
+                // --- 8. BULGING CAULIFLOWER PUFFS & DETAIL CARVING (椰菜花无缝堆叠) ---
+                float3 uvwDetail = warpedPos * detailScaleVec + _DetailWindSpeed.xyz * _Time.y;
+                float detailNoise = SAMPLE_TEXTURE3D(_DetailNoiseTex, sampler_LinearRepeat, uvwDetail).r;
+                
+                // Warp the boundary of the cloud slightly outward in detailed spherical patterns (convective bubbling)
+                // Kept very gentle to make the clouds look light, clean, and通透 rather than sticky/hairy!
+                float boundaryWarp = detailNoise * _Puffiness * 0.15 * heightFactor * (1.0 - baseShape);
+                
+                // Softly erode only the very outer boundary edge of the cloud
+                float edgeCarving = (1.0 - detailNoise) * _DetailInfluence * 0.12 * (1.0 - baseShape);
+
+                float finalShape = cloudVal + boundaryWarp - edgeCarving;
+
+                // --- 9. SOLID CORE NORMALIZATION (动漫风格坚实边缘切片) ---
+                // Dividing by max(_EdgeSoftness, 0.001) scales the shape gradient, creating beautifully crisp,
+                // sharp anime-style boundaries that completely erase fuzzy/powdery pixels!
+                float normalizedDensity = saturate(finalShape / max(_EdgeSoftness, 0.001));
+                float finalDensity = saturate(normalizedDensity * _CloudDensityScale);
+
+                return finalDensity;
             }
 
-            // Beer-Powder volumetric lighting model
+            // Translucent backlit-friendly volumetric lighting model (无灰黑边缘)
             float LightEnergy(float densityToSun, float absorption)
             {
-                // Beer's Law Soft Normalization (防黑超载柔和归一化)
-                float beer = exp(-densityToSun * absorption * 0.15);
+                // Beer's law attenuation along the sun direction
+                float beer = exp(-densityToSun * absorption);
                 
-                // Powder Effect (for multi-scattering bright border glows)
-                float powder = 1.0 - exp(-densityToSun * 2.0);
+                // Translucent backlit glow transmission through boundaries
+                float backlit = exp(-densityToSun * 0.15) * _BacklitGlow;
                 
-                return beer * powder;
+                return max(beer, backlit);
             }
 
             half4 Fragment(Varyings input) : SV_Target
@@ -260,6 +283,11 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
 
                 // Setup raymarching parameters
                 int maxSteps = min((int)_StepCount, 64);
+                
+                // Clamp far clipping plane to maximum visible distance to concentrate steps in the active cloud area!
+                // This gives extremely high visual density and eliminates banding under macOS Metal
+                tFar = min(tFar, 160000.0);
+                
                 float stepSize = (tFar - tNear) / (float)maxSteps;
                 
                 // Use screen-space pixel position (SV_POSITION) to eliminate floating-point moire diagonal banding lines!
@@ -275,15 +303,21 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
                 [loop]
                 for (int i = 0; i < maxSteps; i++)
                 {
-                    // Calculate ray position using randomized pixel step size and starting jitter offset
-                    float t = tNear + (float(i) + jitter * 0.95) * pixelStepSize;
+                    // Calculate starting dither offset to hide color banding
+                    float ditherOffset = jitter * _JitterStrength * pixelStepSize;
+                    // Clamp dither offset to at most 180 meters to prevent screen-space pixelated shredding/fragmentation 
+                    // at extreme horizon distances or during low step counts (high step sizes)
+                    ditherOffset = min(ditherOffset, 180.0);
+                    
+                    // Calculate ray position using starting dither offset and step size
+                    float t = tNear + float(i) * pixelStepSize + ditherOffset;
                     float3 currentPos = rayOrigin + rayDir * t;
                     
                     float density = SampleCloudDensity(currentPos);
                     
                     // Smooth distance-based fade (渐隐衰减) to dissolve clouds before they tile weirdly at the horizon
-                    // Clouds smoothly fade to 0 between 3200m and 5000m from the camera
-                    float distanceFade = saturate((5000.0 - t) / 1800.0);
+                    // Clouds smoothly fade to 0 between 96000m and 160000m from the camera to prevent sharp circular borders (800% range)
+                    float distanceFade = saturate((160000.0 - t) / 64000.0);
                     density *= distanceFade;
                     
                     if (density > 0.001)
@@ -319,16 +353,17 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
                         float3 voxelLighting = ambientLight + directLight;
                         
                         // Real-world Forward Scattering Edge Glow (边缘前向散射亮化):
-                        // Thin, wispy boundary layers with low density scatter light intensely, making them look white/bright.
-                        // We blend the albedo towards _MaxLightColor at low densities to erase dirty black edges completely!
-                        float edgeGlowFactor = saturate(1.0 - density * 3.2); // 1.0 at thin edges, 0.0 inside thick core
-                        float3 voxelAlbedo = lerp(_ShadowColor.rgb, _MaxLightColor.rgb, max(heightFactor, edgeGlowFactor));
+                        // Thin, wispy boundary layers scatter light intensely, making them look bright and translucent.
+                        // We blend the shadow color towards the sky light at low densities to keep edges light and通透!
+                        float edgeGlowFactor = saturate(1.0 - density * 1.5);
+                        float3 voxelAlbedo = lerp(_ShadowColor.rgb, _MaxLightColor.rgb, saturate(heightFactor + edgeGlowFactor * 1.6));
                         
                         // Final cloud color is the product of albedo and lighting (乘性着色，完美保留体积自阴影与明暗梯度)
                         float3 cloudColor = voxelAlbedo * voxelLighting;
                         
-                        // Standard front-to-back alpha blending
-                        float alpha = density * stepSize * 0.05;
+                        // Beer-Lambert law transmittance: mathematically invariant to stepSize and stepCount,
+                        // completely eliminating the contour slicing/banding artifacts!
+                        float alpha = 1.0 - exp(-density * pixelStepSize * 0.0055);
                         finalColor.rgb += (1.0 - finalColor.a) * cloudColor * alpha;
                         finalColor.a += (1.0 - finalColor.a) * alpha;
                         
