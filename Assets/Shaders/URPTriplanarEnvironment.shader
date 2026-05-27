@@ -37,6 +37,7 @@ Shader "Environment/URPTriplanarEnvironment"
             {
                 float4 positionOS : POSITION;
                 float3 normalOS : NORMAL;
+                float4 color : COLOR;
             };
 
             struct Varyings
@@ -45,6 +46,7 @@ Shader "Environment/URPTriplanarEnvironment"
                 float3 positionWS : TEXCOORD0;
                 float3 normalWS : TEXCOORD1;
                 float displacement : TEXCOORD2;
+                float4 color : COLOR;
             };
 
             TEXTURE2D(_MainTex);
@@ -160,6 +162,7 @@ Shader "Environment/URPTriplanarEnvironment"
                 
                 output.positionCS = TransformWorldToHClip(positionWS);
                 output.positionWS = positionWS;
+                output.color = input.color;
                 
                 // 2. Analytical Normal Reconstruction at the Vertex Shader level (800x faster than per-pixel!)
                 float delta = 0.15;
@@ -382,6 +385,7 @@ Shader "Environment/URPTriplanarEnvironment"
             {
                 float4 positionOS : POSITION;
                 float3 normalOS : NORMAL;
+                float4 color : COLOR;
             };
 
             struct Varyings
@@ -481,6 +485,7 @@ Shader "Environment/URPTriplanarEnvironment"
             {
                 float4 positionOS : POSITION;
                 float3 normalOS : NORMAL;
+                float4 color : COLOR;
             };
 
             struct Varyings

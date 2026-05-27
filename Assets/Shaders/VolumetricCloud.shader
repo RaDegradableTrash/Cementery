@@ -52,6 +52,10 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
             #pragma vertex FullscreenVert
             #pragma fragment Fragment
 
+            // Added shadow keywords to receive geometry shadows
+            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE
+            #pragma multi_compile _ _SHADOWS_SOFT
+
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
@@ -213,14 +217,16 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
                 float3 uvwCoverage = warpedPos * (baseScaleVec * 0.2) + _BaseWindSpeed.xyz * _Time.y * 0.1;
                 uvwCoverage.y = 0.0;
                 float coverage = SAMPLE_TEXTURE3D(_BaseNoiseTex, sampler_LinearRepeat, uvwCoverage).r;
-                float coverageMask = smoothstep(0.22, 0.48, coverage);
-
-                // --- 7. DYNAMIC RADIUS THRESHOLDING (云块体积与大小控制) ---
+                
+                // --- 7. DYNAMIC RADIUS THRESHOLDING (云块体积与大小控制)
+                // Make the coverage noise higher contrast to create larger empty gaps
+                float coverageMask = smoothstep(0.32, 0.58, coverage);
                 
                 float distToCam = length(pos - _WorldSpaceCameraPos);
                 float distRatio = saturate(distToCam / _MaxRenderDist);
-                // 距离越远，阈值越高，从而过滤掉远处稀碎的小云块
-                float localThreshold = _CloudThreshold * 0.5 + baseSpread + (1.0 - coverageMask) * 0.35 + distRatio * 0.15;
+                // 距离大片云（云岛）越远，(1.0 - coverageMask) 的惩罚越重（从 0.35 提至 1.5），
+                // 彻底抹除岛屿外围的细碎小云。同时随距离 distRatio 增加基础抹除率。
+                float localThreshold = _CloudThreshold * 0.5 + baseSpread + (1.0 - coverageMask) * 1.5 + distRatio * 0.25;
                 
                 // Apply vertical profile envelope directly to shape
                 float baseShape = baseNoise * verticalEnvelope;
@@ -270,6 +276,54 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
                 return max(beer, backlit);
             }
 
+            
+            
+
+            
+            // --- ROBUST 3D-PARALLAX CLOUD SHADOW & TYNDALL MASK ---
+            float SampleShadowMask(float3 worldPos, float3 sunDir)
+            {
+                if (sunDir.y <= 0.05) return 0.0;
+                
+                // To guarantee 1-to-1 correspondence with the clouds, we take 3 samples 
+                // along the sun's ray slicing through the volume. This flawlessly captures 
+                // the 3D volume shape, convective warp, and prevents low-angle sun parallax mismatches!
+                
+                float diff = _CloudMaxHeight - _CloudMinHeight;
+                float h1 = _CloudMinHeight + diff * 0.2;
+                float h2 = _CloudMinHeight + diff * 0.5;
+                float h3 = _CloudMinHeight + diff * 0.8;
+                
+                float3 cp1 = worldPos + sunDir * ((h1 - worldPos.y) / sunDir.y);
+                float3 cp2 = worldPos + sunDir * ((h2 - worldPos.y) / sunDir.y);
+                float3 cp3 = worldPos + sunDir * ((h3 - worldPos.y) / sunDir.y);
+                
+                float3 baseScaleVec = float3(_BaseScale, _BaseScale / _VerticalStretch, _BaseScale);
+                
+                // Sample lower, mid, and upper slices with accurate ConvectiveWarp offsets
+                float3 uvw1 = cp1 * baseScaleVec + _BaseWindSpeed.xyz * _Time.y - float3(0, _ConvectiveWarp * 0.2, 0);
+                float n1 = SAMPLE_TEXTURE3D_LOD(_BaseNoiseTex, sampler_LinearRepeat, uvw1, 0).r;
+                
+                float3 uvw2 = cp2 * baseScaleVec + _BaseWindSpeed.xyz * _Time.y - float3(0, _ConvectiveWarp * 0.5, 0);
+                float n2 = SAMPLE_TEXTURE3D_LOD(_BaseNoiseTex, sampler_LinearRepeat, uvw2, 0).r;
+                
+                float3 uvw3 = cp3 * baseScaleVec + _BaseWindSpeed.xyz * _Time.y - float3(0, _ConvectiveWarp * 0.8, 0);
+                float n3 = SAMPLE_TEXTURE3D_LOD(_BaseNoiseTex, sampler_LinearRepeat, uvw3, 0).r;
+                
+                // Max blend ensures we catch the thickest part of the cloud along the ray
+                float baseNoise = max(n1, max(n2, n3));
+                
+                float3 uvwCoverage = cp2 * (baseScaleVec * 0.2) + _BaseWindSpeed.xyz * _Time.y * 0.1;
+                uvwCoverage.y = 0.0;
+                float coverage = SAMPLE_TEXTURE3D_LOD(_BaseNoiseTex, sampler_LinearRepeat, uvwCoverage, 0).r;
+                float coverageMask = smoothstep(0.32, 0.58, coverage);
+                
+                float threshold = _CloudThreshold * 0.5 + (1.0 - coverageMask) * 1.5;
+                float density = saturate(baseNoise - threshold);
+                
+                return saturate(pow(density * 2.5, 1.5));
+            }
+
             half4 Fragment(Varyings input) : SV_Target
             {
                 float2 uv = input.uv;
@@ -295,9 +349,69 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
 
                 // Intersect ray with the cloud boundaries
                 float tNear, tFar;
-                if (!IntersectCloudBox(rayOrigin, rayDir, sceneDist, tNear, tFar))
+                bool hitClouds = IntersectCloudBox(rayOrigin, rayDir, sceneDist, tNear, tFar);
+                
+                float4 finalColor = float4(0, 0, 0, 0);
+                Light mainLight = GetMainLight();
+                float jitter = InterleavedGradientNoise(input.positionCS.xy);
+                
+                // === REALISTIC GROUND SHADOWS AND TYNDALL RAYS ===
+                
+                // 1. Realistic Ground Cloud Shadows
+                if (!isSkybox && sceneDist < 20000.0)
                 {
-                    return half4(0, 0, 0, 0); // No clouds intersected or occluded by scene
+                    float shadow = SampleShadowMask(sceneWorldPos, mainLight.direction);
+                    
+                    if (shadow > 0.01) 
+                    {
+                        // 使用更大的系数提高阴影的最暗处的深度（增强反差），同时因为 shadow 变量现在是渐变的，
+                        // 所以阴影边缘会自然过渡，同一片云也会呈现出深浅不一的质感。
+                        finalColor.rgb = float3(0.0, 0.0, 0.0);
+                        finalColor.a = shadow * 0.51; // 降低到原来的 60% (0.85 * 0.6 = 0.51)，不再黑得过头
+                    }
+                }
+                
+                // 2. Volumetric Tyndall God Rays
+                float maxTyndallDist = isSkybox ? (hitClouds ? min(tNear, 3000.0) : 3000.0) : min(sceneDist, 3000.0);
+                
+                if (maxTyndallDist > 20.0)
+                {
+                    int tyndallSteps = 16; // 高精度步数
+                    float stepSize = maxTyndallDist / (float)tyndallSteps;
+                    float accumulatedLight = 0.0;
+                    
+                    float t = jitter * stepSize;
+                    
+                    [loop]
+                    for (int j = 0; j < tyndallSteps; j++)
+                    {
+                        float3 pos = rayOrigin + rayDir * t;
+                        float shadowAtPos = SampleShadowMask(pos, mainLight.direction);
+                        
+                        // 1.0 means full sunlight, 0.0 means shadowed by clouds
+                        float illumination = pow(1.0 - shadowAtPos, 2.0);
+                        
+                        // Add light based on step distance (Riemann sum)
+                        accumulatedLight += illumination * stepSize * 0.0005;
+                        
+                        t += stepSize;
+                    }
+                    
+                    if (accumulatedLight > 0.01)
+                    {
+                        // Phase function gives sun glare
+                        float phase = lerp(0.5, 3.0, pow(saturate(dot(rayDir, mainLight.direction) * 0.5 + 0.5), 3.0));
+                        float3 godRayColor = _MaxLightColor.rgb * accumulatedLight * phase;
+                        
+                        // Additive blending for realistic light shafts
+                        finalColor.rgb += godRayColor * (1.0 - finalColor.a);
+                        finalColor.a = saturate(finalColor.a + accumulatedLight * 0.3);
+                    }
+                }
+                
+                if (!hitClouds)
+                {
+                    return finalColor; 
                 }
 
                 // Setup raymarching parameters
@@ -310,11 +424,6 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
                 float stepSize = (tFar - tNear) / (float)maxSteps;
                 
                 // Use screen-space pixel position (SV_POSITION) to eliminate floating-point moire diagonal banding lines!
-                float jitter = InterleavedGradientNoise(input.positionCS.xy);
-                
-                float4 finalColor = float4(0, 0, 0, 0);
-                Light mainLight = GetMainLight();
-                
                 // Apply a tiny randomized step size jitter (+/- 6%) per pixel to completely smash the grid aliasing shells,
                 // making 3D texture undersampling Moire patterns 100% mathematically impossible!
                 float pixelStepSize = stepSize * (1.0 + (jitter - 0.5) * 0.12);
