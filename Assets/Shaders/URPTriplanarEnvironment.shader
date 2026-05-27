@@ -7,6 +7,8 @@ Shader "Environment/URPTriplanarEnvironment"
         _TriplanarScale ("Texture Scale", Float) = 1.0
         _BlendSharpness ("Blend Sharpness", Range(1, 20)) = 5.0
         _Color ("Tint Color", Color) = (1,1,1,1)
+        _GlobalSaturation ("Global Saturation", Float) = 1.0
+        _GlobalContrast ("Global Contrast", Float) = 1.0
     }
 
     SubShader
@@ -189,6 +191,9 @@ Shader "Environment/URPTriplanarEnvironment"
                 return colX * blendWeights.x + colY * blendWeights.y + colZ * blendWeights.z;
             }
 
+            float _GlobalSaturation;
+            float _GlobalContrast;
+
             float4 frag(Varyings input) : SV_Target
             {
                 float3 normalWS = normalize(input.normalWS);
@@ -261,6 +266,12 @@ Shader "Environment/URPTriplanarEnvironment"
                 float3 sparkleColor = float3(1.0, 0.86, 0.52) * glint * 4.5 * mainLight.shadowAttenuation * cloudShadow;
 
                 float3 finalColor = albedo.rgb * (diffuse + ambient) + specColor + fresnelGlow + sparkleColor;
+
+                // Vibrant Anime Color Grading (dynamic saturation & contrast)
+                float luma = dot(finalColor, float3(0.299, 0.587, 0.114));
+                finalColor = lerp(luma.xxx, finalColor, _GlobalSaturation);
+                finalColor = (finalColor - 0.35) * _GlobalContrast + 0.35;
+                finalColor = max(0.0, finalColor);
 
                 return float4(finalColor, 1.0);
             }

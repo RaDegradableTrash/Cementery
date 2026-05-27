@@ -122,7 +122,7 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
---- !u!21 &763418705
+--- !u!21 &348732894
 Material:
   serializedVersion: 8
   m_ObjectHideFlags: 0
@@ -239,7 +239,7 @@ Material:
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
   m_BuildTextureStacks: []
---- !u!1 &1492165694
+--- !u!1 &846876395
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -247,11 +247,11 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 1492165699}
-  - component: {fileID: 1492165698}
-  - component: {fileID: 1492165697}
-  - component: {fileID: 1492165696}
-  - component: {fileID: 1492165695}
+  - component: {fileID: 846876400}
+  - component: {fileID: 846876399}
+  - component: {fileID: 846876398}
+  - component: {fileID: 846876397}
+  - component: {fileID: 846876396}
   m_Layer: 0
   m_Name: Desert_Chunk_-2_-1
   m_TagString: Untagged
@@ -259,55 +259,55 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &1492165695
+--- !u!114 &846876396
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1492165694}
+  m_GameObject: {fileID: 846876395}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 29a3ce47a273645cd8ed9bb4aada19a8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  width: 32
-  depth: 32
+  width: 64
+  depth: 64
   cellSize: 2
-  seed: 37886
+  seed: 42
   enableMinecraftHills: 0
-  hillMaxHeight: 15
-  hillNoiseScale: 50
-  octaves: 3
-  lacunarity: 3
-  gain: 0.0001
-  enableTerracing: 0
-  terraceStep: 1
-  terraceFlatness: 0.4
-  baseScale: 80
-  baseHeight: 50
+  hillMaxHeight: 35
+  hillNoiseScale: 120
+  octaves: 5
+  lacunarity: 2.1
+  gain: 0.48
+  enableTerracing: 1
+  terraceStep: 5
+  terraceFlatness: 0.8
+  baseScale: 200
+  baseHeight: 10
   baseNoiseHeight: 15
-  duneSpacing: 160
-  duneHeight: 8
-  duneDirection: 32
-  duneWarpScale: 20
-  duneWarpStrength: 15
-  crestPosition: 0.814
-  windwardExponent: 2.4
-  rippleSpacing: 6
-  rippleHeight: 0.4
-  rippleDirection: 99
-  detailScale: 12
-  detailHeight: 0.4
+  duneSpacing: 70
+  duneHeight: 5.5
+  duneDirection: 45
+  duneWarpScale: 100
+  duneWarpStrength: 18
+  crestPosition: 0.8
+  windwardExponent: 2
+  rippleSpacing: 5
+  rippleHeight: 0.35
+  rippleDirection: 55
+  detailScale: 10
+  detailHeight: 0.3
   blendWidth: 8
   terrainMaterial: {fileID: 0}
---- !u!64 &1492165696
+--- !u!64 &846876397
 MeshCollider:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1492165694}
+  m_GameObject: {fileID: 846876395}
   m_Material: {fileID: 0}
   m_IncludeLayers:
     serializedVersion: 2
@@ -323,13 +323,13 @@ MeshCollider:
   m_Convex: 0
   m_CookingOptions: 30
   m_Mesh: {fileID: 4300000, guid: e66810a9bdfc549d69b3f04a00cc3a94, type: 2}
---- !u!23 &1492165697
+--- !u!23 &846876398
 MeshRenderer:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1492165694}
+  m_GameObject: {fileID: 846876395}
   m_Enabled: 1
   m_CastShadows: 1
   m_ReceiveShadows: 1
@@ -343,7 +343,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 763418705}
+  - {fileID: 348732894}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -365,24 +365,24 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
---- !u!33 &1492165698
+--- !u!33 &846876399
 MeshFilter:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1492165694}
+  m_GameObject: {fileID: 846876395}
   m_Mesh: {fileID: 4300000, guid: e66810a9bdfc549d69b3f04a00cc3a94, type: 2}
---- !u!4 &1492165699
+--- !u!4 &846876400
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1492165694}
+  m_GameObject: {fileID: 846876395}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -128, y: 0, z: -64}
+  m_LocalPosition: {x: -256, y: 0, z: -128}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -392,4 +392,4 @@ Transform:
 SceneRoots:
   m_ObjectHideFlags: 0
   m_Roots:
-  - {fileID: 1492165699}
+  - {fileID: 846876400}

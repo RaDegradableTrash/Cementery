@@ -50,11 +50,28 @@ public class VolumetricCloudFeature : ScriptableRendererFeature
         public Vector3 baseWindSpeed = new Vector3(2.0f, 0.0f, 1.0f);
         public Vector3 detailWindSpeed = new Vector3(1.0f, 1.0f, 1.0f);
 
+        public enum ResolutionScale
+        {
+            Full = 1,
+            Half = 2,
+            Quarter = 4
+        }
+
         [Header("Performance Settings")]
+        [Tooltip("Resolution scale of the volumetric clouds rendering target buffer. Full is the safest. Half/Quarter can improve performance but may have platform-specific blit issues.")]
+        public ResolutionScale resolutionScale = ResolutionScale.Full;
         [Range(4, 64)] public int maxSteps = 16;
         [Tooltip("Controls the screen-space dither jitter grain strength. Set this to a lower value (e.g. 0.2) to completely remove the powdery/sandy grain and make the clouds silky-smooth.")]
         [Range(0.0f, 1.0f)] public float jitterStrength = 0.2f;
         public float shadowSampleDistance = 40.0f;
+
+        [Header("Optimization Settings")]
+        [Tooltip("The maximum distance from the camera up to which clouds will be rendered. Chunks beyond this are completely clipped for zero rendering cost.")]
+        public float maxRenderDistance = 4000.0f;
+        [Tooltip("Beyond this distance, cloud sampling steps are dynamically scaled down to optimize GPU fill-rate.")]
+        public float farDistanceOptimization = 4000.0f;
+        [Tooltip("The minimum raymarching step count enforced at far distances (lower steps = faster rendering).")]
+        [Range(1, 16)] public int farStepCount = 4;
 
         [Header("Shader Reference")]
         public Shader cloudShader;
@@ -461,6 +478,7 @@ public class VolumetricCloudPass : ScriptableRenderPass
     private Material _material;
     private Texture3D _baseNoise;
     private Texture3D _detailNoise;
+    private RTHandle _lowResCloudTexture;
 
     private static readonly int BaseNoiseTexId = Shader.PropertyToID("_BaseNoiseTex");
     private static readonly int DetailNoiseTexId = Shader.PropertyToID("_DetailNoiseTex");
@@ -486,6 +504,9 @@ public class VolumetricCloudPass : ScriptableRenderPass
     private static readonly int LightStepDistanceId = Shader.PropertyToID("_LightStepDistance");
     private static readonly int EdgeSoftnessId = Shader.PropertyToID("_EdgeSoftness");
     private static readonly int BacklitGlowId = Shader.PropertyToID("_BacklitGlow");
+    private static readonly int MaxRenderDistanceId = Shader.PropertyToID("_MaxRenderDist");
+    private static readonly int FarDistanceOptimizationId = Shader.PropertyToID("_FarDist");
+    private static readonly int FarStepCountId = Shader.PropertyToID("_FarSteps");
 
     public VolumetricCloudPass(VolumetricCloudFeature.CloudSettings settings)
     {
@@ -522,6 +543,20 @@ public class VolumetricCloudPass : ScriptableRenderPass
         // Explicitly configure the camera color target as the render target for this pass.
         // This prevents URP from optimizing the pass away and ensures depth textures are bound correctly.
         ConfigureTarget(renderingData.cameraData.renderer.cameraColorTargetHandle);
+
+        if (_settings.resolutionScale != VolumetricCloudFeature.CloudSettings.ResolutionScale.Full)
+        {
+            RenderTextureDescriptor desc = renderingData.cameraData.cameraTargetDescriptor;
+            desc.depthBufferBits = 0;
+            desc.colorFormat = RenderTextureFormat.ARGB32;
+            desc.sRGB = renderingData.cameraData.cameraTargetDescriptor.sRGB;
+            
+            int scale = (int)_settings.resolutionScale;
+            desc.width = Mathf.Max(1, desc.width / scale);
+            desc.height = Mathf.Max(1, desc.height / scale);
+
+            RenderingUtils.ReAllocateIfNeeded(ref _lowResCloudTexture, desc, FilterMode.Bilinear, TextureWrapMode.Clamp, name: "_LowResCloudTexture");
+        }
     }
 
     public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
@@ -565,6 +600,9 @@ public class VolumetricCloudPass : ScriptableRenderPass
         _material.SetFloat(LightStepDistanceId, _settings.shadowSampleDistance);
         _material.SetFloat(EdgeSoftnessId, _settings.edgeSoftness);
         _material.SetFloat(BacklitGlowId, _settings.backlitGlow);
+        _material.SetFloat(MaxRenderDistanceId, _settings.maxRenderDistance);
+        _material.SetFloat(FarDistanceOptimizationId, _settings.farDistanceOptimization);
+        _material.SetFloat(FarStepCountId, _settings.farStepCount);
 
         // Set global shader variables so other shaders (like the terrain) can dynamically calculate cloud shadows!
         Shader.SetGlobalTexture("_BaseNoiseTex", _baseNoise);
@@ -577,9 +615,24 @@ public class VolumetricCloudPass : ScriptableRenderPass
         Shader.SetGlobalVector("_BaseWindSpeed", new Vector4(_settings.baseWindSpeed.x, _settings.baseWindSpeed.y, _settings.baseWindSpeed.z, 0));
         Shader.SetGlobalFloat("_ConvectiveWarp", _settings.convectiveWarp);
 
-        // Blit from built-in blackTexture to the camera color target using the custom material.
-        // cmd.Blit is universally supported and will hardware-blend the overlay correctly.
-        cmd.Blit(Texture2D.blackTexture, renderingData.cameraData.renderer.cameraColorTargetHandle, _material, 0);
+        // Blit from built-in blackTexture using the custom material.
+        if (_settings.resolutionScale == VolumetricCloudFeature.CloudSettings.ResolutionScale.Full || _lowResCloudTexture == null)
+        {
+            // Full resolution: direct composite using Pass 0 (Blend SrcAlpha OneMinusSrcAlpha)
+            cmd.Blit(Texture2D.blackTexture, renderingData.cameraData.renderer.cameraColorTargetHandle, _material, 0);
+        }
+        else
+        {
+            // Explicitly set active target and clear
+            CoreUtils.SetRenderTarget(cmd, _lowResCloudTexture, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
+            cmd.ClearRenderTarget(false, true, Color.clear);
+
+            // Pass 1 (Blend Off): raw raymarching capture to low-res RT, no destination blending
+            cmd.Blit(Texture2D.blackTexture, _lowResCloudTexture, _material, 1);
+
+            // Pass 2 (Blend SrcAlpha OneMinusSrcAlpha): correct upscale-composite to camera
+            cmd.Blit(_lowResCloudTexture, renderingData.cameraData.renderer.cameraColorTargetHandle, _material, 2);
+        }
 
         context.ExecuteCommandBuffer(cmd);
         CommandBufferPool.Release(cmd);
@@ -592,6 +645,7 @@ public class VolumetricCloudPass : ScriptableRenderPass
 
     public void Dispose()
     {
+        if (_lowResCloudTexture != null) _lowResCloudTexture.Release();
         CoreUtils.Destroy(_material);
     }
 }

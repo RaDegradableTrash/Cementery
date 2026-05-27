@@ -10,6 +10,21 @@ public static class UrpMigrationBootstrap
     private const string PipelineAssetPath = UrpFolderPath + "/URP_Performance.asset";
     private const string RendererAssetPath = UrpFolderPath + "/URP_Performance_Renderer.asset";
 
+    /// <summary>
+    /// Standalone menu item: registers all chunk scenes in Assets/Scenes/Chunks and
+    /// Assets/Scenes/DesertChunks into the Editor Build Settings so WorldStreamer can load them.
+    /// Run this once after baking new terrain chunks.
+    /// </summary>
+    [MenuItem("Cementery/Register Chunk Scenes in Build Settings")]
+    public static void MenuRegisterChunkScenes()
+    {
+        RegisterChunkScenesInBuildSettings();
+        EditorUtility.DisplayDialog(
+            "Chunk Registration Complete",
+            "All chunk scenes in Assets/Scenes/Chunks and Assets/Scenes/DesertChunks have been added to Build Settings.\n\nYou can now enter Play Mode and WorldStreamer will load them correctly.",
+            "OK");
+    }
+
     private static bool _runQueued;
     private static int _retryCount;
 

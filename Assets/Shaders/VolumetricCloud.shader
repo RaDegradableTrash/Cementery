@@ -32,6 +32,10 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
         _StepCount ("Max Ray Steps", Float) = 16
         _JitterStrength ("Dither Jitter Strength", Range(0, 1)) = 0.2
         _LightStepDistance ("Shadow Sample Distance", Float) = 40.0
+        
+        _MaxRenderDist ("Max Render Distance", Float) = 4000.0
+        _FarDist ("Far Distance Optimization", Float) = 4000.0
+        _FarSteps ("Far Step Count", Float) = 4.0
     }
 
     SubShader
@@ -79,6 +83,9 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
                 float _StepCount;
                 float _JitterStrength;
                 float _LightStepDistance;
+                float _MaxRenderDist;
+                float _FarDist;
+                float _FarSteps;
             CBUFFER_END
 
             struct Attributes
@@ -209,7 +216,11 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
                 float coverageMask = smoothstep(0.22, 0.48, coverage);
 
                 // --- 7. DYNAMIC RADIUS THRESHOLDING (云块体积与大小控制) ---
-                float localThreshold = _CloudThreshold + baseSpread + (1.0 - coverageMask) * 0.65;
+                
+                float distToCam = length(pos - _WorldSpaceCameraPos);
+                float distRatio = saturate(distToCam / _MaxRenderDist);
+                // 距离越远，阈值越高，从而过滤掉远处稀碎的小云块
+                float localThreshold = _CloudThreshold * 0.5 + baseSpread + (1.0 - coverageMask) * 0.35 + distRatio * 0.15;
                 
                 // Apply vertical profile envelope directly to shape
                 float baseShape = baseNoise * verticalEnvelope;
@@ -223,12 +234,20 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
                 
                 // Warp the boundary of the cloud slightly outward in detailed spherical patterns (convective bubbling)
                 // Kept very gentle to make the clouds look light, clean, and通透 rather than sticky/hairy!
-                float boundaryWarp = detailNoise * _Puffiness * 0.15 * heightFactor * (1.0 - baseShape);
+                // 近实远虚：远处细节噪声衰减，减少噪点和破碎感，保留大块平滑的体积
+                float detailFade = saturate(1.0 - distRatio * 1.5);
+                // --- 8. INTENSE CAULIFLOWER CARVING & POPCORN STRUCTURE ---
+                // Increase erosion multiplier to carve deep, structured canyons into the smooth ellipse
+                float erosionModifier = lerp(0.2, 1.2, heightFactor); // Carve more at the fluffy tops, less at the flat bottoms
+                float edgeCarving = (1.0 - detailNoise) * (_DetailInfluence * detailFade) * erosionModifier * 0.7;
                 
-                // Softly erode only the very outer boundary edge of the cloud
-                float edgeCarving = (1.0 - detailNoise) * _DetailInfluence * 0.12 * (1.0 - baseShape);
-
-                float finalShape = cloudVal + boundaryWarp - edgeCarving;
+                // Subtract carving to create distinct structured clumps
+                float carvedShape = cloudVal - edgeCarving;
+                
+                // Add popcorn bulging to make the clumps spherical and volumetric
+                float boundaryWarp = detailNoise * (_Puffiness * detailFade) * 0.4 * saturate(carvedShape * 2.0);
+                
+                float finalShape = carvedShape + boundaryWarp;
 
                 // --- 9. SOLID CORE NORMALIZATION (动漫风格坚实边缘切片) ---
                 // Dividing by max(_EdgeSoftness, 0.001) scales the shape gradient, creating beautifully crisp,
@@ -303,21 +322,16 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
                 [loop]
                 for (int i = 0; i < maxSteps; i++)
                 {
-                    // Calculate starting dither offset to hide color banding
-                    float ditherOffset = jitter * _JitterStrength * pixelStepSize;
-                    // Clamp dither offset to at most 180 meters to prevent screen-space pixelated shredding/fragmentation 
-                    // at extreme horizon distances or during low step counts (high step sizes)
-                    ditherOffset = min(ditherOffset, 180.0);
-                    
-                    // Calculate ray position using starting dither offset and step size
-                    float t = tNear + float(i) * pixelStepSize + ditherOffset;
+                    // Full step jitter eliminates banding (slicing) at low step counts
+                    // Scale by _JitterStrength (typically 1.0 to fully hide slices)
+                    float t = tNear + (float(i) + jitter * max(0.5, _JitterStrength * 2.0)) * stepSize;
                     float3 currentPos = rayOrigin + rayDir * t;
                     
                     float density = SampleCloudDensity(currentPos);
                     
                     // Smooth distance-based fade (渐隐衰减) to dissolve clouds before they tile weirdly at the horizon
                     // Clouds smoothly fade to 0 between 96000m and 160000m from the camera to prevent sharp circular borders (800% range)
-                    float distanceFade = saturate((160000.0 - t) / 64000.0);
+                    float distanceFade = saturate((_MaxRenderDist - t) / (_MaxRenderDist * 0.4));
                     density *= distanceFade;
                     
                     if (density > 0.001)

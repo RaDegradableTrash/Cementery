@@ -122,7 +122,7 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
---- !u!1 &418343899
+--- !u!1 &1692918496
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -130,11 +130,11 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 418343904}
-  - component: {fileID: 418343903}
-  - component: {fileID: 418343902}
-  - component: {fileID: 418343901}
-  - component: {fileID: 418343900}
+  - component: {fileID: 1692918501}
+  - component: {fileID: 1692918500}
+  - component: {fileID: 1692918499}
+  - component: {fileID: 1692918498}
+  - component: {fileID: 1692918497}
   m_Layer: 0
   m_Name: Desert_Chunk_0_-2
   m_TagString: Untagged
@@ -142,55 +142,55 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &418343900
+--- !u!114 &1692918497
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 418343899}
+  m_GameObject: {fileID: 1692918496}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 29a3ce47a273645cd8ed9bb4aada19a8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  width: 32
-  depth: 32
+  width: 64
+  depth: 64
   cellSize: 2
-  seed: 37886
+  seed: 42
   enableMinecraftHills: 0
-  hillMaxHeight: 15
-  hillNoiseScale: 50
-  octaves: 3
-  lacunarity: 3
-  gain: 0.0001
-  enableTerracing: 0
-  terraceStep: 1
-  terraceFlatness: 0.4
-  baseScale: 80
-  baseHeight: 50
+  hillMaxHeight: 35
+  hillNoiseScale: 120
+  octaves: 5
+  lacunarity: 2.1
+  gain: 0.48
+  enableTerracing: 1
+  terraceStep: 5
+  terraceFlatness: 0.8
+  baseScale: 200
+  baseHeight: 10
   baseNoiseHeight: 15
-  duneSpacing: 160
-  duneHeight: 8
-  duneDirection: 32
-  duneWarpScale: 20
-  duneWarpStrength: 15
-  crestPosition: 0.814
-  windwardExponent: 2.4
-  rippleSpacing: 6
-  rippleHeight: 0.4
-  rippleDirection: 99
-  detailScale: 12
-  detailHeight: 0.4
+  duneSpacing: 70
+  duneHeight: 5.5
+  duneDirection: 45
+  duneWarpScale: 100
+  duneWarpStrength: 18
+  crestPosition: 0.8
+  windwardExponent: 2
+  rippleSpacing: 5
+  rippleHeight: 0.35
+  rippleDirection: 55
+  detailScale: 10
+  detailHeight: 0.3
   blendWidth: 8
   terrainMaterial: {fileID: 0}
---- !u!64 &418343901
+--- !u!64 &1692918498
 MeshCollider:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 418343899}
+  m_GameObject: {fileID: 1692918496}
   m_Material: {fileID: 0}
   m_IncludeLayers:
     serializedVersion: 2
@@ -206,13 +206,13 @@ MeshCollider:
   m_Convex: 0
   m_CookingOptions: 30
   m_Mesh: {fileID: 4300000, guid: c6e236af0af5f4a43b05ba70cfb4acf3, type: 2}
---- !u!23 &418343902
+--- !u!23 &1692918499
 MeshRenderer:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 418343899}
+  m_GameObject: {fileID: 1692918496}
   m_Enabled: 1
   m_CastShadows: 1
   m_ReceiveShadows: 1
@@ -226,7 +226,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 1657511938}
+  - {fileID: 1780144484}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -248,30 +248,30 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
---- !u!33 &418343903
+--- !u!33 &1692918500
 MeshFilter:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 418343899}
+  m_GameObject: {fileID: 1692918496}
   m_Mesh: {fileID: 4300000, guid: c6e236af0af5f4a43b05ba70cfb4acf3, type: 2}
---- !u!4 &418343904
+--- !u!4 &1692918501
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 418343899}
+  m_GameObject: {fileID: 1692918496}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: -128}
+  m_LocalPosition: {x: 0, y: 0, z: -256}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!21 &1657511938
+--- !u!21 &1780144484
 Material:
   serializedVersion: 8
   m_ObjectHideFlags: 0
@@ -392,4 +392,4 @@ Material:
 SceneRoots:
   m_ObjectHideFlags: 0
   m_Roots:
-  - {fileID: 418343904}
+  - {fileID: 1692918501}
