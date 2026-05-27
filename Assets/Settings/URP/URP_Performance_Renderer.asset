@@ -88,20 +88,32 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   m_Active: 1
   settings:
-    minHeight: 5
+    minHeight: 0
     maxHeight: 5000
-    densityScale: 0.38
-    threshold: 0.534
-    baseNoiseScale: 0.0005
-    detailNoiseScale: 0.00008
-    detailInfluence: 0.661
-    lightAbsorption: 0.41
-    shadowColor: {r: 1, g: 1, b: 1, a: 0.003921569}
-    maxLightColor: {r: 1, g: 1, b: 1, a: 0.003921569}
-    baseWindSpeed: {x: 0.02, y: 0, z: 0.01}
-    detailWindSpeed: {x: 0.001, y: 0.001, z: 0.001}
-    maxSteps: 15
-    shadowSampleDistance: 10
+    densityScale: 1.07
+    threshold: 0.073
+    baseNoiseScale: 0.0002
+    detailNoiseScale: 0.003
+    detailInfluence: 0.929
+    verticalStretch: 0.84
+    convectiveWarp: 0.421
+    verticalRandomness: 0.745
+    puffiness: 0.295
+    cloudBaseFlatness: 0.904
+    edgeSoftness: 0.037
+    lightAbsorption: 0.56
+    backlitGlow: 0.48
+    shadowColor: {r: 0.8370417, g: 0.8370419, b: 0.8490566, a: 1}
+    maxLightColor: {r: 1, g: 1, b: 1, a: 1}
+    baseWindSpeed: {x: 0.01, y: 0, z: 0.005}
+    detailWindSpeed: {x: 0.0005, y: 0.0005, z: 0.0005}
+    resolutionScale: 1
+    maxSteps: 10
+    jitterStrength: 0.2
+    shadowSampleDistance: 110
+    maxRenderDistance: 8000
+    farDistanceOptimization: 4000
+    farStepCount: 4
     cloudShader: {fileID: 4800000, guid: 089923f24a6434d358a87d8a72945d85, type: 3}
 --- !u!114 &1077259839986911734
 MonoBehaviour:

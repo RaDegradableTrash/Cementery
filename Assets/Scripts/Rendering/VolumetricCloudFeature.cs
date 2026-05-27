@@ -19,9 +19,30 @@ public class VolumetricCloudFeature : ScriptableRendererFeature
         public float baseNoiseScale = 0.0005f;
         public float detailNoiseScale = 0.003f;
         [Range(0.0f, 1.0f)] public float detailInfluence = 0.35f;
+        [Tooltip("Vertical stretch factor. Value < 1.0 compresses the noise vertically to create more vertical layers and rich vertical details; value > 1.0 stretches the noise vertically.")]
+        [Range(0.1f, 10.0f)] public float verticalStretch = 1.0f;
+
+        [Header("Convective Shapes")]
+        [Tooltip("Controls the outward convective bulging/spreading at the top of the clouds.")]
+        [Range(0.0f, 2.0f)] public float convectiveWarp = 0.8f;
+
+        [Tooltip("Controls the vertical waviness and irregularity of the cloud columns.")]
+        [Range(0.0f, 1.0f)] public float verticalRandomness = 0.5f;
+
+        [Tooltip("Controls the strength of the bulging cauliflower bubble structures on the boundaries.")]
+        [Range(0.0f, 1.0f)] public float puffiness = 0.6f;
+
+        [Tooltip("Controls how flat and clean the bottom of the cloud deck is.")]
+        [Range(0.0f, 1.0f)] public float cloudBaseFlatness = 0.8f;
+
+        [Tooltip("Controls the sharpness of the cloud boundary. Lower values make the edge extremely crisp and stylized (anime style), while higher values make it soft and wispy.")]
+        [Range(0.001f, 0.5f)] public float edgeSoftness = 0.02f;
 
         [Header("Lighting & Color")]
         [Range(0.1f, 10.0f)] public float lightAbsorption = 2.5f;
+
+        [Tooltip("Controls the intensity of the sunlight bleeding through thin cloud boundaries, making them look light and translucent.")]
+        [Range(0.0f, 2.0f)] public float backlitGlow = 0.5f;
         public Color shadowColor = new Color(0.2f, 0.25f, 0.35f, 1.0f);
         public Color maxLightColor = new Color(1.0f, 0.95f, 0.85f, 1.0f);
 
@@ -29,9 +50,28 @@ public class VolumetricCloudFeature : ScriptableRendererFeature
         public Vector3 baseWindSpeed = new Vector3(2.0f, 0.0f, 1.0f);
         public Vector3 detailWindSpeed = new Vector3(1.0f, 1.0f, 1.0f);
 
+        public enum ResolutionScale
+        {
+            Full = 1,
+            Half = 2,
+            Quarter = 4
+        }
+
         [Header("Performance Settings")]
+        [Tooltip("Resolution scale of the volumetric clouds rendering target buffer. Full is the safest. Half/Quarter can improve performance but may have platform-specific blit issues.")]
+        public ResolutionScale resolutionScale = ResolutionScale.Full;
         [Range(4, 64)] public int maxSteps = 16;
+        [Tooltip("Controls the screen-space dither jitter grain strength. Set this to a lower value (e.g. 0.2) to completely remove the powdery/sandy grain and make the clouds silky-smooth.")]
+        [Range(0.0f, 1.0f)] public float jitterStrength = 0.2f;
         public float shadowSampleDistance = 40.0f;
+
+        [Header("Optimization Settings")]
+        [Tooltip("The maximum distance from the camera up to which clouds will be rendered. Chunks beyond this are completely clipped for zero rendering cost.")]
+        public float maxRenderDistance = 4000.0f;
+        [Tooltip("Beyond this distance, cloud sampling steps are dynamically scaled down to optimize GPU fill-rate.")]
+        public float farDistanceOptimization = 4000.0f;
+        [Tooltip("The minimum raymarching step count enforced at far distances (lower steps = faster rendering).")]
+        [Range(1, 16)] public int farStepCount = 4;
 
         [Header("Shader Reference")]
         public Shader cloudShader;
@@ -39,12 +79,16 @@ public class VolumetricCloudFeature : ScriptableRendererFeature
 
     public CloudSettings settings = new CloudSettings();
     
+    public static VolumetricCloudFeature Instance { get; private set; }
+
     private VolumetricCloudPass _cloudPass;
     private Texture3D _baseNoiseTex;
     private Texture3D _detailNoiseTex;
 
     public override void Create()
     {
+        Instance = this;
+
         // Force find the shader to recover from any serialized null states
         settings.cloudShader = Shader.Find("Hidden/Universal Render Pipeline/VolumetricCloud");
 
@@ -121,7 +165,23 @@ public class VolumetricCloudFeature : ScriptableRendererFeature
         tex.filterMode = FilterMode.Bilinear;
         
         Color32[] colors = new Color32[size * size * size];
-        int tileBase = 4;
+        int gridSize = 5;
+        
+        // Precompute grid points for high performance
+        Vector3[,,] gridPoints = new Vector3[gridSize, gridSize, gridSize];
+        Random.State oldState = Random.state;
+        Random.InitState(1337); // Use a distinct seed to prevent coordinate alignment with detail noise!
+        for (int z = 0; z < gridSize; z++)
+        {
+            for (int y = 0; y < gridSize; y++)
+            {
+                for (int x = 0; x < gridSize; x++)
+                {
+                    gridPoints[x, y, z] = new Vector3(Random.value, Random.value, Random.value);
+                }
+            }
+        }
+        Random.state = oldState;
         
         for (int z = 0; z < size; z++)
         {
@@ -129,29 +189,48 @@ public class VolumetricCloudFeature : ScriptableRendererFeature
             {
                 for (int x = 0; x < size; x++)
                 {
-                    float fx = (float)x / size * tileBase;
-                    float fy = (float)y / size * tileBase;
-                    float fz = (float)z / size * tileBase;
+                    float fx = (float)x / size * gridSize;
+                    float fy = (float)y / size * gridSize;
+                    float fz = (float)z / size * gridSize;
                     
-                    // 3-octave FBM tileable Perlin Noise
-                    float sum = 0.0f;
-                    float amplitude = 1.0f;
-                    float frequency = 1.0f;
-                    float maxAmp = 0.0f;
+                    int cellX = Mathf.FloorToInt(fx);
+                    int cellY = Mathf.FloorToInt(fy);
+                    int cellZ = Mathf.FloorToInt(fz);
                     
-                    for (int oct = 0; oct < 3; oct++)
+                    float minDist = 1e9f;
+                    for (int dz = -1; dz <= 1; dz++)
                     {
-                        float px = fx * frequency;
-                        float py = fy * frequency;
-                        float pz = fz * frequency;
-                        int t = Mathf.RoundToInt(tileBase * frequency);
-                        sum += Noise3D.Perlin(px, py, pz, t) * amplitude;
-                        maxAmp += amplitude;
-                        amplitude *= 0.5f;
-                        frequency *= 2.0f;
+                        for (int dy = -1; dy <= 1; dy++)
+                        {
+                            for (int dx = -1; dx <= 1; dx++)
+                            {
+                                int nx = cellX + dx;
+                                int ny = cellY + dy;
+                                int nz = cellZ + dz;
+                                
+                                // Wrap coordinates for tileability
+                                int wx = (nx % gridSize + gridSize) % gridSize;
+                                int wy = (ny % gridSize + gridSize) % gridSize;
+                                int wz = (nz % gridSize + gridSize) % gridSize;
+                                
+                                Vector3 pointPos = new Vector3(nx, ny, nz) + gridPoints[wx, wy, wz];
+                                float dist = Vector3.Distance(new Vector3(fx, fy, fz), pointPos);
+                                if (dist < minDist) minDist = dist;
+                            }
+                        }
                     }
                     
-                    float noiseVal = (sum / maxAmp) * 0.5f + 0.5f;
+                    // Invert cell distance to get cellular Worley shape
+                    float noiseVal = Mathf.Clamp01(1.0f - minDist);
+                    
+                    // Add a tiny bit of Perlin detail inside the base texture itself to make base chunks look beautifully organic!
+                    // We blend 85% Worley with 15% Perlin to give the isolated chunks fluffy micro-distortions
+                    float px = fx * 2.0f;
+                    float py = fy * 2.0f;
+                    float pz = fz * 2.0f;
+                    float perlinVal = Noise3D.Perlin(px, py, pz, gridSize * 2) * 0.5f + 0.5f;
+                    
+                    noiseVal = noiseVal * 0.85f + perlinVal * 0.15f;
                     byte val = (byte)(Mathf.Clamp01(noiseVal) * 255.0f);
                     
                     int idx = x + y * size + z * size * size;
@@ -399,6 +478,7 @@ public class VolumetricCloudPass : ScriptableRenderPass
     private Material _material;
     private Texture3D _baseNoise;
     private Texture3D _detailNoise;
+    private RTHandle _lowResCloudTexture;
 
     private static readonly int BaseNoiseTexId = Shader.PropertyToID("_BaseNoiseTex");
     private static readonly int DetailNoiseTexId = Shader.PropertyToID("_DetailNoiseTex");
@@ -409,13 +489,24 @@ public class VolumetricCloudPass : ScriptableRenderPass
     private static readonly int BaseScaleId = Shader.PropertyToID("_BaseScale");
     private static readonly int DetailScaleId = Shader.PropertyToID("_DetailScale");
     private static readonly int DetailInfluenceId = Shader.PropertyToID("_DetailInfluence");
+    private static readonly int VerticalStretchId = Shader.PropertyToID("_VerticalStretch");
+    private static readonly int ConvectiveWarpId = Shader.PropertyToID("_ConvectiveWarp");
+    private static readonly int VerticalRandomnessId = Shader.PropertyToID("_VerticalRandomness");
+    private static readonly int PuffinessId = Shader.PropertyToID("_Puffiness");
+    private static readonly int CloudBaseFlatnessId = Shader.PropertyToID("_CloudBaseFlatness");
     private static readonly int AbsorptionId = Shader.PropertyToID("_Absorption");
     private static readonly int ShadowColorId = Shader.PropertyToID("_ShadowColor");
     private static readonly int MaxLightColorId = Shader.PropertyToID("_MaxLightColor");
     private static readonly int BaseWindSpeedId = Shader.PropertyToID("_BaseWindSpeed");
     private static readonly int DetailWindSpeedId = Shader.PropertyToID("_DetailWindSpeed");
     private static readonly int StepCountId = Shader.PropertyToID("_StepCount");
+    private static readonly int JitterStrengthId = Shader.PropertyToID("_JitterStrength");
     private static readonly int LightStepDistanceId = Shader.PropertyToID("_LightStepDistance");
+    private static readonly int EdgeSoftnessId = Shader.PropertyToID("_EdgeSoftness");
+    private static readonly int BacklitGlowId = Shader.PropertyToID("_BacklitGlow");
+    private static readonly int MaxRenderDistanceId = Shader.PropertyToID("_MaxRenderDist");
+    private static readonly int FarDistanceOptimizationId = Shader.PropertyToID("_FarDist");
+    private static readonly int FarStepCountId = Shader.PropertyToID("_FarSteps");
 
     public VolumetricCloudPass(VolumetricCloudFeature.CloudSettings settings)
     {
@@ -452,6 +543,20 @@ public class VolumetricCloudPass : ScriptableRenderPass
         // Explicitly configure the camera color target as the render target for this pass.
         // This prevents URP from optimizing the pass away and ensures depth textures are bound correctly.
         ConfigureTarget(renderingData.cameraData.renderer.cameraColorTargetHandle);
+
+        if (_settings.resolutionScale != VolumetricCloudFeature.CloudSettings.ResolutionScale.Full)
+        {
+            RenderTextureDescriptor desc = renderingData.cameraData.cameraTargetDescriptor;
+            desc.depthBufferBits = 0;
+            desc.colorFormat = RenderTextureFormat.ARGB32;
+            desc.sRGB = renderingData.cameraData.cameraTargetDescriptor.sRGB;
+            
+            int scale = (int)_settings.resolutionScale;
+            desc.width = Mathf.Max(1, desc.width / scale);
+            desc.height = Mathf.Max(1, desc.height / scale);
+
+            RenderingUtils.ReAllocateIfNeeded(ref _lowResCloudTexture, desc, FilterMode.Bilinear, TextureWrapMode.Clamp, name: "_LowResCloudTexture");
+        }
     }
 
     public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
@@ -477,6 +582,11 @@ public class VolumetricCloudPass : ScriptableRenderPass
         _material.SetFloat(BaseScaleId, _settings.baseNoiseScale);
         _material.SetFloat(DetailScaleId, _settings.detailNoiseScale);
         _material.SetFloat(DetailInfluenceId, _settings.detailInfluence);
+        _material.SetFloat(VerticalStretchId, _settings.verticalStretch);
+        _material.SetFloat(ConvectiveWarpId, _settings.convectiveWarp);
+        _material.SetFloat(VerticalRandomnessId, _settings.verticalRandomness);
+        _material.SetFloat(PuffinessId, _settings.puffiness);
+        _material.SetFloat(CloudBaseFlatnessId, _settings.cloudBaseFlatness);
         _material.SetFloat(AbsorptionId, _settings.lightAbsorption);
         
         _material.SetColor(ShadowColorId, _settings.shadowColor);
@@ -486,11 +596,43 @@ public class VolumetricCloudPass : ScriptableRenderPass
         _material.SetVector(DetailWindSpeedId, new Vector4(_settings.detailWindSpeed.x, _settings.detailWindSpeed.y, _settings.detailWindSpeed.z, 0));
         
         _material.SetFloat(StepCountId, _settings.maxSteps);
+        _material.SetFloat(JitterStrengthId, _settings.jitterStrength);
         _material.SetFloat(LightStepDistanceId, _settings.shadowSampleDistance);
+        _material.SetFloat(EdgeSoftnessId, _settings.edgeSoftness);
+        _material.SetFloat(BacklitGlowId, _settings.backlitGlow);
+        _material.SetFloat(MaxRenderDistanceId, _settings.maxRenderDistance);
+        _material.SetFloat(FarDistanceOptimizationId, _settings.farDistanceOptimization);
+        _material.SetFloat(FarStepCountId, _settings.farStepCount);
 
-        // Blit from built-in blackTexture to the camera color target using the custom material.
-        // cmd.Blit is universally supported and will hardware-blend the overlay correctly.
-        cmd.Blit(Texture2D.blackTexture, renderingData.cameraData.renderer.cameraColorTargetHandle, _material, 0);
+        // Set global shader variables so other shaders (like the terrain) can dynamically calculate cloud shadows!
+        Shader.SetGlobalTexture("_BaseNoiseTex", _baseNoise);
+        Shader.SetGlobalFloat("_CloudMinHeight", _settings.minHeight);
+        Shader.SetGlobalFloat("_CloudMaxHeight", _settings.maxHeight);
+        Shader.SetGlobalFloat("_CloudThreshold", _settings.threshold);
+        Shader.SetGlobalFloat("_CloudDensityScale", _settings.densityScale);
+        Shader.SetGlobalFloat("_BaseScale", _settings.baseNoiseScale);
+        Shader.SetGlobalFloat("_VerticalStretch", _settings.verticalStretch);
+        Shader.SetGlobalVector("_BaseWindSpeed", new Vector4(_settings.baseWindSpeed.x, _settings.baseWindSpeed.y, _settings.baseWindSpeed.z, 0));
+        Shader.SetGlobalFloat("_ConvectiveWarp", _settings.convectiveWarp);
+
+        // Blit from built-in blackTexture using the custom material.
+        if (_settings.resolutionScale == VolumetricCloudFeature.CloudSettings.ResolutionScale.Full || _lowResCloudTexture == null)
+        {
+            // Full resolution: direct composite using Pass 0 (Blend SrcAlpha OneMinusSrcAlpha)
+            cmd.Blit(Texture2D.blackTexture, renderingData.cameraData.renderer.cameraColorTargetHandle, _material, 0);
+        }
+        else
+        {
+            // Explicitly set active target and clear
+            CoreUtils.SetRenderTarget(cmd, _lowResCloudTexture, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
+            cmd.ClearRenderTarget(false, true, Color.clear);
+
+            // Pass 1 (Blend Off): raw raymarching capture to low-res RT, no destination blending
+            cmd.Blit(Texture2D.blackTexture, _lowResCloudTexture, _material, 1);
+
+            // Pass 2 (Blend SrcAlpha OneMinusSrcAlpha): correct upscale-composite to camera
+            cmd.Blit(_lowResCloudTexture, renderingData.cameraData.renderer.cameraColorTargetHandle, _material, 2);
+        }
 
         context.ExecuteCommandBuffer(cmd);
         CommandBufferPool.Release(cmd);
@@ -503,6 +645,7 @@ public class VolumetricCloudPass : ScriptableRenderPass
 
     public void Dispose()
     {
+        if (_lowResCloudTexture != null) _lowResCloudTexture.Release();
         CoreUtils.Destroy(_material);
     }
 }

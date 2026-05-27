@@ -12,7 +12,7 @@ namespace EnvironmentSystem
         [Header("General Settings")]
         [Tooltip("Delay in seconds before unloading a chunk to prevent thrashing at boundaries.")]
         public float unloadDelay = 5f;
-        [Tooltip("Set to true to use automatic 3x3 grid coordinate-based loading (Option B). Set to false to use legacy ChunkTriggers.")]
+        [Tooltip("Set to true to use automatic 7x7 grid coordinate-based loading (Option B). Set to false to use legacy ChunkTriggers.")]
         public bool useGridStreaming = true;
 
         [Header("Grid Auto Streamer (Option B)")]
@@ -30,6 +30,14 @@ namespace EnvironmentSystem
         private HashSet<string> _requestedChunks = new HashSet<string>();
         private HashSet<string> _loadedChunks = new HashSet<string>();
         private Dictionary<string, Coroutine> _unloadRoutines = new Dictionary<string, Coroutine>();
+        // Pending scene load queue for throttling: max 2 concurrent loads to avoid stutter
+        private Queue<string> _loadQueue = new Queue<string>();
+        private int _activeLoads = 0;
+        private const int MaxConcurrentLoads = 2;
+
+        // Cache DesertTerrainChunk size so FindObjectOfType is not called every 0.5 s
+        private float _chunkSizeCacheTime = -99f;
+        private const float ChunkSizeCacheInterval = 5f;
 
         private float _nextCheckTime;
         private int _lastGridX = int.MinValue;
@@ -74,15 +82,19 @@ namespace EnvironmentSystem
                 }
             }
 
-            // 2. Perform grid projection and load 3x3 surrounding chunks
+            // 2. Perform grid projection and load 7x7 surrounding chunks
             if (trackingTarget != null)
             {
-                // Dynamically retrieve spacing metrics from active chunk to keep projection perfectly in sync!
-                var activeChunk = FindObjectOfType<DesertTerrainChunk>();
-                if (activeChunk != null)
+                // Refresh chunk size from active chunk every ChunkSizeCacheInterval (not every frame!)
+                if (Time.time - _chunkSizeCacheTime > ChunkSizeCacheInterval)
                 {
-                    chunkSizeX = activeChunk.width * activeChunk.cellSize;
-                    chunkSizeZ = activeChunk.depth * activeChunk.cellSize;
+                    _chunkSizeCacheTime = Time.time;
+                    var activeChunk = FindObjectOfType<DesertTerrainChunk>();
+                    if (activeChunk != null)
+                    {
+                        chunkSizeX = activeChunk.width * activeChunk.cellSize;
+                        chunkSizeZ = activeChunk.depth * activeChunk.cellSize;
+                    }
                 }
 
                 Vector3 pos = trackingTarget.position;
@@ -96,16 +108,17 @@ namespace EnvironmentSystem
                     UpdateGridChunks(gridX, gridZ);
                 }
             }
+
         }
 
         private void UpdateGridChunks(int centerGridX, int centerGridZ)
         {
             List<string> requiredList = new List<string>();
 
-            // Generate surrounding 3x3 grid coordinates
-            for (int dx = -1; dx <= 1; dx++)
+            // 5x5 grid (25 chunks) instead of 7x7 (49) for much better performance
+            for (int dx = -2; dx <= 2; dx++)
             {
-                for (int dz = -1; dz <= 1; dz++)
+                for (int dz = -2; dz <= 2; dz++)
                 {
                     int gx = centerGridX + dx;
                     int gz = centerGridZ + dz;
@@ -114,7 +127,7 @@ namespace EnvironmentSystem
                 }
             }
 
-            Debug.Log($"<color=#38bdf8><b>[WorldStreamer]</b></color> Grid projection updated! Centered at grid ({centerGridX}, {centerGridZ}). Gathering 3x3 dynamic scenes.");
+            Debug.Log($"<color=#38bdf8><b>[WorldStreamer]</b></color> Grid updated! Center ({centerGridX}, {centerGridZ}). Loading 5x5 grid.");
             RequestChunks(requiredList);
         }
 
@@ -154,10 +167,22 @@ namespace EnvironmentSystem
                 _unloadRoutines.Remove(chunkName);
             }
 
-            if (!_loadedChunks.Contains(chunkName))
+            if (!_loadedChunks.Contains(chunkName) && !_loadQueue.Contains(chunkName))
             {
                 _loadedChunks.Add(chunkName);
-                StartCoroutine(LoadSceneAsync(chunkName));
+                // Throttle: enqueue, then drain up to MaxConcurrentLoads
+                _loadQueue.Enqueue(chunkName);
+                DrainLoadQueue();
+            }
+        }
+
+        private void DrainLoadQueue()
+        {
+            while (_activeLoads < MaxConcurrentLoads && _loadQueue.Count > 0)
+            {
+                string next = _loadQueue.Dequeue();
+                _activeLoads++;
+                StartCoroutine(LoadSceneAsync(next));
             }
         }
 
@@ -176,15 +201,19 @@ namespace EnvironmentSystem
             {
                 Debug.LogWarning($"[WorldStreamer] Failed to load chunk {sceneName}. Check Build Settings!");
                 _loadedChunks.Remove(sceneName);
+                _activeLoads = Mathf.Max(0, _activeLoads - 1);
+                DrainLoadQueue();
                 yield break;
             }
 
-            // You could link this to a loading screen UI or progress bar here
+            asyncLoad.allowSceneActivation = true;
             while (!asyncLoad.isDone)
             {
                 yield return null;
             }
             Debug.Log($"[WorldStreamer] Loaded chunk: {sceneName}");
+            _activeLoads = Mathf.Max(0, _activeLoads - 1);
+            DrainLoadQueue();
         }
 
         private IEnumerator UnloadSceneAsync(string sceneName)

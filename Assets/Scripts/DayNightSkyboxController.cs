@@ -65,8 +65,8 @@ public class DayNightSkyboxController : MonoBehaviour
     public LightShadows shadowMode = LightShadows.Soft;
     [Range(0f, 1f)] public float dayShadowStrength = 0.85f;
     [Range(0f, 1f)] public float nightShadowStrength = 0.65f;
-    [Range(0f, 0.2f)] public float shadowBias = 0.05f;
-    [Range(0f, 1f)] public float shadowNormalBias = 0.4f;
+    [Range(0f, 0.2f)] public float shadowBias = 0.08f;
+    [Range(0f, 1f)] public float shadowNormalBias = 0.85f;
     [Range(0.01f, 1f)] public float shadowNearPlane = 0.2f;
     [Range(0, 8192)] public int shadowCustomResolution = 4096;
 
@@ -78,8 +78,8 @@ public class DayNightSkyboxController : MonoBehaviour
     public bool enforceShadowAntiBandingProfile = true;
     [Range(20f, 120f)] public float antiBandingShadowDistance = 60f;
     [Range(0, 4)] public int antiBandingMaxCascades = 2;
-    [Range(0f, 0.2f)] public float antiBandingMinShadowBias = 0.02f;
-    [Range(0f, 1f)] public float antiBandingMinShadowNormalBias = 0.28f;
+    [Range(0f, 0.2f)] public float antiBandingMinShadowBias = 0.08f;
+    [Range(0f, 1f)] public float antiBandingMinShadowNormalBias = 0.85f;
 
     [Header("Skybox (Procedural)")]
     public Color daySkyTint = new Color(0.47f, 0.52f, 0.6f, 1f);
@@ -389,12 +389,64 @@ public class DayNightSkyboxController : MonoBehaviour
             horizonAttenuation = Mathf.Lerp(horizonIntensityFloor, 1f, Mathf.Pow(sunAboveHorizon01, horizonIntensityPower));
         }
 
-        sunLight.intensity = Mathf.Lerp(minIntensity, maxIntensity, daylight) * horizonAttenuation;
+        // --- DYNAMIC CLOUD OCCLUSION DIMMING ---
+        // Dynamically queries the globally set cloud variables to evaluate overall coverage.
+        // Lower thresholds and higher densities represent overcast conditions, which dims and cools the main light source.
+        float cloudLightOcclusion = 1.0f;
+        float cloudCoverageFactor = 0.0f;
+        
+        float globalThreshold = Shader.GetGlobalFloat("_CloudThreshold");
+        float globalDensityScale = Shader.GetGlobalFloat("_CloudDensityScale");
+        if (globalDensityScale > 0.001f)
+        {
+            // High coverage corresponds to low threshold settings (0 = overcast, 1 = clear)
+            cloudCoverageFactor = Mathf.Clamp01(1.0f - globalThreshold);
+            // Let the sun intensity dim by up to 68% under heavy overcast skies
+            cloudLightOcclusion = Mathf.Lerp(1.0f, 0.32f, cloudCoverageFactor * Mathf.Clamp01(globalDensityScale * 0.4f));
+        }
+
+        sunLight.intensity = Mathf.Lerp(minIntensity, maxIntensity, daylight) * horizonAttenuation * cloudLightOcclusion;
 
         Color baseSunColor = Color.Lerp(nightSunColor, daySunColor, daylight);
         Color twilightColor = Color.Lerp(baseSunColor, sunriseSunColor, twilight);
         float redDiskBlend = Mathf.Clamp01(twilight * (1f - Mathf.Clamp01((sunElevation + 0.05f) / 0.9f)) * 1.35f * sunriseRedBoost);
-        sunLight.color = Color.Lerp(twilightColor, sunriseRedColor, redDiskBlend);
+        Color finalSunColor = Color.Lerp(twilightColor, sunriseRedColor, redDiskBlend);
+
+        // Shift color towards cool sky reflection shadows under heavy cloud cover
+        if (cloudCoverageFactor > 0.01f)
+        {
+            Color cloudShadowTint = new Color(0.75f, 0.82f, 0.94f); // Cool ambient skylight refraction
+            finalSunColor = Color.Lerp(finalSunColor, finalSunColor * cloudShadowTint, cloudCoverageFactor * 0.45f);
+        }
+
+        // 🌟 Twilight Saturation Boost for dramatic Shinkai skies
+        if (twilight > 0.01f)
+        {
+            float h, s, v;
+            Color.RGBToHSV(finalSunColor, out h, out s, out v);
+            s = Mathf.Clamp01(s * (1.0f + twilight * 0.20f)); // 20% saturation boost
+            finalSunColor = Color.HSVToRGB(h, s, v);
+        }
+
+        sunLight.color = finalSunColor;
+
+        // 🌟 Saturation & Contrast modifiers for the terrain
+        float terrainSaturation = 1.0f;
+        float terrainContrast = 1.0f;
+
+        if (twilight > 0.01f)
+        {
+            terrainSaturation += twilight * 0.20f;
+        }
+
+        if (cloudCoverageFactor > 0.01f)
+        {
+            terrainSaturation -= cloudCoverageFactor * 0.15f;
+            terrainContrast += cloudCoverageFactor * 0.25f;
+        }
+
+        Shader.SetGlobalFloat("_GlobalSaturation", terrainSaturation);
+        Shader.SetGlobalFloat("_GlobalContrast", terrainContrast);
 
         if (!forceRealtimeShadows)
             return;
@@ -429,6 +481,11 @@ public class DayNightSkyboxController : MonoBehaviour
             runtimeShadowBias = Mathf.Max(runtimeShadowBias, antiBandingMinShadowBias);
             runtimeShadowNormalBias = Mathf.Max(runtimeShadowNormalBias, antiBandingMinShadowNormalBias);
         }
+
+        // 🌟 Enforce robust minimum shadow biases at runtime to completely cure diagonal shadow acne 
+        // and triangulation boundary lines on the highly displaced terrain mesh.
+        runtimeShadowBias = Mathf.Max(runtimeShadowBias, 0.08f);
+        runtimeShadowNormalBias = Mathf.Max(runtimeShadowNormalBias, 0.85f);
 
         sunLight.shadows = shadowMode;
         sunLight.shadowStrength = Mathf.Lerp(nightShadowStrength, dayShadowStrength, daylight);
@@ -471,6 +528,16 @@ public class DayNightSkyboxController : MonoBehaviour
         float twilightBlend = Mathf.SmoothStep(0f, 1f, twilight);
         Color baseSkyColor = Color.Lerp(nightSkyTint, daySkyTint, daylight);
         Color skyColor = Color.Lerp(baseSkyColor, sunsetSkyTint, twilightBlend);
+
+        // 🌟 Twilight Sky Saturation Boost for majestic, colorful sunset horizons
+        if (twilightBlend > 0.01f)
+        {
+            float h, s, v;
+            Color.RGBToHSV(skyColor, out h, out s, out v);
+            s = Mathf.Clamp01(s * (1.0f + twilightBlend * 0.20f)); // 20% saturation boost
+            skyColor = Color.HSVToRGB(h, s, v);
+        }
+
         Color groundColor = Color.Lerp(nightGroundColor, dayGroundColor, daylight);
 
         float exposure = Mathf.Lerp(nightExposure, dayExposure, daylight);
@@ -503,21 +570,49 @@ public class DayNightSkyboxController : MonoBehaviour
 
     private void ApplyAmbientAndFog(float daylight)
     {
+        // Query global cloud parameters for dynamic ambient/shadow adjustments
+        float globalThreshold = Shader.GetGlobalFloat("_CloudThreshold");
+        float globalDensityScale = Shader.GetGlobalFloat("_CloudDensityScale");
+        float cloudCoverageFactor = 0f;
+        if (globalDensityScale > 0.001f)
+        {
+            cloudCoverageFactor = Mathf.Clamp01(1.0f - globalThreshold);
+        }
 
         if (controlAmbient)
         {
             if (useTrilightAmbient)
             {
                 RenderSettings.ambientMode = AmbientMode.Trilight;
-                RenderSettings.ambientSkyColor = Color.Lerp(nightAmbientSky, dayAmbientSky, daylight);
-                RenderSettings.ambientEquatorColor = Color.Lerp(nightAmbientEquator, dayAmbientEquator, daylight);
-                RenderSettings.ambientGroundColor = Color.Lerp(nightAmbientGround, dayAmbientGround, daylight);
+                Color skyColor = Color.Lerp(nightAmbientSky, dayAmbientSky, daylight);
+                Color equatorColor = Color.Lerp(nightAmbientEquator, dayAmbientEquator, daylight);
+                Color groundColor = Color.Lerp(nightAmbientGround, dayAmbientGround, daylight);
+
+                // Dynamically tint shadows to rich cyan/blue under heavy cloud cover
+                if (cloudCoverageFactor > 0.01f)
+                {
+                    Color coolBlue = new Color(0.48f, 0.58f, 0.72f, 1.0f);
+                    skyColor = Color.Lerp(skyColor, coolBlue * skyColor * 1.5f, cloudCoverageFactor * 0.5f);
+                    equatorColor = Color.Lerp(equatorColor, coolBlue * equatorColor * 1.3f, cloudCoverageFactor * 0.5f);
+                }
+
+                RenderSettings.ambientSkyColor = skyColor;
+                RenderSettings.ambientEquatorColor = equatorColor;
+                RenderSettings.ambientGroundColor = groundColor;
             }
             else
             {
                 RenderSettings.ambientMode = AmbientMode.Flat;
                 Color flatAmbient = Color.Lerp(nightAmbientEquator, dayAmbientEquator, daylight);
                 flatAmbient.a = 1f;
+
+                // Dynamically tint shadows to rich cyan/blue under heavy cloud cover
+                if (cloudCoverageFactor > 0.01f)
+                {
+                    Color coolBlue = new Color(0.48f, 0.58f, 0.72f, 1.0f);
+                    flatAmbient = Color.Lerp(flatAmbient, coolBlue * flatAmbient * 1.4f, cloudCoverageFactor * 0.5f);
+                }
+
                 RenderSettings.ambientLight = flatAmbient;
             }
 
@@ -525,7 +620,15 @@ public class DayNightSkyboxController : MonoBehaviour
         }
 
         if (controlFog)
-            RenderSettings.fogColor = Color.Lerp(nightFog, dayFog, daylight);
+        {
+            Color fogCol = Color.Lerp(nightFog, dayFog, daylight);
+            if (cloudCoverageFactor > 0.01f)
+            {
+                Color coolFog = new Color(0.55f, 0.62f, 0.75f, 1.0f);
+                fogCol = Color.Lerp(fogCol, coolFog * fogCol * 1.2f, cloudCoverageFactor * 0.4f);
+            }
+            RenderSettings.fogColor = fogCol;
+        }
     }
 
     private void ApplyReflections(float daylight, float deltaTime, bool forceReflectionUpdate)

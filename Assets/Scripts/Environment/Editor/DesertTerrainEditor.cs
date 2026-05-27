@@ -27,7 +27,7 @@ namespace EnvironmentSystem
         private int maxChunkZ = 1;
 
         [Header("Save Folder (场景保存目录)")]
-        private string scenesPath = "Assets/Scenes/DesertChunks";
+        private string scenesPath = "Assets/Scenes/Chunks";
 
         // Local instance to easily adjust settings in the editor window
         private DesertTerrainChunk settings = null;
