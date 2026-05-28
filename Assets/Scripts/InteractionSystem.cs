@@ -76,6 +76,7 @@ public class InteractionSystem : MonoBehaviour
     private WorldObject _lookedAt;
     private Rigidbody _carryCandidateRb;
     private WorldObject _carryCandidateWo;
+    private PremodeledContainer _lookedAtContainer;
     private Vector3 _dragAnchorLocal;
 
     private Transform _carriedTransform;
@@ -893,11 +894,18 @@ public class InteractionSystem : MonoBehaviour
             _lookedAt = null;
             _carryCandidateRb = null;
             _carryCandidateWo = null;
+            _lookedAtContainer = null; // 🌟 新增：未射中时清空盒子引用
             return;
         }
 
         _lookedAt = hit.collider.GetComponentInParent<WorldObject>();
         
+        // 🌟 新增：扫描当前注视的物体（或其父级）上是否挂有收纳盒组件
+        if (_lookedAt != null)
+            _lookedAtContainer = _lookedAt.GetComponent<PremodeledContainer>() ?? _lookedAt.GetComponentInParent<PremodeledContainer>();
+        else
+            _lookedAtContainer = null;
+
         if (_carriedRb == null)
             _carryCandidateRb = ResolveCarryCandidate(hit, out _carryCandidateWo);
         else
@@ -943,9 +951,70 @@ public class InteractionSystem : MonoBehaviour
     {
         HandleCarryScrollInput();
 
+        // 1. 【左键按下】常规搬起物体（原封不动，保证基本搬运绝对健康）
         if (Input.GetMouseButtonDown(0) && _carriedRb == null && HasCarryCandidate())
             PickUp(_carryCandidateRb, _carryCandidateWo);
 
+        // ── 🌟 彻底隔离的盒子存储交互逻辑（完美适配全新数据驱动单物体架构） 🌟 ──
+        // ── 🌟 盒子右键无缝存储机制 🌟 ──────────────────────────────────
+        if (_lookedAtContainer != null && Input.GetMouseButtonDown(1))
+        {
+            // 情况一：手里抓着齿轮，执行安全放入
+            if (_carriedRb != null && _carriedWo != null)
+            {
+                GameObject matchedPrefab = null;
+                int itemSize = 1;
+
+                if (_lookedAtContainer.CanStore(_carriedWo, out matchedPrefab, out itemSize))
+                {
+                    // 🌟 瘦身后严丝合缝的 2 参数调用，直接绝杀 CS1501 编译报错
+                    if (_lookedAtContainer.TryInsert(matchedPrefab, itemSize))
+                    {
+                        GameObject objToDestroy = _carriedRb.gameObject;
+                        Drop(); // 释放物理手部缓存
+                        Destroy(objToDestroy); // 毁灭手里的真实齿轮
+                        ClearPrompts();
+                        return;
+                    }
+                }
+            }
+            // 情况二：空手看着盒子，执行无缝拔出
+            else if (_carriedRb == null)
+            {
+                if (!_lookedAtContainer.IsEmpty)
+                {
+                    GameObject originPrefab = null;
+                    _lookedAtContainer.TryExtract(out originPrefab);
+
+                    if (originPrefab != null)
+                    {
+                        Vector3 spawnPos = _lookedAtContainer.transform.position + Vector3.up * 0.5f;
+                        GameObject spawnedObj = Instantiate(originPrefab, spawnPos, Quaternion.identity);
+                        
+                        foreach (var c in spawnedObj.GetComponentsInChildren<Collider>())
+                        {
+                            c.enabled = true;
+                            c.isTrigger = false;
+                        }
+
+                        Rigidbody spawnRb = spawnedObj.GetComponent<Rigidbody>() ?? spawnedObj.GetComponentInParent<Rigidbody>();
+                        WorldObject spawnWo = spawnedObj.GetComponent<WorldObject>() ?? spawnedObj.GetComponentInParent<WorldObject>();
+
+                        if (spawnRb != null)
+                        {
+                            spawnRb.isKinematic = false;
+                            spawnRb.gameObject.SetActive(true);
+                            PickUp(spawnRb, spawnWo); // 瞬间吸附
+                        }
+                        ClearPrompts();
+                        return;
+                    }
+                }
+            }
+        }
+        // ───────────────────────────────────────────────────────────────────
+
+        // 2. 常规投掷逻辑（原汁原味）
         if (_carriedRb != null && !_isPlacementMode)
         {
             if (Input.GetKeyDown(KeyCode.Q))
@@ -968,6 +1037,7 @@ public class InteractionSystem : MonoBehaviour
             _throwChargeTimer = 0f;
         }
 
+        // 3. Tab 放置模式及旋转检测（原汁原味）
         if (_carriedRb != null)
         {
             if (Input.GetKeyDown(KeyCode.Tab))
@@ -1005,6 +1075,7 @@ public class InteractionSystem : MonoBehaviour
             ExitPlacementMode();
         }
 
+        // 4. 左键松开执行放下或 Tab 放置
         if (Input.GetMouseButtonUp(0) && _carriedRb != null)
         {
             if (_isPlacementMode && _isPlacementValid)
@@ -1017,6 +1088,7 @@ public class InteractionSystem : MonoBehaviour
             }
         }
 
+        // 5. E 键装入背包逻辑
         if (_carriedRb != null && !_isPlacementMode)
         {
             if (Input.GetKeyDown(KeyCode.E) && _carriedWo != null && _carriedWo.collectable)
@@ -1027,7 +1099,8 @@ public class InteractionSystem : MonoBehaviour
             }
         }
 
-        if (Input.GetMouseButtonDown(1))
+        // 6. 常规物体的右键互动行为（只有在【没看着盒子】时才会触发）
+        if (Input.GetMouseButtonDown(1) && _lookedAtContainer == null)
         {
             if (_lookedAt != null && _lookedAt.interactable)
             {
@@ -1302,9 +1375,25 @@ public class InteractionSystem : MonoBehaviour
 
         RestoreCarryFriction();
 
-        // Re-enable colliders before restoring physics
+        // 🌟 终极防卡位排查：强制把被关掉的 Collider 重新安全唤醒
         SetCarriedCollidersEnabled(true);
 
+        // 🌟 核心防爆锁：在松开的这一瞬间，如果物体蹭到了地里或别的碰撞体内部，
+        // 我们不使用复杂的射线去算脱离向量，而是直接在这一帧的物理渲染树里，
+        // 强行把物体的 Rigidbody 速度、角速度无差别强制洗白清零！
+        _carriedRb.velocity = Vector3.zero;
+        _carriedRb.angularVelocity = Vector3.zero;
+
+        // 🌟 保底强制位置修正：检查物体是不是陷进地里太深了
+        // 如果手持物体松手时处于极度危险的重叠状态，我们轻轻将它往相机的后方或上方挪动一小丢丢空气保护区
+        if (playerCamera != null)
+        {
+            Vector3 safetyPushDir = (playerCamera.transform.position - _carriedRb.transform.position).normalized;
+            // 仅仅往玩家方向微调 5 厘米，瞬间瓦解任何坚硬表面产生的“挤压弹飞惯性”
+            _carriedRb.transform.position += Vector3.up * 0.05f + safetyPushDir * 0.02f;
+        }
+
+        // 还原基本物理状态
         _carriedRb.isKinematic = _rbWasKinematic;
         _carriedRb.useGravity = _rbHadGravity;
         _carriedRb.interpolation = _rbInterpolation;
@@ -1312,13 +1401,20 @@ public class InteractionSystem : MonoBehaviour
         _carriedRb.drag = _rbOriginalDrag;
         _carriedRb.angularDrag = _rbOriginalAngularDrag;
 
+        // 🌟 再次洗白，确保刚体在脱离手部控制的第一帧拥有绝对干净、安分的初始动力学状态
+        if (!_carriedRb.isKinematic)
+        {
+            _carriedRb.velocity = Vector3.zero;
+            _carriedRb.angularVelocity = Vector3.zero;
+        }
+
         _carriedWo?.SetCarriedState(false);
         _carriedWo?.TriggerDrop(gameObject);
 
         PlayerController pc = GetComponent<PlayerController>();
-        if (pc != null)
-            pc.SpeedMultiplier = 1f;
+        if (pc != null) pc.SpeedMultiplier = 1f;
 
+        // 彻底清空手部引用缓存
         _carriedTransform = null;
         _carriedWo = null;
         _carriedRb = null;
@@ -1329,6 +1425,8 @@ public class InteractionSystem : MonoBehaviour
         _carryRayDistance = 0f;
         _carryPitchRollOffset = Quaternion.identity;
         _carriedRadius = 0f;
+
+        Physics.SyncTransforms(); // 让物理世界在松手完毕后强行保持冷静并刷新
     }
 
     void SetCarriedCollidersEnabled(bool enabled)

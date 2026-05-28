@@ -83,22 +83,7 @@ namespace EnvironmentSystem
                 MarkDirtyAndSave(chunk);
             }
 
-            EditorGUILayout.Space();
 
-            // Draw Biome Button (Pastel Yellow/Orange)
-            GUI.backgroundColor = new Color(0.9f, 0.75f, 0.4f);
-            if (GUILayout.Button("🌍 仅重新生成群系颜色 (Regenerate Biome Colormap)", GUILayout.Height(36)))
-            {
-                Undo.RecordObject(chunk, "Regenerate Biome Colors");
-                if (chunk.TryGetComponent<MeshFilter>(out var filter) && filter.sharedMesh != null)
-                {
-                    Undo.RecordObject(filter.sharedMesh, "Regenerate Biome Colors Mesh");
-                }
-
-                chunk.RegenerateBiomeColors();
-
-                MarkDirtyAndSave(chunk);
-            }
 
             // Restore GUI color
             GUI.backgroundColor = defaultBg;

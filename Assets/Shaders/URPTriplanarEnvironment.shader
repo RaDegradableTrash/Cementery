@@ -207,7 +207,8 @@ Shader "Environment/URPTriplanarEnvironment"
                 blendWeights /= (blendWeights.x + blendWeights.y + blendWeights.z); // Normalize
 
                 // Sample Albedo
-                float4 albedo = SampleTriplanar(_MainTex, sampler_MainTex, input.positionWS, blendWeights, _TriplanarScale) * _Color;
+                float3 activeColor = input.color.a > 0.05 ? input.color.rgb : _Color.rgb;
+                float4 albedo = SampleTriplanar(_MainTex, sampler_MainTex, input.positionWS, blendWeights, _TriplanarScale);
 
                 // 🌟 Compacted Sand Ambient Occlusion (脚印/轮胎痕迹压实暗部遮蔽)
                 // Darkens the base albedo based on depth of indentation, making footprint channels beautifully and deeply visible!
@@ -236,9 +237,11 @@ Shader "Environment/URPTriplanarEnvironment"
                 Light mainLight = GetMainLight(TransformWorldToShadowCoord(input.positionWS));
                 float NdotL = saturate(dot(normalWS, mainLight.direction));
                 
-                // --- JOURNEY STYLE CLEAN SOFT GRADIENT TINT ---
-                // Blends a velvety warm sun-kissed gradient exactly like Journey's beautiful stylized look
-                float3 baseWarmColor = lerp(float3(0.92, 0.68, 0.40), float3(0.96, 0.82, 0.58), NdotL);
+                // --- BIOME & JOURNEY STYLE CLEAN SOFT GRADIENT TINT ---
+                // We use the Biome color as the base, and apply a soft gradient tint based on light angle
+                float3 shadowTint = activeColor * 0.75;
+                float3 litTint = activeColor * 1.1;
+                float3 baseWarmColor = lerp(shadowTint, litTint, NdotL);
                 albedo.rgb = albedo.rgb * baseWarmColor;
 
                 // Calculate dynamic cloud shadow factor
