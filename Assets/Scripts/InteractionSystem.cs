@@ -957,6 +957,7 @@ public class InteractionSystem : MonoBehaviour
 
         // ── 🌟 彻底隔离的盒子存储交互逻辑（完美适配全新数据驱动单物体架构） 🌟 ──
         // ── 🌟 盒子右键无缝存储机制 🌟 ──────────────────────────────────
+        // ── 🌟 盒子右键无缝存储机制（5参数防崩溃动画版） 🌟 ────────────────────
         if (_lookedAtContainer != null && Input.GetMouseButtonDown(1))
         {
             // 情况一：手里抓着齿轮，执行安全放入
@@ -967,12 +968,16 @@ public class InteractionSystem : MonoBehaviour
 
                 if (_lookedAtContainer.CanStore(_carriedWo, out matchedPrefab, out itemSize))
                 {
-                    // 🌟 瘦身后严丝合缝的 2 参数调用，直接绝杀 CS1501 编译报错
-                    if (_lookedAtContainer.TryInsert(matchedPrefab, itemSize))
+                    // 抓取手持物体的原始 Scale 以及它当前的世界坐标和旋转
+                    Vector3 originalScale = _carriedWo.transform.localScale;
+                    Vector3 currentWorldPos = _carriedTransform.position;
+                    Quaternion currentWorldRot = _carriedTransform.rotation;
+
+                    if (_lookedAtContainer.TryInsert(matchedPrefab, itemSize, originalScale, currentWorldPos, currentWorldRot))
                     {
                         GameObject objToDestroy = _carriedRb.gameObject;
-                        Drop(); // 释放物理手部缓存
-                        Destroy(objToDestroy); // 毁灭手里的真实齿轮
+                        Drop(); // 释放物理手部连接
+                        Destroy(objToDestroy); // 安全毁灭手里的齿轮
                         ClearPrompts();
                         return;
                     }
@@ -988,6 +993,7 @@ public class InteractionSystem : MonoBehaviour
 
                     if (originPrefab != null)
                     {
+                        // 在盒子中央上方 0.5 米实例化一个拥有完美独立物理的新齿轮
                         Vector3 spawnPos = _lookedAtContainer.transform.position + Vector3.up * 0.5f;
                         GameObject spawnedObj = Instantiate(originPrefab, spawnPos, Quaternion.identity);
                         
@@ -1004,7 +1010,7 @@ public class InteractionSystem : MonoBehaviour
                         {
                             spawnRb.isKinematic = false;
                             spawnRb.gameObject.SetActive(true);
-                            PickUp(spawnRb, spawnWo); // 瞬间吸附
+                            PickUp(spawnRb, spawnWo); // 直接吸附在手心里
                         }
                         ClearPrompts();
                         return;

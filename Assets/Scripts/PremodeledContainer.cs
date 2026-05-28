@@ -4,40 +4,31 @@ using UnityEngine;
 public class PremodeledContainer : MonoBehaviour
 {
     [System.Serializable]
-    public class ContainerSkinStage
+    public class RuntimeStoredItem
     {
-        [Tooltip("该模型对应的齿轮完美数量（如：空盒子为0，一槽成品盒子为1...）")]
-        public int gearCount;
-        [Tooltip("你在场景里做好的对应成品盒子物体（如 CabinetWithThreeGear4）")]
-        public GameObject skinRootObject;
+        public GameObject spawnedVisual;   // 留在盒子里的纯视觉网格
+        public GameObject originPrefab;    // 原始 Prefab 资产，用于取出时还给手
+        public int size;                    // 占用的体积（默认1）
     }
 
     [Header("Acceptable Settings")]
     [Tooltip("此容器允许放入的物体 Prefab 列表（如项目资源里的 Gear4 预制体）")]
     public List<GameObject> allowedPrefabs;
 
-    [Header("Visual Skin Stages (成品盒子外观配置)")]
-    [Tooltip("请把你的 0~5 槽成品盒子按顺序拖进这里")]
-    public List<ContainerSkinStage> skinStages;
+    [Header("Slot References (核心：只认这 5 个点)")]
+    [Tooltip("直接把当前这一个盒子底下的 GearSpot1 ~ GearSpot5 拖进这里！")]
+    public List<Transform> placementSlots;
 
-    // 运行时仅记录当前存入的齿轮数量
-    private int _currentGearCount = 0;
-    private int _maxCapacity = 5;
+    [Header("Animation Settings")]
+    public float transitionDuration = 0.22f;
+    public AnimationCurve transitionCurve = AnimationCurve.EaseInOut(0, 0, 1, 1);
 
-    public bool IsEmpty => _currentGearCount == 0;
-    public bool IsFull => _currentGearCount >= _maxCapacity;
+    // 运行时严格记录当前盒子里存进去的齿轮
+    private List<RuntimeStoredItem> _storedItems = new List<RuntimeStoredItem>();
+    private int _occupiedSlotCount = 0;
 
-    void Awake()
-    {
-        // 计算当前配置里的最大容量
-        _maxCapacity = 0;
-        foreach (var stage in skinStages)
-        {
-            if (stage.gearCount > _maxCapacity) _maxCapacity = stage.gearCount;
-        }
-
-        UpdateSkinVisuals();
-    }
+    public bool IsEmpty => _storedItems.Count == 0;
+    public int RemainingSlots => placementSlots.Count - _occupiedSlotCount;
 
     /// <summary>
     /// 判断手里的物体是否可以放入此盒子
@@ -47,7 +38,7 @@ public class PremodeledContainer : MonoBehaviour
         matchedPrefab = null;
         itemSize = 1;
 
-        if (carriedWo == null || IsFull) return false;
+        if (carriedWo == null) return false;
 
         // 获取物体的占用体积
         if (carriedWo.collectItemData != null && carriedWo.collectItemData.localOffsets != null)
@@ -56,14 +47,19 @@ public class PremodeledContainer : MonoBehaviour
             if (itemSize == 0) itemSize = 1;
         }
 
-        // 判断塞入后是否会超出这个收纳箱的最高上限
-        if (_currentGearCount + itemSize > _maxCapacity) return false;
+        // 检查剩余槽位是否足够
+        if (RemainingSlots < itemSize) return false;
 
-        // 检查物品是否在允许的列表中
-        if (allowedPrefabs == null) return false;
+        if (allowedPrefabs == null || allowedPrefabs.Count == 0) return false;
+
+        // 宽松的名字模糊配对，防止 (Clone) 后缀干扰
+        string carriedName = carriedWo.gameObject.name.ToLower().Replace("(clone)", "").Trim();
         foreach (var prefab in allowedPrefabs)
         {
-            if (prefab != null && carriedWo.gameObject.name.StartsWith(prefab.name))
+            if (prefab == null) continue;
+            string prefabName = prefab.name.ToLower().Trim();
+
+            if (carriedName.StartsWith(prefabName) || prefabName.StartsWith(carriedName))
             {
                 matchedPrefab = prefab;
                 return true;
@@ -76,14 +72,36 @@ public class PremodeledContainer : MonoBehaviour
     /// <summary>
     /// 放入物品
     /// </summary>
-    public bool TryInsert(GameObject prefab, int size)
+    public bool TryInsert(GameObject prefab, int size, Vector3 pickupScale, Vector3 currentWorldPos, Quaternion currentWorldRot)
     {
-        if (_currentGearCount + size > _maxCapacity) return false;
+        if (RemainingSlots < size) return false;
 
-        _currentGearCount += size;
+        int targetSlotIndex = _occupiedSlotCount;
+        if (targetSlotIndex >= placementSlots.Count || targetSlotIndex + size > placementSlots.Count) return false;
+
+        Transform targetSpot = placementSlots[targetSlotIndex];
+
+        // 1. 生成纯视觉体（先留在世界坐标作为动画起点）
+        GameObject newVisual = Instantiate(prefab, currentWorldPos, currentWorldRot);
         
-        // 瞬间切换视觉材质或成品模型，零碰撞，绝对安全
-        UpdateSkinVisuals();
+        // 🌟 降维打击：直接剥离所有碰撞体和刚体，让它变成纯粹老实的“幽灵渲染网格”，绝不引发物理崩溃！
+        StripAllPhysicsComponents(newVisual);
+
+        _storedItems.Add(new RuntimeStoredItem
+        {
+            spawnedVisual = newVisual,
+            originPrefab = prefab,
+            size = size
+        });
+
+        _occupiedSlotCount += size;
+
+        // 2. 飞入对应的 Slot 点
+        if (newVisual != null && targetSpot != null)
+        {
+            StartCoroutine(AnimateToSpotCo(newVisual, targetSpot, pickupScale));
+        }
+
         return true;
     }
 
@@ -95,28 +113,64 @@ public class PremodeledContainer : MonoBehaviour
         originPrefab = null;
         if (IsEmpty) return null;
 
-        _currentGearCount--;
-        UpdateSkinVisuals();
+        int lastIndex = _storedItems.Count - 1;
+        RuntimeStoredItem lastItem = _storedItems[lastIndex];
+        _storedItems.RemoveAt(lastIndex);
 
-        // 默认返回允许放入的第一个预制体还给玩家的手
-        if (allowedPrefabs != null && allowedPrefabs.Count > 0)
+        _occupiedSlotCount -= lastItem.size;
+        originPrefab = lastItem.originPrefab;
+
+        if (lastItem.spawnedVisual != null)
         {
-            originPrefab = allowedPrefabs[0];
+            Destroy(lastItem.spawnedVisual);
         }
 
         return originPrefab;
     }
 
-    private void UpdateSkinVisuals()
+    private System.Collections.IEnumerator AnimateToSpotCo(GameObject visual, Transform targetSpot, Vector3 keepScale)
     {
-        if (skinStages == null || skinStages.Count == 0) return;
+        float elapsed = 0f;
+        Vector3 startPos = visual.transform.position;
+        Quaternion startRot = visual.transform.rotation;
 
-        foreach (var stage in skinStages)
+        while (elapsed < transitionDuration)
         {
-            if (stage.skinRootObject != null)
-            {
-                stage.skinRootObject.SetActive(stage.gearCount == _currentGearCount);
-            }
+            if (visual == null || targetSpot == null) yield break;
+
+            elapsed += Time.deltaTime;
+            float t = Mathf.Clamp01(elapsed / transitionDuration);
+            float evaluatedT = transitionCurve.Evaluate(t);
+
+            visual.transform.position = Vector3.Lerp(startPos, targetSpot.position, evaluatedT);
+            visual.transform.rotation = Quaternion.Slerp(startRot, targetSpot.rotation, evaluatedT);
+            visual.transform.localScale = keepScale;
+
+            yield return null;
         }
+
+        if (visual != null && targetSpot != null)
+        {
+            visual.transform.SetParent(targetSpot);
+            visual.transform.localPosition = Vector3.zero;
+            visual.transform.localRotation = Quaternion.identity;
+            visual.transform.localScale = keepScale;
+        }
+    }
+
+    private void StripAllPhysicsComponents(GameObject obj)
+    {
+        // 强制摧毁刚体，防止警告
+        Rigidbody rb = obj.GetComponent<Rigidbody>() ?? obj.GetComponentInParent<Rigidbody>();
+        if (rb != null) Destroy(rb);
+
+        // 强制关闭/摧毁所有层级的碰撞箱，防止 Non-convex MeshCollider 报错掐断执行流
+        foreach (var col in obj.GetComponentsInChildren<Collider>(true))
+        {
+            Destroy(col);
+        }
+
+        WorldObject wo = obj.GetComponent<WorldObject>() ?? obj.GetComponentInParent<WorldObject>();
+        if (wo != null) Destroy(wo);
     }
 }

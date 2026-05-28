@@ -7,53 +7,45 @@ public class PremodeledContainerEditor : Editor
 {
     public override void OnInspectorGUI()
     {
-        // 绘制基础公开皮肤面板（如 AllowedPrefabs, Skin Stages 列表）
         DrawDefaultInspector();
 
         PremodeledContainer container = (PremodeledContainer)target;
 
         GUILayout.Space(12);
-        GUI.backgroundColor = new Color(0.15f, 0.6f, 1f); // 换个好看的蓝色按钮
+        GUI.backgroundColor = new Color(0.1f, 0.75f, 0.5f); // 醒目的绿色按钮
 
-        if (GUILayout.Button("⚡ 一键快速关联层级下的成品外观子物体", GUILayout.Height(30)))
+        if (GUILayout.Button("⚡ 一键秒级抓取当前盒子内部的 GearSpots", GUILayout.Height(35)))
         {
-            Undo.RecordObject(container, "Auto Setup Skin Stages");
+            Undo.RecordObject(container, "Grab Current Container Slots");
 
-            if (container.skinStages == null)
-                container.skinStages = new List<PremodeledContainer.ContainerSkinStage>();
+            if (container.placementSlots == null)
+                container.placementSlots = new List<Transform>();
             else
-                container.skinStages.Clear();
+                container.placementSlots.Clear();
 
-            // 遍历并抓取当前盒子底下的子网格体成品状态
-            foreach (Transform child in container.transform)
-            {
-                // 排除自带的物理外框 Cube，只抓取带有关卡状态的 Cabinet 变体
-                if (child.name.ToLower().Contains("cube")) continue;
+            FindSpotsRecursively(container.transform, container.placementSlots);
 
-                int inferredCount = 0;
-                
-                // 智能从名字推断它包含了几个齿轮
-                if (child.name.Contains("One") || child.name.Contains("1")) inferredCount = 1;
-                else if (child.name.Contains("Two") || child.name.Contains("2")) inferredCount = 2;
-                else if (child.name.Contains("Three") || child.name.Contains("3")) inferredCount = 3;
-                else if (child.name.Contains("Four") || child.name.Contains("4")) inferredCount = 4;
-                else if (child.name.Contains("Five") || child.name.Contains("5")) inferredCount = 5;
-
-                PremodeledContainer.ContainerSkinStage newStage = new PremodeledContainer.ContainerSkinStage
-                {
-                    gearCount = inferredCount,
-                    skinRootObject = child.gameObject
-                };
-
-                container.skinStages.Add(newStage);
-            }
-
-            // 按数量进行严谨排序
-            container.skinStages.Sort((a, b) => a.gearCount.CompareTo(b.gearCount));
+            // 按名字自然字典序排序
+            container.placementSlots.Sort((a, b) => string.Compare(a.name, b.name, System.StringComparison.Ordinal));
 
             EditorUtility.SetDirty(container);
-            Debug.Log("<color=#40A0FF><b>[SkinTool]</b></color> 成品盒子视觉节点自动关联成功！");
+            Debug.Log($"<color=#10FF80><b>[ContainerTool]</b></color> 成功！已为当前盒子关联了 <b>{container.placementSlots.Count}</b> 个放置点。");
         }
         GUI.backgroundColor = Color.white;
+    }
+
+    private void FindSpotsRecursively(Transform current, List<Transform> resultList)
+    {
+        foreach (Transform child in current)
+        {
+            if (child.name.ToLower().Contains("spot"))
+            {
+                resultList.Add(child);
+            }
+            if (child.childCount > 0)
+            {
+                FindSpotsRecursively(child, resultList);
+            }
+        }
     }
 }
