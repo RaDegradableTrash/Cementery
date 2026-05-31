@@ -21,12 +21,17 @@ public class SnowAccumulationManager : MonoBehaviour
         if (Instance == null) Instance = this;
         else Destroy(gameObject);
 
+        if (modificationShader == null)
+        {
+            modificationShader = Shader.Find("Hidden/SnowModification");
+        }
+
         InitializeMap();
     }
 
     private void InitializeMap()
     {
-        snowHeightMap = new RenderTexture(mapResolution, mapResolution, 0, RenderTextureFormat.RFloat);
+        snowHeightMap = new RenderTexture(mapResolution, mapResolution, 0, RenderTextureFormat.ARGBFloat);
         snowHeightMap.name = "SnowHeightMap";
         snowHeightMap.Create();
 
@@ -54,9 +59,12 @@ public class SnowAccumulationManager : MonoBehaviour
         }
     }
 
-    private void UpdateGlobalShaderParams()
+    public void UpdateGlobalShaderParams()
     {
-        Shader.SetGlobalTexture("_GlobalSnowHeightMap", snowHeightMap);
+        if (snowHeightMap != null)
+        {
+            Shader.SetGlobalTexture("_GlobalSnowHeightMap", snowHeightMap);
+        }
         Vector4 snowParams = new Vector4(mapCenter.x, mapCenter.z, mapWorldSize, 1f / mapWorldSize);
         Shader.SetGlobalVector("_GlobalSnowMapParams", snowParams);
     }
@@ -88,13 +96,6 @@ public class SnowAccumulationManager : MonoBehaviour
         Graphics.Blit(snowHeightMap, tempRT, modificationMaterial, 0);
         Graphics.Blit(tempRT, snowHeightMap);
 
-        // Pass 1: Multiple Blur Iterations for smooth transition (5 times)
-        for (int i = 0; i < 5; i++)
-        {
-            Graphics.Blit(snowHeightMap, tempRT, modificationMaterial, 1);
-            Graphics.Blit(tempRT, snowHeightMap);
-        }
-
         RenderTexture.ReleaseTemporary(tempRT);
     }
 
@@ -109,5 +110,35 @@ public class SnowAccumulationManager : MonoBehaviour
         {
             Destroy(modificationMaterial);
         }
+    }
+
+    // --- 调试代码：用于输出 RenderTexture 中心的最大高度 ---
+    private void Update()
+    {
+        UpdateGlobalShaderParams(); // Ensure params are always synced, even if mapCenter is modified externally
+        
+        if (Input.GetKeyDown(KeyCode.P))
+        {
+            DebugSnowHeight();
+        }
+    }
+
+    private void DebugSnowHeight()
+    {
+        if (snowHeightMap == null) return;
+        RenderTexture.active = snowHeightMap;
+        Texture2D tex = new Texture2D(snowHeightMap.width, snowHeightMap.height, TextureFormat.RGBAFloat, false);
+        tex.ReadPixels(new Rect(0, 0, snowHeightMap.width, snowHeightMap.height), 0, 0);
+        tex.Apply();
+        RenderTexture.active = null;
+
+        float maxHeight = 0f;
+        Color[] pixels = tex.GetPixels();
+        foreach (var p in pixels)
+        {
+            if (p.r > maxHeight) maxHeight = p.r;
+        }
+        Debug.Log($"[SnowDebug] 当前高度图中探测到的最高雪层厚度为: {maxHeight}。Shader Cutoff 为 0.05");
+        Destroy(tex);
     }
 }

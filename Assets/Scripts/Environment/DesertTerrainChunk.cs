@@ -140,6 +140,10 @@ namespace EnvironmentSystem
             {
                 Build();
             }
+            else
+            {
+                UpdateSnowLayer(filter.sharedMesh);
+            }
             EnsureShaderMigration();
         }
 
@@ -923,6 +927,8 @@ namespace EnvironmentSystem
                 col.sharedMesh = null;
                 col.sharedMesh = mesh;
             }
+
+            UpdateSnowLayer(mesh);
 
             if (TryGetComponent<MeshRenderer>(out var mr))
             {

@@ -4,7 +4,7 @@ Shader "Environment/SnowBlanket"
     {
         _LightGreen ("Light Green", Color) = (0.6, 1.0, 0.6, 1.0)
         _DarkGreen ("Dark Green", Color) = (0.1, 0.4, 0.1, 1.0)
-        _DisplacementScale ("Height Displacement", Float) = 1.5
+        _DisplacementScale ("Height Displacement", Float) = 0.6
         _NormalBlend ("Normal Smoothness", Range(0, 1)) = 0.85
         _Cutoff ("Snow Threshold", Range(0, 0.1)) = 0.05
     }
@@ -75,9 +75,8 @@ Shader "Environment/SnowBlanket"
                 // --- Vertex Displacement ---
                 float h = GetSnowHeight(positionWS);
                 
-                // Push vertices up based on heightmap (using world UP for gravity-based piling)
-                // We only displace if h > cutoff to ensure flat base
-                float displacement = max(0.0, h - _Cutoff) * _DisplacementScale;
+                // Use smoothstep to prevent harsh spikes (0.05 to 0.2)
+                float displacement = smoothstep(_Cutoff, _Cutoff + 0.15, h) * _DisplacementScale;
                 positionWS.y += displacement;
                 
                 output.positionCS = TransformWorldToHClip(positionWS);
@@ -100,7 +99,7 @@ Shader "Environment/SnowBlanket"
                 float3 upNormal = float3(0, 1, 0);
                 
                 // The thicker the snow, the more it points UP to hide the sharp terrain geometry
-                float blendFactor = saturate(h * 2.0) * _NormalBlend;
+                float blendFactor = saturate(h * 1.5) * _NormalBlend * 0.7; // Limit normal blend strength to prevent flipping
                 float3 finalNormalWS = normalize(lerp(worldNormal, upNormal, blendFactor));
 
                 // 3. Snow PBR Approximation (High diffuse, low specular, high ambient)

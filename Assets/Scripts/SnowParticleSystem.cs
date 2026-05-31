@@ -6,8 +6,8 @@ using EnvironmentSystem;
 public class SnowParticleSystem : MonoBehaviour
 {
     [Header("Snow Settings")]
-    public float particleSnowRadius = 2.5f; // 大范围涂抹，形成膏状连接
-    public float particleSnowAmount = 0.015f; // 极致平滑累积
+    public float particleSnowRadius = 8.5f; // 扩大半径以覆盖更多顶点，避免低多边形尖刺
+    public float particleSnowAmount = 0.025f; // 增加单次厚度补偿半径扩大的稀释
 
     private ParticleSystem partSystem;
     private List<ParticleCollisionEvent> collisionEvents;
@@ -34,7 +34,7 @@ public class SnowParticleSystem : MonoBehaviour
             mapCenter = SnowAccumulationManager.Instance.mapCenter;
         }
         
-        transform.position = new Vector3(mapCenter.x, 200f, mapCenter.z); // Cloud height
+        transform.position = new Vector3(mapCenter.x, 50f, mapCenter.z); // Cloud height
         transform.rotation = Quaternion.Euler(90f, 0f, 0f); // Pointing straight down (Z down)
 
         // 2. Main Module setup
@@ -103,6 +103,13 @@ public class SnowParticleSystem : MonoBehaviour
             Vector3 pos = collisionEvents[i].intersection;
 
             // 2D Base Layer Support
+            if (SnowAccumulationManager.Instance == null)
+            {
+                GameObject managerGO = new GameObject("[SYSTEM] SnowAccumulationManager");
+                var manager = managerGO.AddComponent<SnowAccumulationManager>();
+                manager.mapCenter = pos; // Align the 100x100 area exactly to where the snow is falling!
+            }
+            
             if (SnowAccumulationManager.Instance != null)
             {
                 SnowAccumulationManager.Instance.AddSnowAtPoint(pos, particleSnowRadius, particleSnowAmount);
