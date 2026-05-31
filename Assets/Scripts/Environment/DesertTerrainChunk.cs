@@ -61,6 +61,7 @@ namespace EnvironmentSystem
         public int width = 64;       // Vertices along X
         public int depth = 64;       // Vertices along Z
         public float cellSize = 2f;  // Space between vertices (meters)
+        public int snowResolutionMultiplier = 4; // Modifier for high-res snow mesh
 
         [Header("Global Seed")]
         public int seed = 42;
@@ -133,19 +134,33 @@ namespace EnvironmentSystem
         private bool _asyncBuildRunning = false;
         private bool _asyncBuildQueued  = false;
 
-        private void Start()
+
+
+    public void UpdateResolution()
+    {
+        if (_asyncBuildRunning) return;
+
+        Transform snowLayerTransform = transform.Find("SnowLayer");
+        if (snowLayerTransform != null)
         {
-            MeshFilter filter = GetComponent<MeshFilter>();
-            if (filter == null || filter.sharedMesh == null)
+            MeshFilter filter = snowLayerTransform.GetComponent<MeshFilter>();
+            if (filter != null && filter.sharedMesh != null)
             {
-                Build();
+                // Check if current mesh matches expected high-res vertex count
+                int expectedVertices = (width * snowResolutionMultiplier + 1) * (depth * snowResolutionMultiplier + 1);
+                // Also account for skirts
+                int expectedTotal = expectedVertices + 2 * (depth * snowResolutionMultiplier + 1) + 2 * (width * snowResolutionMultiplier + 1);
+                
+                if (filter.sharedMesh.vertexCount == expectedTotal)
+                {
+                    return; // Already correct resolution, no need to rebuild
+                }
             }
-            else
-            {
-                UpdateSnowLayer(filter.sharedMesh);
-            }
-            EnsureShaderMigration();
         }
+        
+        // Needs rebuild
+        StartCoroutine(BuildAsyncCoroutine(delayFrames: 1));
+    }
 
         private void EnsureShaderMigration()
         {
@@ -197,6 +212,21 @@ namespace EnvironmentSystem
         {
             SceneManager.sceneLoaded += OnSceneLoaded;
             ChunkRegistry.Register(this);
+            UpdateResolution();
+        }
+
+        private void Start()
+        {
+            MeshFilter filter = GetComponent<MeshFilter>();
+            if (filter == null || filter.sharedMesh == null)
+            {
+                Build();
+            }
+            else
+            {
+                UpdateResolution(); // Ensure high-res mesh is built if missing
+            }
+            EnsureShaderMigration();
         }
 
         private void OnDisable()
@@ -997,6 +1027,12 @@ namespace EnvironmentSystem
             if (crestPosition <= 0.05f) crestPosition = 0.05f;
             if (crestPosition >= 0.95f) crestPosition = 0.95f;
             if (windwardExponent < 1f) windwardExponent = 1f;
+            
+            // Hot-swap when changing resolution in Inspector
+            if (Application.isPlaying && gameObject.activeInHierarchy)
+            {
+                UpdateResolution();
+            }
             if (blendWidth < 1) blendWidth = 1;
             if (detailScale < 0.1f) detailScale = 0.1f;
 
@@ -1070,13 +1106,19 @@ namespace EnvironmentSystem
             }
         }
 
-        private struct MeshBuildResult
-        {
-            public Vector3[] vertices;
-            public Vector2[] uvs;
-            public Vector3[] normals;
-            public int[]     triangles;
-        }
+    private struct MeshBuildResult
+    {
+        public Vector3[] vertices;
+        public Vector2[] uvs;
+        public Vector3[] normals;
+        public int[] triangles;
+    }
+
+    private struct ChunkBuildResult
+    {
+        public MeshBuildResult terrainMesh;
+        public MeshBuildResult snowMesh;
+    }
 
         // ── Static thread-safe height sampling (mirror of instance methods, no Unity API) ──
 
@@ -1493,8 +1535,18 @@ namespace EnvironmentSystem
             var rdP = TerrainHeightParams.Capture(rdc);
             var ruP = TerrainHeightParams.Capture(ruc);
 
+            var snowSelfP = selfP;
+            snowSelfP.width *= snowResolutionMultiplier;
+            snowSelfP.depth *= snowResolutionMultiplier;
+            snowSelfP.cellSize /= snowResolutionMultiplier;
+
             // ── 2. Launch background computation (no Unity API inside Task) ──────
-            var task = Task.Run(() => ComputeMeshData(selfP, lP, rP, dP, uP, ldP, luP, rdP, ruP));
+            var task = Task.Run(() => {
+                var res = new ChunkBuildResult();
+                res.terrainMesh = ComputeMeshData(selfP, lP, rP, dP, uP, ldP, luP, rdP, ruP);
+                res.snowMesh = ComputeMeshData(snowSelfP, lP, rP, dP, uP, ldP, luP, rdP, ruP);
+                return res;
+            });
 
             // ── 3. Yield each frame until done (main thread stays free) ──────────
             while (!task.IsCompleted)
@@ -1514,7 +1566,7 @@ namespace EnvironmentSystem
             }
 
             // ── 4. Apply result on main thread in <2 ms ───────────────────────────
-            MeshBuildResult result = task.Result;
+            ChunkBuildResult result = task.Result;
             ApplyMeshFromResult(result);
             _asyncBuildRunning = false;
 
@@ -1539,7 +1591,7 @@ namespace EnvironmentSystem
         /// Applies pre-computed mesh arrays to the MeshFilter and MeshCollider.
         /// Called on the main thread; runs in under 2 ms.
         /// </summary>
-        private void ApplyMeshFromResult(MeshBuildResult result)
+        private void ApplyMeshFromResult(ChunkBuildResult result)
         {
             if (!TryGetComponent<MeshFilter>(out var filter)) return;
 
@@ -1563,13 +1615,13 @@ namespace EnvironmentSystem
                 filter.sharedMesh = mesh;
             }
 
-            if (result.vertices.Length > 65535)
+            if (result.terrainMesh.vertices.Length > 65535)
                 mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
 
-            mesh.vertices  = result.vertices;
-            mesh.uv        = result.uvs;
-            mesh.normals   = result.normals;
-            mesh.triangles = result.triangles;
+            mesh.vertices  = result.terrainMesh.vertices;
+            mesh.uv        = result.terrainMesh.uvs;
+            mesh.normals   = result.terrainMesh.normals;
+            mesh.triangles = result.terrainMesh.triangles;
             mesh.RecalculateBounds();
             mesh.UploadMeshData(false);
 
@@ -1579,7 +1631,17 @@ namespace EnvironmentSystem
                 col.sharedMesh = mesh;
             }
 
-            UpdateSnowLayer(mesh);
+            Mesh snowMesh = new Mesh { name = "SnowLayerMesh" };
+            if (result.snowMesh.vertices.Length > 65535)
+                snowMesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+            snowMesh.vertices = result.snowMesh.vertices;
+            snowMesh.uv = result.snowMesh.uvs;
+            snowMesh.normals = result.snowMesh.normals;
+            snowMesh.triangles = result.snowMesh.triangles;
+            snowMesh.RecalculateBounds();
+            snowMesh.UploadMeshData(false);
+
+            UpdateSnowLayer(snowMesh);
         }
 
         // ── Snow Layer Management (Restored for 2D Base) ──────────────────────────
@@ -1605,6 +1667,10 @@ namespace EnvironmentSystem
 
             MeshFilter filter = snowLayerObj.GetComponent<MeshFilter>();
             if (filter == null) filter = snowLayerObj.AddComponent<MeshFilter>();
+            if (filter.sharedMesh != null && filter.sharedMesh != originalMesh)
+            {
+                Destroy(filter.sharedMesh);
+            }
             filter.sharedMesh = originalMesh;
 
             MeshRenderer renderer = snowLayerObj.GetComponent<MeshRenderer>();

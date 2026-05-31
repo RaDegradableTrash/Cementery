@@ -23,9 +23,8 @@ Shader "Hidden/SnowModification"
                 float2 worldPos = (i.uv - 0.5) * _SnowMapParams.z + _SnowMapParams.xy;
                 float dist = distance(worldPos, _BrushParams.xz);
                 
-                // Domain Warping: Perturb the distance slightly based on noise
-                float noise = pseudoNoise(worldPos * 2.0);
-                float warpedRadius = _BrushParams.w * (0.8 + noise * 0.4); 
+                // Use a perfect smooth circle without noise to prevent high-frequency spikes
+                float warpedRadius = _BrushParams.w; 
                 
                 float t = saturate(1.0 - (dist / warpedRadius));
                 // Use a smoothstep blended with noise for muddy, irregular accumulation
@@ -45,9 +44,10 @@ Shader "Hidden/SnowModification"
             sampler2D _MainTex; float4 _MainTex_TexelSize;
             fixed4 frag (v2f i) : SV_Target {
                 float4 sum = 0;
-                for(int x=-1; x<=1; x++) for(int y=-1; y<=1; y++)
-                    sum += tex2D(_MainTex, i.uv + float2(x, y) * _MainTex_TexelSize.xy);
-                return sum / 9.0;
+                for(int x=-2; x<=2; x++) 
+                    for(int y=-2; y<=2; y++)
+                        sum += tex2D(_MainTex, i.uv + float2(x, y) * _MainTex_TexelSize.xy);
+                return sum / 25.0;
             }
             ENDCG
         }

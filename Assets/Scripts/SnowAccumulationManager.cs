@@ -13,8 +13,9 @@ public class SnowAccumulationManager : MonoBehaviour
     public Shader modificationShader;
     
     [Header("Runtime Debug (Do not set)")]
-    public RenderTexture snowHeightMap;
-    public Material modificationMaterial;
+    private RenderTexture snowHeightMap;
+    private Material modificationMaterial;
+    private bool _needsBlur = false;
 
     private void Awake()
     {
@@ -97,6 +98,8 @@ public class SnowAccumulationManager : MonoBehaviour
         Graphics.Blit(tempRT, snowHeightMap);
 
         RenderTexture.ReleaseTemporary(tempRT);
+        
+        _needsBlur = true; // Mark for a SINGLE blur pass this frame in LateUpdate
     }
 
     private void OnDestroy()
@@ -120,6 +123,33 @@ public class SnowAccumulationManager : MonoBehaviour
         if (Input.GetKeyDown(KeyCode.P))
         {
             DebugSnowHeight();
+        }
+
+        // 调试按键：按住 ] 键将雪变为绿色
+        if (Input.GetKey(KeyCode.RightBracket))
+        {
+            Shader.SetGlobalFloat("_SnowDebugGreen", 1f);
+        }
+        else
+        {
+            Shader.SetGlobalFloat("_SnowDebugGreen", 0f);
+        }
+    }
+
+    private void LateUpdate()
+    {
+        // 优化：将所有粒子的模糊操作集中到同一帧的最后执行一次！
+        // 既不会产生延迟闪烁（因为在渲染前执行），又把每帧几百次的 Blit 降为了 2 次！
+        if (_needsBlur && modificationMaterial != null && snowHeightMap != null)
+        {
+            RenderTexture tempRT = RenderTexture.GetTemporary(snowHeightMap.descriptor);
+            for (int i = 0; i < 2; i++) 
+            {
+                Graphics.Blit(snowHeightMap, tempRT, modificationMaterial, 1);
+                Graphics.Blit(tempRT, snowHeightMap);
+            }
+            RenderTexture.ReleaseTemporary(tempRT);
+            _needsBlur = false;
         }
     }
 
