@@ -12,15 +12,31 @@ public class SnowAccumulationManager : MonoBehaviour
     [Header("Resources")]
     public Shader modificationShader;
     
+    [Header("Occlusion Setup")]
+    public Transform playerCar;
+    public float carOcclusionRadius = 3.5f;
+    public float globalSnowRate = 0.05f;
+    
     [Header("Runtime Debug (Do not set)")]
+    public Material modificationMaterial;
     private RenderTexture snowHeightMap;
-    private Material modificationMaterial;
-    private bool _needsBlur = false;
+    private RenderTexture occlusionMap;
 
     private void Awake()
     {
         if (Instance == null) Instance = this;
         else Destroy(gameObject);
+
+        if (playerCar == null)
+        {
+            var carControl = FindObjectOfType<CarControl>();
+            if (carControl != null) playerCar = carControl.transform;
+            else 
+            {
+                GameObject p = GameObject.FindGameObjectWithTag("Player");
+                if (p != null) playerCar = p.transform;
+            }
+        }
 
         if (modificationShader == null)
         {
@@ -32,9 +48,22 @@ public class SnowAccumulationManager : MonoBehaviour
 
     private void InitializeMap()
     {
-        snowHeightMap = new RenderTexture(mapResolution, mapResolution, 0, RenderTextureFormat.ARGBFloat);
+        // 1. Create a 1024x1024 RenderTexture for high precision (10cm per pixel for 100x100m)
+        snowHeightMap = new RenderTexture(1024, 1024, 0, RenderTextureFormat.RHalf);
         snowHeightMap.name = "SnowHeightMap";
-        snowHeightMap.Create();
+        snowHeightMap.filterMode = FilterMode.Bilinear;
+        
+        // CLEAR garbage data from RenderTexture initialization!
+        RenderTexture.active = snowHeightMap;
+        GL.Clear(false, true, Color.clear);
+        RenderTexture.active = null;
+
+        // 2. Create the occlusion map
+        occlusionMap = new RenderTexture(512, 512, 0, RenderTextureFormat.RHalf);
+        occlusionMap.name = "OcclusionMap";
+        occlusionMap.filterMode = FilterMode.Bilinear;
+        occlusionMap.wrapMode = TextureWrapMode.Clamp;
+        occlusionMap.Create();
 
         ClearSnow();
 
@@ -66,8 +95,35 @@ public class SnowAccumulationManager : MonoBehaviour
         {
             Shader.SetGlobalTexture("_GlobalSnowHeightMap", snowHeightMap);
         }
+        if (modificationMaterial != null && occlusionMap != null)
+        {
+            modificationMaterial.SetTexture("_OcclusionMap", occlusionMap);
+        }
         Vector4 snowParams = new Vector4(mapCenter.x, mapCenter.z, mapWorldSize, 1f / mapWorldSize);
         Shader.SetGlobalVector("_GlobalSnowMapParams", snowParams);
+    }
+
+    private void UpdateOcclusionMap()
+    {
+        if (occlusionMap == null || modificationMaterial == null) return;
+
+        if (playerCar != null)
+        {
+            modificationMaterial.SetVector("_CarParams", new Vector4(playerCar.position.x, playerCar.position.y, playerCar.position.z, carOcclusionRadius));
+            modificationMaterial.SetVector("_CarParamsForward", new Vector4(playerCar.forward.x, playerCar.forward.y, playerCar.forward.z, 4.5f));
+            Vector4 snowParams = new Vector4(mapCenter.x, mapCenter.z, mapWorldSize, 1f / mapWorldSize);
+            modificationMaterial.SetVector("_SnowMapParams", snowParams);
+            
+            // Pass 2: Draw Occlusion mask
+            Graphics.Blit(null, occlusionMap, modificationMaterial, 2);
+        }
+        else
+        {
+            // If no car, clear to white (no occlusion)
+            RenderTexture.active = occlusionMap;
+            GL.Clear(false, true, Color.white);
+            RenderTexture.active = null;
+        }
     }
 
     public void VacuumSnow(Vector3 pos, float radius, float speed)
@@ -98,8 +154,6 @@ public class SnowAccumulationManager : MonoBehaviour
         Graphics.Blit(tempRT, snowHeightMap);
 
         RenderTexture.ReleaseTemporary(tempRT);
-        
-        _needsBlur = true; // Mark for a SINGLE blur pass this frame in LateUpdate
     }
 
     private void OnDestroy()
@@ -108,6 +162,11 @@ public class SnowAccumulationManager : MonoBehaviour
         {
             snowHeightMap.Release();
             Destroy(snowHeightMap);
+        }
+        if (occlusionMap != null)
+        {
+            occlusionMap.Release();
+            Destroy(occlusionMap);
         }
         if (modificationMaterial != null)
         {
@@ -118,6 +177,10 @@ public class SnowAccumulationManager : MonoBehaviour
     // --- 调试代码：用于输出 RenderTexture 中心的最大高度 ---
     private void Update()
     {
+        UpdateOcclusionMap();
+
+
+
         UpdateGlobalShaderParams(); // Ensure params are always synced, even if mapCenter is modified externally
         
         if (Input.GetKeyDown(KeyCode.P))
@@ -134,23 +197,8 @@ public class SnowAccumulationManager : MonoBehaviour
         {
             Shader.SetGlobalFloat("_SnowDebugGreen", 0f);
         }
-    }
 
-    private void LateUpdate()
-    {
-        // 优化：将所有粒子的模糊操作集中到同一帧的最后执行一次！
-        // 既不会产生延迟闪烁（因为在渲染前执行），又把每帧几百次的 Blit 降为了 2 次！
-        if (_needsBlur && modificationMaterial != null && snowHeightMap != null)
-        {
-            RenderTexture tempRT = RenderTexture.GetTemporary(snowHeightMap.descriptor);
-            for (int i = 0; i < 2; i++) 
-            {
-                Graphics.Blit(snowHeightMap, tempRT, modificationMaterial, 1);
-                Graphics.Blit(tempRT, snowHeightMap);
-            }
-            RenderTexture.ReleaseTemporary(tempRT);
-            _needsBlur = false;
-        }
+        UpdateOcclusionMap();
     }
 
     private void DebugSnowHeight()

@@ -6,8 +6,8 @@ using EnvironmentSystem;
 public class SnowParticleSystem : MonoBehaviour
 {
     [Header("Snow Settings")]
-    public float particleSnowRadius = 2.5f; // 精细涂抹
-    public float particleSnowAmount = 0.005f; // 极缓堆积，依靠高帧率实现平滑
+    public float particleSnowRadius = 1.5f; 
+    public float particleSnowAmount = 0.2f; // Increase accumulation rate so it passes the Cutoff!
 
     private ParticleSystem partSystem;
     private List<ParticleCollisionEvent> collisionEvents;
@@ -15,8 +15,8 @@ public class SnowParticleSystem : MonoBehaviour
     private void Awake()
     {
         // FORCE values to override potentially broken Inspector serialized values!
-        particleSnowRadius = 2.5f;
-        particleSnowAmount = 0.005f;
+        particleSnowRadius = 1.2f;
+        particleSnowAmount = 0.05f;
 
         partSystem = GetComponent<ParticleSystem>();
         collisionEvents = new List<ParticleCollisionEvent>();
@@ -57,8 +57,7 @@ public class SnowParticleSystem : MonoBehaviour
         // 3. Emission Module setup
         var emission = partSystem.emission;
         emission.enabled = true;
-        // 雪花更密集，提升到现在的250% (原100 -> 250)
-        emission.rateOverTime = 250f;  
+        emission.rateOverTime = 300f;  
 
         // 4. Shape Module setup: 圆形范围 (Circle)
         var shape = partSystem.shape;
@@ -75,60 +74,85 @@ public class SnowParticleSystem : MonoBehaviour
         collision.dampen = 1f; 
         collision.lifetimeLoss = 1f; 
         collision.collidesWith = ~0; 
-        collision.quality = ParticleSystemCollisionQuality.Medium; 
+        collision.quality = ParticleSystemCollisionQuality.High; // High drops collisions on 130k poly terrains!
+        collision.voxelSize = 0.2f; // Increase voxel resolution to 20cm to eliminate grid-snapping lines!
 
-        // 6. 恢复2D贴图模式并接受光照
+        // 6. 生成并应用柔和的雪花材质
         var renderer = GetComponent<ParticleSystemRenderer>();
         if (renderer != null)
         {
-            // 恢复为 2D 粒子模式 (Billboard)
             renderer.renderMode = ParticleSystemRenderMode.Billboard;
-
-            // 使用受光影影响的 Lit 着色器，而不是 Unlit 发光
-            Shader urpLitParticleShader = Shader.Find("Universal Render Pipeline/Particles/Lit");
-            if (urpLitParticleShader == null) urpLitParticleShader = Shader.Find("Particles/Standard Surface");
             
-            if (urpLitParticleShader != null)
+            Shader unlitShader = Shader.Find("Mobile/Particles/Additive");
+            if (unlitShader == null) unlitShader = Shader.Find("Mobile/Particles/Additive");
+            
+            if (unlitShader != null)
             {
-                Material litMat = new Material(urpLitParticleShader);
-                // 开启 GPU 实例化优化性能
-                litMat.enableInstancing = true; 
+                Material mat = new Material(unlitShader);
+                mat.SetFloat("_Surface", 1); // Transparent
+                mat.SetFloat("_Blend", 2);   // Additive blending makes them glow against the sky!
+                mat.SetFloat("_ZWrite", 0);
+                mat.SetColor("_BaseColor", new Color(2.0f, 2.0f, 2.0f, 0.8f)); // HDR bright white
                 
-                // 设置为 Additive 透光模式并开启发光，消除灰尘感
-                litMat.SetFloat("_Surface", 1); // Transparent
-                litMat.SetFloat("_Blend", 2); // Additive
-                litMat.SetFloat("_ZWrite", 0);
-                litMat.SetColor("_BaseColor", new Color(0.9f, 0.95f, 1.0f, 0.5f));
-                litMat.SetColor("_EmissionColor", new Color(0.2f, 0.4f, 0.8f) * 0.5f);
-                litMat.EnableKeyword("_EMISSION");
-                litMat.SetFloat("_Smoothness", 0.9f);
+                // 程序化生成柔和的圆形贴图
+                Texture2D circleTex = new Texture2D(32, 32, TextureFormat.RGBA32, false);
+                circleTex.name = "SoftSnowflakeTex";
+                Color[] pixels = new Color[32 * 32];
+                Vector2 center = new Vector2(16, 16);
+                for (int y = 0; y < 32; y++)
+                {
+                    for (int x = 0; x < 32; x++)
+                    {
+                        float dist = Vector2.Distance(new Vector2(x, y), center) / 16f;
+                        float alpha = Mathf.Clamp01(1f - dist);
+                        // 柔和边缘
+                        alpha = alpha * alpha * (3f - 2f * alpha);
+                        pixels[y * 32 + x] = new Color(1f, 1f, 1f, alpha);
+                    }
+                }
+                circleTex.SetPixels(pixels);
+                circleTex.Apply();
                 
-                renderer.sharedMaterial = litMat;
+                mat.mainTexture = circleTex;
+                renderer.sharedMaterial = mat;
             }
         }
     }
 
+    private static GameObject snowBlobPrefab;
+    private static Queue<GameObject> activeBlobs = new Queue<GameObject>();
+
     private void OnParticleCollision(GameObject other)
     {
-        // 1. 如果雪花撞到的不是沙地（例如撞到了车顶），就不在高度图上累加积雪！
-        // 这样车子底下就能完美呈现出“没下雪”的干净区域！
-        if (other.GetComponent<DesertTerrainChunk>() == null && other.layer != LayerMask.NameToLayer("Default"))
-        {
-            return; 
-        }
-
         int numCollisionEvents = partSystem.GetCollisionEvents(other, collisionEvents);
 
         for (int i = 0; i < numCollisionEvents; i++)
         {
             Vector3 pos = collisionEvents[i].intersection;
+            Vector3 normal = collisionEvents[i].normal;
 
-            // 2D Base Layer Support
+            // 如果撞到的不是地形，就意味着撞到了车子、石头等动态或静态物体
+            if (other.GetComponentInParent<DesertTerrainChunk>() == null && !other.name.Contains("Terrain"))
+            {
+                var dynamicObj = other.GetComponentInParent<DynamicSnowObject>();
+                if (dynamicObj == null && other.transform.root != null)
+                {
+                    dynamicObj = other.transform.root.gameObject.AddComponent<DynamicSnowObject>();
+                }
+                
+                if (dynamicObj != null)
+                {
+                    dynamicObj.AddSnowLocal(pos, particleSnowRadius, particleSnowAmount);
+                }
+                continue; // 撞到物体的雪花不会再穿透到地上！
+            }
+
+            // 2D Base Layer Support (对于地形)
             if (SnowAccumulationManager.Instance == null)
             {
                 GameObject managerGO = new GameObject("[SYSTEM] SnowAccumulationManager");
                 var manager = managerGO.AddComponent<SnowAccumulationManager>();
-                manager.mapCenter = pos; // Align the 100x100 area exactly to where the snow is falling!
+                manager.mapCenter = pos; 
             }
             
             if (SnowAccumulationManager.Instance != null)
