@@ -303,7 +303,10 @@ public class InventoryRaycastPlacer : MonoBehaviour
             previewObject.SetParent(inventoryRoot, false);
 
         if (marker != null)
-            Destroy(marker);
+        {
+            if (Application.isPlaying) Destroy(marker);
+            else UnityEngine.Object.DestroyImmediate(marker);
+        }
 
         SetPreviewVisible(true);
         SetPreviewColor(validPreviewColor);
@@ -399,7 +402,10 @@ public class InventoryRaycastPlacer : MonoBehaviour
 
         previewItemData = item;
         if (previewObject != null)
-            Destroy(previewObject.gameObject);
+        {
+            if (Application.isPlaying) Destroy(previewObject.gameObject);
+            else UnityEngine.Object.DestroyImmediate(previewObject.gameObject);
+        }
 
         previewObject = null;
         previewRenderers = null;
@@ -531,7 +537,10 @@ public class InventoryRaycastPlacer : MonoBehaviour
 
         previewItemData = null;
         if (previewObject != null)
-            Destroy(previewObject.gameObject);
+        {
+            if (Application.isPlaying) Destroy(previewObject.gameObject);
+            else UnityEngine.Object.DestroyImmediate(previewObject.gameObject);
+        }
         previewObject = null;
         previewRenderers = null;
     }
@@ -1015,7 +1024,10 @@ public class InventoryRaycastPlacer : MonoBehaviour
 
         Collider col = cube.GetComponent<Collider>();
         if (col != null)
-            Destroy(col);
+        {
+            if (Application.isPlaying) Destroy(col);
+            else UnityEngine.Object.DestroyImmediate(col);
+        }
 
         Vector3Int min = Vector3Int.zero;
         Vector3Int max = Vector3Int.zero;

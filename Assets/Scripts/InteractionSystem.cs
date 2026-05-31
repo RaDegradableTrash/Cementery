@@ -977,7 +977,8 @@ public class InteractionSystem : MonoBehaviour
                     {
                         GameObject objToDestroy = _carriedRb.gameObject;
                         Drop(); // 释放物理手部连接
-                        Destroy(objToDestroy); // 安全毁灭手里的齿轮
+                        if (Application.isPlaying) Destroy(objToDestroy);
+                        else UnityEngine.Object.DestroyImmediate(objToDestroy); // 安全毁灭手里的齿轮
                         ClearPrompts();
                         return;
                     }
@@ -1235,7 +1236,10 @@ public class InteractionSystem : MonoBehaviour
         }
 
         _lookedAt = null;
-        obj.PlayCollectAnim(() => Destroy(obj.gameObject));
+        obj.PlayCollectAnim(() => {
+            if (Application.isPlaying) Destroy(obj.gameObject);
+            else UnityEngine.Object.DestroyImmediate(obj.gameObject);
+        });
     }
 
     public bool HasCarriedObject() => _carriedRb != null;
@@ -1624,7 +1628,12 @@ public class InteractionSystem : MonoBehaviour
         // 修复由于脱离原父级导致的缩放丢失问题
         _placementGhost.transform.localScale = _carriedRb.transform.lossyScale;
         
-        Destroy(_placementGhost.GetComponent<Rigidbody>());
+        var _pgRb = _placementGhost.GetComponent<Rigidbody>();
+        if (_pgRb != null)
+        {
+            if (Application.isPlaying) Destroy(_pgRb);
+            else UnityEngine.Object.DestroyImmediate(_pgRb);
+        }
         foreach(MonoBehaviour mb in _placementGhost.GetComponentsInChildren<MonoBehaviour>())
             mb.enabled = false; // Disable instead of Destroy to avoid "RequiredComponent" dependency errors
             
@@ -1634,7 +1643,8 @@ public class InteractionSystem : MonoBehaviour
             if (c.isTrigger)
             {
                 // 原本就是Trigger的碰撞体（如交互区域）不能用于物理防穿模计算，直接删除
-                Destroy(c);
+                if (Application.isPlaying) Destroy(c);
+                else UnityEngine.Object.DestroyImmediate(c);
             }
             else
             {
@@ -1653,7 +1663,11 @@ public class InteractionSystem : MonoBehaviour
         _isPlacementMode = false;
         if (_mouseLook != null) _mouseLook.suspendMouseLook = false;
         
-        if (_placementGhost != null) Destroy(_placementGhost);
+        if (_placementGhost != null)
+        {
+            if (Application.isPlaying) Destroy(_placementGhost);
+            else UnityEngine.Object.DestroyImmediate(_placementGhost);
+        }
     }
     
     void UpdatePlacementGhost()

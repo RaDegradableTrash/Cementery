@@ -125,7 +125,8 @@ public class Hostile : MonoBehaviour
     {
         if (durationType == "once")
         {
-            Destroy(gameObject);
+            if (Application.isPlaying) Destroy(gameObject);
+            else UnityEngine.Object.DestroyImmediate(gameObject);
         }
     }
 }

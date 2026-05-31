@@ -122,7 +122,8 @@ public class PremodeledContainer : MonoBehaviour
 
         if (lastItem.spawnedVisual != null)
         {
-            Destroy(lastItem.spawnedVisual);
+            if (Application.isPlaying) Destroy(lastItem.spawnedVisual);
+            else UnityEngine.Object.DestroyImmediate(lastItem.spawnedVisual);
         }
 
         return originPrefab;
@@ -162,15 +163,24 @@ public class PremodeledContainer : MonoBehaviour
     {
         // 强制摧毁刚体，防止警告
         Rigidbody rb = obj.GetComponent<Rigidbody>() ?? obj.GetComponentInParent<Rigidbody>();
-        if (rb != null) Destroy(rb);
+        if (rb != null)
+        {
+            if (Application.isPlaying) Destroy(rb);
+            else UnityEngine.Object.DestroyImmediate(rb);
+        }
 
         // 强制关闭/摧毁所有层级的碰撞箱，防止 Non-convex MeshCollider 报错掐断执行流
         foreach (var col in obj.GetComponentsInChildren<Collider>(true))
         {
-            Destroy(col);
+            if (Application.isPlaying) Destroy(col);
+            else UnityEngine.Object.DestroyImmediate(col);
         }
 
         WorldObject wo = obj.GetComponent<WorldObject>() ?? obj.GetComponentInParent<WorldObject>();
-        if (wo != null) Destroy(wo);
+        if (wo != null)
+        {
+            if (Application.isPlaying) Destroy(wo);
+            else UnityEngine.Object.DestroyImmediate(wo);
+        }
     }
 }
