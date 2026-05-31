@@ -199,6 +199,12 @@ namespace EnvironmentSystem
         {
             SceneManager.sceneLoaded -= OnSceneLoaded;
             ChunkRegistry.Unregister(this);
+            
+            if (EnvironmentSystem.SnowMoundManager.Instance != null && TryGetComponent<MeshCollider>(out var col) && col.sharedMesh != null)
+            {
+                var b = col.bounds;
+                EnvironmentSystem.SnowMoundManager.Instance.ClearArea(b.center, b.extents.magnitude + 20f);
+            }
             _asyncBuildRunning = false;
         }
 
@@ -924,6 +930,8 @@ namespace EnvironmentSystem
                 col.sharedMesh = mesh;
             }
 
+            UpdateSnowLayer(mesh);
+
             if (TryGetComponent<MeshRenderer>(out var mr))
             {
                 if (terrainMaterial != null)
@@ -1571,6 +1579,53 @@ namespace EnvironmentSystem
             {
                 col.sharedMesh = null;
                 col.sharedMesh = mesh;
+            }
+
+            UpdateSnowLayer(mesh);
+        }
+
+
+
+        // ── Snow Layer Management (Restored for 2D Base) ──────────────────────────
+        private void UpdateSnowLayer(Mesh originalMesh)
+        {
+            if (originalMesh == null) return;
+
+            Transform snowLayerTransform = transform.Find("SnowLayer");
+            GameObject snowLayerObj;
+
+            if (snowLayerTransform == null)
+            {
+                snowLayerObj = new GameObject("SnowLayer");
+                snowLayerObj.transform.SetParent(transform, false);
+                snowLayerObj.transform.localPosition = Vector3.zero;
+                snowLayerObj.transform.localRotation = Quaternion.identity;
+                snowLayerObj.transform.localScale = Vector3.one;
+            }
+            else
+            {
+                snowLayerObj = snowLayerTransform.gameObject;
+            }
+
+            MeshFilter filter = snowLayerObj.GetComponent<MeshFilter>();
+            if (filter == null) filter = snowLayerObj.AddComponent<MeshFilter>();
+            filter.sharedMesh = originalMesh;
+
+            MeshRenderer renderer = snowLayerObj.GetComponent<MeshRenderer>();
+            if (renderer == null) renderer = snowLayerObj.AddComponent<MeshRenderer>();
+
+            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; // 2D base doesn't cast shadows
+            renderer.receiveShadows = true;
+
+            Shader snowShader = Shader.Find("Environment/SnowBlanket");
+            if (snowShader != null)
+            {
+                if (renderer.sharedMaterial == null || renderer.sharedMaterial.shader != snowShader)
+                {
+                    Material snowMat = new Material(snowShader);
+                    snowMat.name = "SnowBlanketMaterial";
+                    renderer.sharedMaterial = snowMat;
+                }
             }
         }
     }

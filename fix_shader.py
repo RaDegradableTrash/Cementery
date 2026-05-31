@@ -1,22 +1,50 @@
 import re
 
-file_path = "/Users/ra/Documents/Cementery/Assets/Shaders/URPTriplanarEnvironment.shader"
-with open(file_path, 'r') as f:
+with open('Assets/Shaders/URPTriplanarEnvironment.shader', 'r') as f:
     content = f.read()
 
-old_logic = """                // Multiply with Biome Vertex Color (if alpha > 0.1 to avoid breaking existing terrain without colors)
-                if (input.color.a > 0.05) {
-                    albedo *= input.color.rgb;
-                }
+# We need to move GetTotalDeformation AFTER GetSandDeformation
+# It currently looks like:
+#             float GetTotalDeformation(float3 posWS)
+#             {
+#                 return GetSandDeformation(posWS) + GetSnowDisplacement(posWS);
+#             }
+#
+#             float GetSandDeformation(float3 posWS)
+#             {
+#                 float totalDisp = 0.0;
+#                 ...
+#                 return totalDisp;
+#             }
 
-                float3 baseWarmColor = _Color.rgb;
-                albedo.rgb = albedo.rgb * baseWarmColor;"""
+# Find this pattern and swap them. 
+# We can do this safely by first removing GetTotalDeformation, then appending it after GetSandDeformation.
 
-new_logic = """                // Override global base color with vertex biome color if present
-                float3 baseWarmColor = input.color.a > 0.05 ? input.color.rgb : _Color.rgb;
-                albedo.rgb = albedo.rgb * baseWarmColor;"""
+def_str = """
+            float GetTotalDeformation(float3 posWS)
+            {
+                return GetSandDeformation(posWS) + GetSnowDisplacement(posWS);
+            }
+"""
 
-content = content.replace(old_logic, new_logic)
+content = content.replace(def_str, "")
 
-with open(file_path, 'w') as f:
+# Now find the end of GetSandDeformation
+# We can search for the end of GetSandDeformation which is:
+#                 }
+#                 return totalDisp;
+#             }
+
+content = content.replace(
+"""                }
+                return totalDisp;
+            }""", 
+"""                }
+                return totalDisp;
+            }
+""" + def_str
+)
+
+with open('Assets/Shaders/URPTriplanarEnvironment.shader', 'w') as f:
     f.write(content)
+
