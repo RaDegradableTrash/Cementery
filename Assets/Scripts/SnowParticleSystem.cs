@@ -102,14 +102,6 @@ public class SnowParticleSystem : MonoBehaviour
         {
             Vector3 pos = collisionEvents[i].intersection;
 
-            if (SnowMoundManager.Instance == null)
-            {
-                GameObject managerGO = new GameObject("[SYSTEM] SnowMoundManager");
-                managerGO.AddComponent<SnowMoundManager>();
-            }
-
-            SnowMoundManager.Instance.AddSnow(pos);
-
             // 2D Base Layer Support
             if (SnowAccumulationManager.Instance != null)
             {

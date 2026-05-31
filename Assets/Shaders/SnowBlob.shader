@@ -19,7 +19,6 @@ Shader "Environment/SnowBlob"
             #pragma vertex vert
             #pragma fragment frag
             #pragma multi_compile_instancing
-            #pragma target 3.0
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
@@ -36,6 +35,7 @@ Shader "Environment/SnowBlob"
                 float4 positionCS : SV_POSITION;
                 float3 positionWS : TEXCOORD0;
                 float3 normalWS : TEXCOORD1;
+                float4 positionOS : TEXCOORD3;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
@@ -43,6 +43,12 @@ Shader "Environment/SnowBlob"
                 UNITY_DEFINE_INSTANCED_PROP(float4, _SnowColor)
                 UNITY_DEFINE_INSTANCED_PROP(float, _BlendStrength)
             UNITY_INSTANCING_BUFFER_END(Props)
+
+            // Simple noise function for edge corruption
+            float pseudoNoise(float2 uv)
+            {
+                return frac(sin(dot(uv, float2(12.9898, 78.233))) * 43758.5453);
+            }
 
             Varyings vert(Attributes input)
             {
@@ -54,94 +60,98 @@ Shader "Environment/SnowBlob"
                 output.positionCS = TransformWorldToHClip(positionWS);
                 output.positionWS = positionWS;
                 output.normalWS = TransformObjectToWorldNormal(input.normalOS);
-                
+                output.positionOS = input.positionOS;
                 return output;
             }
 
             float4 frag(Varyings input) : SV_Target
             {
                 UNITY_SETUP_INSTANCE_ID(input);
-
-                float4 baseColor = UNITY_ACCESS_INSTANCED_PROP(Props, _SnowColor);
-                float blendFactor = UNITY_ACCESS_INSTANCED_PROP(Props, _BlendStrength);
-
-                // 【WorldSpace Normal Blending 视觉合一魔法】
-                // 为了让多个相交的雪球不产生“接缝”和明显的互相遮挡阴影（馒头感），
-                // 我们将它们真实的法线强行向绝对正上方 float3(0,1,0) 混合！
-                // 这使得穿插在一起的雪球共享几乎一致的受光面，在视觉上完美融合成一个起伏的整体面团。
-                float3 upNormal = float3(0.0, 1.0, 0.0);
-                float3 finalNormalWS = normalize(lerp(input.normalWS, upNormal, blendFactor));
-
-                Light mainLight = GetMainLight(TransformWorldToShadowCoord(input.positionWS));
                 
-                // 柔和的半兰伯特光照
-                float NdotL = saturate(dot(finalNormalWS, mainLight.direction) * 0.5 + 0.5);
+                // --- 1. Noise Mask & Edge Corrosive Clipping ---
+                // distance from center of object space in XZ plane (sphere has radius 0.5)
+                float d = length(input.positionOS.xz) * 2.0; 
+                float noise = pseudoNoise(input.positionWS.xz * 2.0);
+                
+                // clip(1.0 - distance - noise) as requested
+                clip(1.0 - d - noise * 0.2);
+
+                // --- 2. Normal Blending for "Butter/Cream" transition ---
+                float3 worldNormal = normalize(input.normalWS);
+                float3 upNormal = float3(0, 1, 0);
+
+                // Blend normal to UP near the center, allowing soft shading
+                float blendStrength = UNITY_ACCESS_INSTANCED_PROP(Props, _BlendStrength);
+                float blend = saturate((1.0 - d) * blendStrength);
+                float3 finalNormal = normalize(lerp(worldNormal, upNormal, blend));
+
+                // --- 3. Lighting ---
+                Light mainLight = GetMainLight();
+                float NdotL = saturate(dot(finalNormal, mainLight.direction) * 0.5 + 0.5);
                 float3 diffuse = mainLight.color * NdotL * mainLight.shadowAttenuation;
-                float3 ambient = SampleSH(finalNormalWS) * 1.2;
+                float3 ambient = SampleSH(finalNormal) * 1.2;
                 
-                float3 finalColor = baseColor.rgb * (diffuse + ambient);
+                float4 snowColor = UNITY_ACCESS_INSTANCED_PROP(Props, _SnowColor);
+                float3 finalColor = snowColor.rgb * (diffuse + ambient);
+                
                 return float4(finalColor, 1.0);
             }
             ENDHLSL
         }
-        
+
         Pass
         {
             Name "ShadowCaster"
             Tags { "LightMode"="ShadowCaster" }
 
             HLSLPROGRAM
-            #pragma vertex shadowVert
-            #pragma fragment shadowFrag
+            #pragma vertex vert
+            #pragma fragment frag
             #pragma multi_compile_instancing
-            #pragma target 3.0
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
-            #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonMaterial.hlsl"
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
 
             struct Attributes
             {
                 float4 positionOS : POSITION;
-                float3 normalOS : NORMAL;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             struct Varyings
             {
                 float4 positionCS : SV_POSITION;
+                float4 positionOS : TEXCOORD0;
+                float3 positionWS : TEXCOORD1;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
-            float3 _LightDirection;
-
-            float4 GetShadowPositionHClip(float3 positionWS, float3 normalWS)
+            float pseudoNoise(float2 uv)
             {
-                float4 positionCS = TransformWorldToHClip(ApplyShadowBias(positionWS, normalWS, _LightDirection));
-                #if UNITY_REVERSED_Z
-                positionCS.z = min(positionCS.z, positionCS.w * UNITY_NEAR_CLIP_VALUE);
-                #else
-                positionCS.z = max(positionCS.z, positionCS.w * UNITY_NEAR_CLIP_VALUE);
-                #endif
-                return positionCS;
+                return frac(sin(dot(uv, float2(12.9898, 78.233))) * 43758.5453);
             }
 
-            Varyings shadowVert(Attributes input)
+            Varyings vert(Attributes input)
             {
                 Varyings output;
                 UNITY_SETUP_INSTANCE_ID(input);
                 UNITY_TRANSFER_INSTANCE_ID(input, output);
-
-                float3 positionWS = TransformObjectToWorld(input.positionOS.xyz);
-                float3 normalWS = TransformObjectToWorldNormal(input.normalOS);
-                output.positionCS = GetShadowPositionHClip(positionWS, normalWS);
                 
+                float3 positionWS = TransformObjectToWorld(input.positionOS.xyz);
+                output.positionCS = TransformWorldToHClip(positionWS);
+                output.positionOS = input.positionOS;
+                output.positionWS = positionWS;
                 return output;
             }
 
-            half4 shadowFrag(Varyings input) : SV_Target
+            float4 frag(Varyings input) : SV_Target
             {
                 UNITY_SETUP_INSTANCE_ID(input);
+                
+                // Match the clipping from ForwardLit
+                float d = length(input.positionOS.xz) * 2.0; 
+                float noise = pseudoNoise(input.positionWS.xz * 2.0);
+                clip(1.0 - d - noise * 0.2);
+
                 return 0;
             }
             ENDHLSL

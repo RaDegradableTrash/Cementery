@@ -19,12 +19,6 @@ public class VacuumInteractor : MonoBehaviour
                 {
                     SnowAccumulationManager.Instance.VacuumSnow(hit.point, interactionRadius, vacuumSpeed);
                 }
-
-                if (EnvironmentSystem.SnowMoundManager.Instance != null)
-                {
-                    // For the 3D objects, vacuum removes them entirely if they are in the radius
-                    EnvironmentSystem.SnowMoundManager.Instance.ClearArea(hit.point, interactionRadius);
-                }
             }
         }
     }

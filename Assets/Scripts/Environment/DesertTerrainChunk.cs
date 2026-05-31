@@ -199,12 +199,6 @@ namespace EnvironmentSystem
         {
             SceneManager.sceneLoaded -= OnSceneLoaded;
             ChunkRegistry.Unregister(this);
-            
-            if (EnvironmentSystem.SnowMoundManager.Instance != null && TryGetComponent<MeshCollider>(out var col) && col.sharedMesh != null)
-            {
-                var b = col.bounds;
-                EnvironmentSystem.SnowMoundManager.Instance.ClearArea(b.center, b.extents.magnitude + 20f);
-            }
             _asyncBuildRunning = false;
         }
 
@@ -930,8 +924,6 @@ namespace EnvironmentSystem
                 col.sharedMesh = mesh;
             }
 
-            UpdateSnowLayer(mesh);
-
             if (TryGetComponent<MeshRenderer>(out var mr))
             {
                 if (terrainMaterial != null)
@@ -1584,8 +1576,6 @@ namespace EnvironmentSystem
             UpdateSnowLayer(mesh);
         }
 
-
-
         // ── Snow Layer Management (Restored for 2D Base) ──────────────────────────
         private void UpdateSnowLayer(Mesh originalMesh)
         {
@@ -1628,5 +1618,9 @@ namespace EnvironmentSystem
                 }
             }
         }
+
+
+
+
     }
 }

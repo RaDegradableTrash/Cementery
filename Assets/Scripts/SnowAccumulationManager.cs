@@ -88,6 +88,13 @@ public class SnowAccumulationManager : MonoBehaviour
         Graphics.Blit(snowHeightMap, tempRT, modificationMaterial, 0);
         Graphics.Blit(tempRT, snowHeightMap);
 
+        // Pass 1: Multiple Blur Iterations for smooth transition (5 times)
+        for (int i = 0; i < 5; i++)
+        {
+            Graphics.Blit(snowHeightMap, tempRT, modificationMaterial, 1);
+            Graphics.Blit(tempRT, snowHeightMap);
+        }
+
         RenderTexture.ReleaseTemporary(tempRT);
     }
 

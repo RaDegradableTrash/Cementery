@@ -13,13 +13,24 @@ Shader "Hidden/SnowModification"
             v2f vert(appdata_base v) { v2f o; o.vertex = UnityObjectToClipPos(v.vertex); o.uv = v.texcoord; return o; }
             sampler2D _MainTex;
             float4 _BrushParams, _BrushStrength, _SnowMapParams;
+
+            float pseudoNoise(float2 uv) {
+                return frac(sin(dot(uv, float2(12.9898, 78.233))) * 43758.5453);
+            }
+
             fixed4 frag (v2f i) : SV_Target {
                 float current = tex2D(_MainTex, i.uv).r;
                 float2 worldPos = (i.uv - 0.5) * _SnowMapParams.z + _SnowMapParams.xy;
                 float dist = distance(worldPos, _BrushParams.xz);
-                // 使用 pow(t, 4) 让边缘极其柔和，避免馒头感
-                float t = saturate(1.0 - (dist / _BrushParams.w));
-                float brush = smoothstep(0, 1, pow(t, 1.5)) * _BrushStrength.x;
+                
+                // Domain Warping: Perturb the distance slightly based on noise
+                float noise = pseudoNoise(worldPos * 2.0);
+                float warpedRadius = _BrushParams.w * (0.8 + noise * 0.4); 
+                
+                float t = saturate(1.0 - (dist / warpedRadius));
+                // Use a smoothstep blended with noise for muddy, irregular accumulation
+                float brush = smoothstep(0, 1, pow(t, 2.5)) * _BrushStrength.x;
+                
                 return saturate(current + brush);
             }
             ENDCG
