@@ -46,7 +46,11 @@ namespace EnvironmentSystem
         private void Awake()
         {
             if (Instance == null) Instance = this;
-            else Destroy(gameObject);
+            else
+            {
+                if (Application.isPlaying) Destroy(gameObject);
+                else UnityEngine.Object.DestroyImmediate(gameObject);
+            }
         }
 
         private void Start()

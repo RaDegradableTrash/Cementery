@@ -259,7 +259,18 @@ public class DayNightSkyboxController : MonoBehaviour
     {
         if (_ownsSkyboxMaterial && _runtimeSkybox != null)
         {
+#if UNITY_EDITOR
+            if (!Application.isPlaying)
+            {
+                UnityEngine.Object.DestroyImmediate(_runtimeSkybox);
+            }
+            else
+            {
+                Destroy(_runtimeSkybox);
+            }
+#else
             Destroy(_runtimeSkybox);
+#endif
             _runtimeSkybox = null;
         }
     }

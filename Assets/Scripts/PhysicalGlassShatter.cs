@@ -108,7 +108,8 @@ public class PhysicalGlassShatter : MonoBehaviour
         // 销毁专属的 ShatterCamera
         if (shatterCamera != null)
         {
-            Destroy(shatterCamera.gameObject);
+            if (Application.isPlaying) Destroy(shatterCamera.gameObject);
+            else UnityEngine.Object.DestroyImmediate(shatterCamera.gameObject);
         }
 
         // 2. 调用重生逻辑（玩家和摄像机瞬间传送到天上）
@@ -143,17 +144,20 @@ public class PhysicalGlassShatter : MonoBehaviour
             }
 
             // 5. 延迟清理
-            Destroy(shatterRoot, 5f);
+            if (Application.isPlaying) Destroy(shatterRoot, 5f);
+            else UnityEngine.Object.DestroyImmediate(shatterRoot);
         }
 
         if (screenRT != null)
         {
             screenRT.Release();
-            Destroy(screenRT, 5f);
+            if (Application.isPlaying) Destroy(screenRT, 5f);
+            else UnityEngine.Object.DestroyImmediate(screenRT);
         }
         if (glassMaterial != null)
         {
-            Destroy(glassMaterial, 5f);
+            if (Application.isPlaying) Destroy(glassMaterial, 5f);
+            else UnityEngine.Object.DestroyImmediate(glassMaterial);
         }
     }
 

@@ -55,6 +55,8 @@ Shader "Environment/URPTriplanarEnvironment"
             TEXTURE2D(_NormalMap);
             SAMPLER(sampler_NormalMap);
 
+            
+
             CBUFFER_START(UnityPerMaterial)
                 float _TriplanarScale;
                 float _BlendSharpness;
@@ -117,6 +119,7 @@ Shader "Environment/URPTriplanarEnvironment"
             float4 _DeformerParams[128];    // .x = depth, .y = rimWidth, .z = rimHeight, .w = fade
 
             // Calculates the granular sand displacement at a given world position
+            
             float GetSandDeformation(float3 posWS)
             {
                 float totalDisp = 0.0;
@@ -151,13 +154,19 @@ Shader "Environment/URPTriplanarEnvironment"
                 return totalDisp;
             }
 
+            float GetTotalDeformation(float3 posWS)
+            {
+                return GetSandDeformation(posWS);
+            }
+
+
             Varyings vert(Attributes input)
             {
                 Varyings output;
                 float3 positionWS = TransformObjectToWorld(input.positionOS.xyz);
                 
                 // 1. Physically cave in vertices vertically to form realistic 3D footprints
-                float disp = GetSandDeformation(positionWS);
+                float disp = GetTotalDeformation(positionWS);
                 positionWS.y += disp;
                 
                 output.positionCS = TransformWorldToHClip(positionWS);
@@ -165,9 +174,9 @@ Shader "Environment/URPTriplanarEnvironment"
                 output.color = input.color;
                 
                 // 2. Analytical Normal Reconstruction at the Vertex Shader level (800x faster than per-pixel!)
-                float delta = 0.15;
-                float hRight = GetSandDeformation(positionWS + float3(delta, 0, 0));
-                float hUp = GetSandDeformation(positionWS + float3(0, 0, delta));
+                float delta = 0.8; // 更大的采样范围，让法线（光影）变得平滑软糯
+                float hRight = GetTotalDeformation(positionWS + float3(delta, 0, 0));
+                float hUp = GetTotalDeformation(positionWS + float3(0, 0, delta));
                 
                 float3 normalOffset = float3(
                     (disp - hRight) / delta,
@@ -175,7 +184,8 @@ Shader "Environment/URPTriplanarEnvironment"
                     (disp - hUp) / delta
                 );
                 
-                output.normalWS = normalize(TransformObjectToWorldNormal(input.normalOS) + normalOffset * 1.5);
+                // 减小 offset 权重，避免出现剧烈的黑色背光面
+                output.normalWS = normalize(TransformObjectToWorldNormal(input.normalOS) + normalOffset * 1.2);
                 output.displacement = disp;
                 return output;
             }
@@ -207,7 +217,8 @@ Shader "Environment/URPTriplanarEnvironment"
                 blendWeights /= (blendWeights.x + blendWeights.y + blendWeights.z); // Normalize
 
                 // Sample Albedo
-                float4 albedo = SampleTriplanar(_MainTex, sampler_MainTex, input.positionWS, blendWeights, _TriplanarScale) * _Color;
+                float3 activeColor = input.color.a > 0.05 ? input.color.rgb : _Color.rgb;
+                float4 albedo = SampleTriplanar(_MainTex, sampler_MainTex, input.positionWS, blendWeights, _TriplanarScale);
 
                 // 🌟 Compacted Sand Ambient Occlusion (脚印/轮胎痕迹压实暗部遮蔽)
                 // Darkens the base albedo based on depth of indentation, making footprint channels beautifully and deeply visible!
@@ -236,9 +247,11 @@ Shader "Environment/URPTriplanarEnvironment"
                 Light mainLight = GetMainLight(TransformWorldToShadowCoord(input.positionWS));
                 float NdotL = saturate(dot(normalWS, mainLight.direction));
                 
-                // --- JOURNEY STYLE CLEAN SOFT GRADIENT TINT ---
-                // Blends a velvety warm sun-kissed gradient exactly like Journey's beautiful stylized look
-                float3 baseWarmColor = lerp(float3(0.92, 0.68, 0.40), float3(0.96, 0.82, 0.58), NdotL);
+                // --- BIOME & JOURNEY STYLE CLEAN SOFT GRADIENT TINT ---
+                // We use the Biome color as the base, and apply a soft gradient tint based on light angle
+                float3 shadowTint = activeColor * 0.75;
+                float3 litTint = activeColor * 1.1;
+                float3 baseWarmColor = lerp(shadowTint, litTint, NdotL);
                 albedo.rgb = albedo.rgb * baseWarmColor;
 
                 // Calculate dynamic cloud shadow factor
@@ -268,7 +281,9 @@ Shader "Environment/URPTriplanarEnvironment"
                 float glint = pow(NdotH, 1200.0) * step(0.993, glintNoise) * saturate(dot(mainLight.direction, normalWS));
                 float3 sparkleColor = float3(1.0, 0.86, 0.52) * glint * 4.5 * mainLight.shadowAttenuation * cloudShadow;
 
-                float3 finalColor = albedo.rgb * (diffuse + ambient) + specColor + fresnelGlow + sparkleColor;
+                float3 baseFinalColor = albedo.rgb * (diffuse + ambient) + specColor + fresnelGlow + sparkleColor;
+
+                float3 finalColor = baseFinalColor;
 
                 // Vibrant Anime Color Grading (dynamic saturation & contrast)
                 float luma = dot(finalColor, float3(0.299, 0.587, 0.114));
@@ -316,6 +331,7 @@ Shader "Environment/URPTriplanarEnvironment"
             float4 _DeformerPositions[128];
             float4 _DeformerParams[128];
 
+            
             float GetSandDeformation(float3 posWS)
             {
                 float totalDisp = 0.0;
@@ -348,11 +364,17 @@ Shader "Environment/URPTriplanarEnvironment"
                 return totalDisp;
             }
 
+            float GetTotalDeformation(float3 posWS)
+            {
+                return GetSandDeformation(posWS);
+            }
+
+
             Varyings depthVert(Attributes input)
             {
                 Varyings output;
                 float3 positionWS = TransformObjectToWorld(input.positionOS.xyz);
-                float disp = GetSandDeformation(positionWS);
+                float disp = GetTotalDeformation(positionWS);
                 positionWS.y += disp;
                 output.positionCS = TransformWorldToHClip(positionWS);
                 return output;
@@ -403,6 +425,7 @@ Shader "Environment/URPTriplanarEnvironment"
             float4 _DeformerPositions[128];
             float4 _DeformerParams[128];
 
+            
             float GetSandDeformation(float3 posWS)
             {
                 float totalDisp = 0.0;
@@ -435,20 +458,33 @@ Shader "Environment/URPTriplanarEnvironment"
                 return totalDisp;
             }
 
+            float GetTotalDeformation(float3 posWS)
+            {
+                return GetSandDeformation(posWS);
+            }
+
+
             Varyings depthNormalsVert(Attributes input)
             {
                 Varyings output;
                 float3 positionWS = TransformObjectToWorld(input.positionOS.xyz);
-                float disp = GetSandDeformation(positionWS);
+                float disp = GetTotalDeformation(positionWS);
                 positionWS.y += disp;
                 output.positionCS = TransformWorldToHClip(positionWS);
                 
                 // Normal offset due to footprints
-                float delta = 0.15;
-                float hRight = GetSandDeformation(positionWS + float3(delta, 0, 0));
-                float hUp = GetSandDeformation(positionWS + float3(0, 0, delta));
-                float3 normalOffset = float3((disp - hRight) / delta, 0.0, (disp - hUp) / delta);
-                output.normalWS = normalize(TransformObjectToWorldNormal(input.normalOS) + normalOffset * 1.5);
+                float delta = 0.8; // 更大的采样范围，让法线（光影）变得平滑软糯
+                float hRight = GetTotalDeformation(positionWS + float3(delta, 0, 0));
+                float hUp = GetTotalDeformation(positionWS + float3(0, 0, delta));
+                
+                float3 normalOffset = float3(
+                    (disp - hRight) / delta,
+                    0.0,
+                    (disp - hUp) / delta
+                );
+                
+                // 减小 offset 权重，避免出现剧烈的黑色背光面
+                output.normalWS = normalize(TransformObjectToWorldNormal(input.normalOS) + normalOffset * 1.2);
                 
                 return output;
             }
@@ -502,6 +538,7 @@ Shader "Environment/URPTriplanarEnvironment"
             float4 _DeformerPositions[128];
             float4 _DeformerParams[128];
 
+            
             float GetSandDeformation(float3 posWS)
             {
                 float totalDisp = 0.0;
@@ -534,6 +571,12 @@ Shader "Environment/URPTriplanarEnvironment"
                 return totalDisp;
             }
 
+            float GetTotalDeformation(float3 posWS)
+            {
+                return GetSandDeformation(posWS);
+            }
+
+
             float3 _LightDirection;
 
             float4 GetShadowPositionHClip(float3 positionWS, float3 normalWS)
@@ -551,7 +594,7 @@ Shader "Environment/URPTriplanarEnvironment"
             {
                 Varyings output;
                 float3 positionWS = TransformObjectToWorld(input.positionOS.xyz);
-                float disp = GetSandDeformation(positionWS);
+                float disp = GetTotalDeformation(positionWS);
                 positionWS.y += disp;
                 
                 float3 normalWS = TransformObjectToWorldNormal(input.normalOS);

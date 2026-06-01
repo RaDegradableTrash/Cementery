@@ -367,7 +367,8 @@ public class PlayerDeathFlowController : MonoBehaviour
             Debug.Log("[PlayerDeathFlow] Destroying DeathCamera...");
             if (_deathCamera != null)
             {
-                Destroy(_deathCamera.gameObject);
+                if (Application.isPlaying) Destroy(_deathCamera.gameObject);
+                else UnityEngine.Object.DestroyImmediate(_deathCamera.gameObject);
                 _deathCamera = null;
             }
 
@@ -470,7 +471,8 @@ public class PlayerDeathFlowController : MonoBehaviour
         if (_activeDrone != null)
         {
             Debug.Log("[CompleteRevive Diagnostics] Destroying Drone...");
-            Destroy(_activeDrone);
+            if (Application.isPlaying) Destroy(_activeDrone);
+            else UnityEngine.Object.DestroyImmediate(_activeDrone);
             _activeDrone = null;
         }
 
@@ -587,7 +589,8 @@ public class PlayerDeathFlowController : MonoBehaviour
             yield return null;
         }
 
-        Destroy(fadeObj);
+        if (Application.isPlaying) Destroy(fadeObj);
+        else UnityEngine.Object.DestroyImmediate(fadeObj);
         Debug.Log("[PlayerDeathFlow] CompleteRevive fully finished.");
     }
 

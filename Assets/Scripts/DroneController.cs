@@ -158,7 +158,8 @@ public class DroneController : MonoBehaviour
                 // Destroy or hide the corpse once retrieved
                 if (_targetCorpse != null)
                 {
-                    Destroy(_targetCorpse.gameObject);
+                    if (Application.isPlaying) Destroy(_targetCorpse.gameObject);
+                    else UnityEngine.Object.DestroyImmediate(_targetCorpse.gameObject);
                 }
             }
         }
