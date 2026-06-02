@@ -55,8 +55,9 @@ public class SnowAccumulationManager : MonoBehaviour
         snowHeightMap.wrapMode = TextureWrapMode.Clamp;
         
         // CLEAR garbage data from RenderTexture initialization!
+        snowHeightMap.DiscardContents();
         RenderTexture.active = snowHeightMap;
-        GL.Clear(false, true, Color.clear);
+        GL.Clear(true, true, Color.black);
         RenderTexture.active = null;
 
         // 2. Create the occlusion map
@@ -84,8 +85,9 @@ public class SnowAccumulationManager : MonoBehaviour
     {
         if (snowHeightMap != null)
         {
+            snowHeightMap.DiscardContents();
             RenderTexture.active = snowHeightMap;
-            GL.Clear(false, true, Color.black);
+            GL.Clear(true, true, Color.black);
             RenderTexture.active = null;
         }
     }

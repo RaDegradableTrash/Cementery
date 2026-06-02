@@ -29,6 +29,7 @@ public class DynamicSnowObject : MonoBehaviour
         localSnowMap.filterMode = FilterMode.Bilinear;
         localSnowMap.wrapMode = TextureWrapMode.Clamp;
         // Initialize to black
+        localSnowMap.DiscardContents();
         RenderTexture.active = localSnowMap;
         GL.Clear(false, true, new Color(0, -1000f, 0, 0)); // R: snow height, G: highest hit Y
         RenderTexture.active = null;

@@ -257,16 +257,7 @@ namespace EnvironmentSystem
             target.cellSize = source.cellSize;
             target.seed = source.seed;
 
-            target.enableMinecraftHills = source.enableMinecraftHills;
-            target.hillMaxHeight = source.hillMaxHeight;
-            target.hillNoiseScale = source.hillNoiseScale;
-            target.octaves = source.octaves;
-            target.lacunarity = source.lacunarity;
-            target.gain = source.gain;
 
-            target.enableTerracing = source.enableTerracing;
-            target.terraceStep = source.terraceStep;
-            target.terraceFlatness = source.terraceFlatness;
 
             target.baseScale = source.baseScale;
             target.baseHeight = source.baseHeight;

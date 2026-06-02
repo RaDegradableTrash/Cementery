@@ -49,6 +49,7 @@ Shader "Hidden/SnowModification"
                 for(int x=-2; x<=2; x++) 
                     for(int y=-2; y<=2; y++)
                         sum += tex2D(_MainTex, i.uv + float2(x, y) * _MainTex_TexelSize.xy);
+                sum = max(0, sum);
                 return sum / 25.0;
             }
             ENDCG

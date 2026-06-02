@@ -122,7 +122,7 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
---- !u!1 &262855719
+--- !u!1 &377114475
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -130,11 +130,11 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 262855724}
-  - component: {fileID: 262855723}
-  - component: {fileID: 262855722}
-  - component: {fileID: 262855721}
-  - component: {fileID: 262855720}
+  - component: {fileID: 377114480}
+  - component: {fileID: 377114479}
+  - component: {fileID: 377114478}
+  - component: {fileID: 377114477}
+  - component: {fileID: 377114476}
   m_Layer: 0
   m_Name: Desert_Chunk_0_-4
   m_TagString: Untagged
@@ -142,13 +142,13 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &262855720
+--- !u!114 &377114476
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 262855719}
+  m_GameObject: {fileID: 377114475}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 29a3ce47a273645cd8ed9bb4aada19a8, type: 3}
@@ -157,6 +157,7 @@ MonoBehaviour:
   width: 64
   depth: 64
   cellSize: 2
+  snowResolutionMultiplier: 4
   seed: 42
   enableMinecraftHills: 0
   hillMaxHeight: 35
@@ -178,19 +179,19 @@ MonoBehaviour:
   crestPosition: 0.8
   windwardExponent: 2
   rippleSpacing: 5
-  rippleHeight: 0.35
+  rippleHeight: 0.1
   rippleDirection: 55
   detailScale: 10
   detailHeight: 0.3
   blendWidth: 8
   terrainMaterial: {fileID: 0}
---- !u!64 &262855721
+--- !u!64 &377114477
 MeshCollider:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 262855719}
+  m_GameObject: {fileID: 377114475}
   m_Material: {fileID: 0}
   m_IncludeLayers:
     serializedVersion: 2
@@ -206,13 +207,13 @@ MeshCollider:
   m_Convex: 0
   m_CookingOptions: 30
   m_Mesh: {fileID: 4300000, guid: 5c2d1bfa1462a49e59089ec72112ae6d, type: 2}
---- !u!23 &262855722
+--- !u!23 &377114478
 MeshRenderer:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 262855719}
+  m_GameObject: {fileID: 377114475}
   m_Enabled: 1
   m_CastShadows: 1
   m_ReceiveShadows: 1
@@ -226,7 +227,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 1491859590}
+  - {fileID: 1249671072}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -248,21 +249,21 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
---- !u!33 &262855723
+--- !u!33 &377114479
 MeshFilter:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 262855719}
+  m_GameObject: {fileID: 377114475}
   m_Mesh: {fileID: 4300000, guid: 5c2d1bfa1462a49e59089ec72112ae6d, type: 2}
---- !u!4 &262855724
+--- !u!4 &377114480
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 262855719}
+  m_GameObject: {fileID: 377114475}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: -512}
@@ -271,7 +272,7 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!21 &1491859590
+--- !u!21 &1249671072
 Material:
   serializedVersion: 8
   m_ObjectHideFlags: 0
@@ -392,4 +393,4 @@ Material:
 SceneRoots:
   m_ObjectHideFlags: 0
   m_Roots:
-  - {fileID: 262855724}
+  - {fileID: 377114480}

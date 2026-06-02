@@ -66,13 +66,15 @@ Shader "Environment/SnowBlanket"
             float4 _ShadowTint;
             
             float4 _GlobalSnowMapParams; // x: minX, y: minZ, z: size, w: 1/size
-            Texture2D _GlobalSnowHeightMap;
-            SamplerState sampler_GlobalSnowHeightMap;
+            TEXTURE2D(_GlobalSnowHeightMap);
 
             float GetRawH(float2 uv) 
             {
+                // 绝对防御边界：如果超出 0-1 范围，直接返回 0 (无雪)
+                if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return 0.0;
+                float rawH = SAMPLE_TEXTURE2D_LOD(_GlobalSnowHeightMap, sampler_LinearClamp, uv, 0).r;
+                
                 float halfSize = _GlobalSnowMapParams.z * 0.5;
-                float rawH = _GlobalSnowHeightMap.SampleLevel(sampler_GlobalSnowHeightMap, uv, 0).r;
                 float2 worldPosXZ = float2(
                     (uv.x / _GlobalSnowMapParams.w) + _GlobalSnowMapParams.x - halfSize,
                     (uv.y / _GlobalSnowMapParams.w) + _GlobalSnowMapParams.y - halfSize

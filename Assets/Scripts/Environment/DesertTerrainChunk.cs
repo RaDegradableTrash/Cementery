@@ -66,20 +66,7 @@ namespace EnvironmentSystem
         [Header("Global Seed")]
         public int seed = 42;
 
-        [Header("Minecraft-style Hilly Terrain (MC风凹凸峡谷丘陵)")]
-        public bool enableMinecraftHills = false; // Set to false by default to focus on sand dunes
-        public float hillMaxHeight = 35f;      // Maximum height of the rugged hills
-        public float hillNoiseScale = 120f;    // Base horizontal scale for the hills
-        [Range(1, 8)]
-        public int octaves = 5;                // Complexity octaves (FBM noise layers)
-        public float lacunarity = 2.1f;        // Frequency multiplier between octaves
-        public float gain = 0.48f;             // Amplitude multiplier between octaves
 
-        [Header("MC Stepped Stratification (MC风侵蚀阶梯)")]
-        public bool enableTerracing = true;
-        public float terraceStep = 5f;         // Vertical height of each step/block level (meters)
-        [Range(0.4f, 0.95f)]
-        public float terraceFlatness = 0.8f;   // Percentage of the step that is flat plateau before the cliff drop
 
         [Header("Legacy Rolling Dunes (传统沙丘 - 升级后混沌起伏)")]
         public float baseScale = 200f;       // Scale of large base hills
@@ -483,99 +470,58 @@ namespace EnvironmentSystem
         /// </summary>
         public float SampleBaseHeight(float worldX, float worldZ)
         {
-            if (enableMinecraftHills)
-            {
-                float fbmVal = 0f;
-                float amplitude = 1f;
-                float frequency = 1f / hillNoiseScale;
-                float maxAmp = 0f;
-                float ox = seed * 1.7f;
-                float oz = seed * 2.3f;
-
-                for (int i = 0; i < octaves; i++)
-                {
-                    float n = Mathf.PerlinNoise((worldX * frequency + ox), (worldZ * frequency + oz)) * 2f - 1f;
-                    float ridge = 1.0f - Mathf.Abs(n);
-                    float mixedVal = Mathf.Lerp(n, ridge * 2f - 1f, 0.42f);
-                    fbmVal += mixedVal * amplitude;
-                    maxAmp += amplitude;
-                    amplitude *= gain;
-                    frequency *= lacunarity;
-                }
-
-                float normalizedHeight = (fbmVal / maxAmp) * 0.5f + 0.5f;
-                float rawHeight = baseHeight + normalizedHeight * hillMaxHeight;
-
-                if (enableTerracing && terraceStep > 0.1f)
-                {
-                    float y = rawHeight / terraceStep;
-                    float floorY = Mathf.Floor(y);
-                    float fract = y - floorY;
-                    float smoothFract = fract < terraceFlatness ? 0f : Mathf.SmoothStep(0f, 1f, (fract - terraceFlatness) / (1f - terraceFlatness));
-                    return (floorY + smoothFract) * terraceStep;
-                }
-                return rawHeight;
-            }
-            else
-            {
-                float ox = seed * 1.7f;
-                float oz = seed * 2.3f;
-                return baseHeight + Mathf.PerlinNoise((worldX + ox) / baseScale, (worldZ + oz) / baseScale) * baseNoiseHeight;
-            }
+            float ox = seed * 1.7f;
+            float oz = seed * 2.3f;
+            return baseHeight + Mathf.PerlinNoise((worldX + ox) / baseScale, (worldZ + oz) / baseScale) * baseNoiseHeight;
         }
 
         /// <summary>
         /// Samples only the high-frequency sand dunes and wind-swept ripples.
         /// </summary>
-        public float SampleDetailHeight(float worldX, float worldZ, float baseHForRipples)
+        public float SampleDetailHeight(float worldX, float worldZ)
         {
-            float detailH = 0f;
+            float ox = seed * 1.7f;
+            float oz = seed * 2.3f;
 
-            if (!enableMinecraftHills)
-            {
-                float ox = seed * 1.7f;
-                float oz = seed * 2.3f;
+            // 2. Wind Direction Wandering
+            float angleWander = (Mathf.PerlinNoise((worldX + seed * 8.7f) / 380f, (worldZ + seed * 12.3f) / 380f) * 2f - 1f) * 30f;
+            float theta = (duneDirection + angleWander) * Mathf.Deg2Rad;
+            Vector2 windDir = new Vector2(Mathf.Cos(theta), Mathf.Sin(theta));
 
-                // 2. Wind Direction Wandering
-                float angleWander = (Mathf.PerlinNoise((worldX + seed * 8.7f) / 380f, (worldZ + seed * 12.3f) / 380f) * 2f - 1f) * 30f;
-                float theta = (duneDirection + angleWander) * Mathf.Deg2Rad;
-                Vector2 windDir = new Vector2(Mathf.Cos(theta), Mathf.Sin(theta));
+            // 3. Spacing Modulation
+            float spacingMod = Mathf.PerlinNoise((worldX + seed * 19.3f) / 450f, (worldZ + seed * 23.7f) / 450f);
+            float activeDuneSpacing = duneSpacing * Mathf.Lerp(0.65f, 1.45f, spacingMod);
 
-                // 3. Spacing Modulation
-                float spacingMod = Mathf.PerlinNoise((worldX + seed * 19.3f) / 450f, (worldZ + seed * 23.7f) / 450f);
-                float activeDuneSpacing = duneSpacing * Mathf.Lerp(0.65f, 1.45f, spacingMod);
+            // 4. Height Modulation
+            float heightMod = Mathf.PerlinNoise((worldX - seed * 31.1f) / 280f, (worldZ - seed * 27.9f) / 280f);
+            float activeDuneHeight = duneHeight * Mathf.Lerp(0.4f, 1.4f, heightMod);
 
-                // 4. Height Modulation
-                float heightMod = Mathf.PerlinNoise((worldX - seed * 31.1f) / 280f, (worldZ - seed * 27.9f) / 280f);
-                float activeDuneHeight = duneHeight * Mathf.Lerp(0.4f, 1.4f, heightMod);
+            // 5. Asymmetrical Main Sand Wave
+            float coord = worldX * windDir.x + worldZ * windDir.y;
+            float warp = Mathf.PerlinNoise((worldX + seed * 3.1f) / duneWarpScale, (worldZ + seed * 4.7f) / duneWarpScale) * duneWarpStrength;
+            float duneCoord = (coord + warp) / activeDuneSpacing;
+            float fraction = duneCoord - Mathf.Floor(duneCoord);
 
-                // 5. Asymmetrical Main Sand Wave
-                float coord = worldX * windDir.x + worldZ * windDir.y;
-                float warp = Mathf.PerlinNoise((worldX + seed * 3.1f) / duneWarpScale, (worldZ + seed * 4.7f) / duneWarpScale) * duneWarpStrength;
-                float duneCoord = (coord + warp) / activeDuneSpacing;
-                float fraction = duneCoord - Mathf.Floor(duneCoord);
+            float duneRaw = fraction < crestPosition 
+                ? Mathf.Pow(fraction / crestPosition, windwardExponent)
+                : ((1f - fraction) / (1f - crestPosition));
+            // 平滑圆润化沙丘尖峰，彻底消除因为法线突变和低模网格连接处产生的黑色锯齿折线！
+            float duneH = (duneRaw * duneRaw * (3f - 2f * duneRaw)) * activeDuneHeight;
 
-                float duneRaw = fraction < crestPosition 
-                    ? Mathf.Pow(fraction / crestPosition, windwardExponent)
-                    : ((1f - fraction) / (1f - crestPosition));
-                // 平滑圆润化沙丘尖峰，彻底消除因为法线突变和低模网格连接处产生的黑色锯齿折线！
-                float duneH = (duneRaw * duneRaw * (3f - 2f * duneRaw)) * activeDuneHeight;
+            // 6. Secondary Cross dunes
+            float secondaryTheta = (duneDirection + 35f) * Mathf.Deg2Rad;
+            Vector2 secWindDir = new Vector2(Mathf.Cos(secondaryTheta), Mathf.Sin(secondaryTheta));
+            float secCoord = worldX * secWindDir.x + worldZ * secWindDir.y;
+            float secWarp = Mathf.PerlinNoise((worldX + seed * 14.1f) / (duneWarpScale * 0.5f), (worldZ - seed * 11.7f) / (duneWarpScale * 0.5f)) * (duneWarpStrength * 0.4f);
+            float secDuneCoord = (secCoord + secWarp) / (activeDuneSpacing * 0.45f);
+            float secFraction = secDuneCoord - Mathf.Floor(secDuneCoord);
 
-                // 6. Secondary Cross dunes
-                float secondaryTheta = (duneDirection + 35f) * Mathf.Deg2Rad;
-                Vector2 secWindDir = new Vector2(Mathf.Cos(secondaryTheta), Mathf.Sin(secondaryTheta));
-                float secCoord = worldX * secWindDir.x + worldZ * secWindDir.y;
-                float secWarp = Mathf.PerlinNoise((worldX + seed * 14.1f) / (duneWarpScale * 0.5f), (worldZ - seed * 11.7f) / (duneWarpScale * 0.5f)) * (duneWarpStrength * 0.4f);
-                float secDuneCoord = (secCoord + secWarp) / (activeDuneSpacing * 0.45f);
-                float secFraction = secDuneCoord - Mathf.Floor(secDuneCoord);
+            float secDuneRaw = secFraction < 0.75f
+                ? Mathf.Pow(secFraction / 0.75f, 2f)
+                : ((1f - secFraction) / 0.25f);
+            float secDuneH = (secDuneRaw * secDuneRaw * (3f - 2f * secDuneRaw)) * (activeDuneHeight * 0.35f);
 
-                float secDuneRaw = secFraction < 0.75f
-                    ? Mathf.Pow(secFraction / 0.75f, 2f)
-                    : ((1f - secFraction) / 0.25f);
-                float secDuneH = (secDuneRaw * secDuneRaw * (3f - 2f * secDuneRaw)) * (activeDuneHeight * 0.35f);
-
-                detailH = duneH + secDuneH;
-            }
+            float detailH = duneH + secDuneH;
 
             // Wind-swept ripples
             float rippleTheta = rippleDirection * Mathf.Deg2Rad;
@@ -584,22 +530,14 @@ namespace EnvironmentSystem
             float rippleWarp = Mathf.PerlinNoise(worldX / 8f, worldZ / 8f) * 0.3f;
             float rippleVal = Mathf.Sin((rippleCoord + rippleWarp) * Mathf.PI * 2f);
 
-            float rippleFactor = 1.0f;
-            if (enableMinecraftHills && enableTerracing)
-            {
-                float yVal = baseHForRipples / terraceStep;
-                float fractVal = yVal - Mathf.Floor(yVal);
-                if (fractVal > 0.05f) rippleFactor = 0.05f;
-            }
-
-            float rippleH = (rippleVal * 0.5f + 0.5f) * rippleHeight * rippleFactor;
+            float rippleH = (rippleVal * 0.5f + 0.5f) * rippleHeight;
             return detailH + rippleH;
         }
 
         public float SampleHeight(float worldX, float worldZ)
         {
             float baseH = SampleBaseHeight(worldX, worldZ);
-            return baseH + SampleDetailHeight(worldX, worldZ, baseH);
+            return baseH + SampleDetailHeight(worldX, worldZ);
         }
 
         // ── Mesh Generation ────────────────────────────────────────────────────
@@ -1038,13 +976,6 @@ namespace EnvironmentSystem
             }
             if (blendWidth < 1) blendWidth = 1;
             if (detailScale < 0.1f) detailScale = 0.1f;
-
-            if (hillNoiseScale < 1f) hillNoiseScale = 1f;
-            if (octaves < 1) octaves = 1;
-            if (octaves > 8) octaves = 8;
-            if (terraceStep < 0.1f) terraceStep = 0.1f;
-            if (terraceFlatness < 0.1f) terraceFlatness = 0.1f;
-            if (terraceFlatness >= 0.99f) terraceFlatness = 0.99f;
         }
 
         // ── Async Build System ─────────────────────────────────────────────────
@@ -1056,11 +987,6 @@ namespace EnvironmentSystem
         {
             public bool isValid;
             public int seed;
-            public bool enableMinecraftHills;
-            public float hillMaxHeight, hillNoiseScale, lacunarity, gain;
-            public int octaves;
-            public bool enableTerracing;
-            public float terraceStep, terraceFlatness;
             public float baseScale, baseHeight, baseNoiseHeight;
             public float duneSpacing, duneHeight, duneDirection;
             public float duneWarpScale, duneWarpStrength;
@@ -1078,15 +1004,6 @@ namespace EnvironmentSystem
                 {
                     isValid         = true,
                     seed            = c.seed,
-                    enableMinecraftHills = c.enableMinecraftHills,
-                    hillMaxHeight   = c.hillMaxHeight,
-                    hillNoiseScale  = c.hillNoiseScale,
-                    lacunarity      = c.lacunarity,
-                    gain            = c.gain,
-                    octaves         = c.octaves,
-                    enableTerracing = c.enableTerracing,
-                    terraceStep     = c.terraceStep,
-                    terraceFlatness = c.terraceFlatness,
                     baseScale       = c.baseScale,
                     baseHeight      = c.baseHeight,
                     baseNoiseHeight = c.baseNoiseHeight,
@@ -1127,95 +1044,58 @@ namespace EnvironmentSystem
 
         private static float SampleBaseHeightS(in TerrainHeightParams p, float wx, float wz)
         {
-            if (p.enableMinecraftHills)
-            {
-                float fbmVal = 0f, amplitude = 1f, frequency = 1f / p.hillNoiseScale, maxAmp = 0f;
-                float ox = p.seed * 1.7f, oz = p.seed * 2.3f;
-                for (int i = 0; i < p.octaves; i++)
-                {
-                    float n = Mathf.PerlinNoise(wx * frequency + ox, wz * frequency + oz) * 2f - 1f;
-                    float ridge = 1.0f - Mathf.Abs(n);
-                    fbmVal += Mathf.Lerp(n, ridge * 2f - 1f, 0.42f) * amplitude;
-                    maxAmp += amplitude;
-                    amplitude *= p.gain;
-                    frequency *= p.lacunarity;
-                }
-                float rawHeight = p.baseHeight + (fbmVal / maxAmp * 0.5f + 0.5f) * p.hillMaxHeight;
-                if (p.enableTerracing && p.terraceStep > 0.1f)
-                {
-                    float y = rawHeight / p.terraceStep;
-                    float floorY = Mathf.Floor(y);
-                    float fract = y - floorY;
-                    float sf = fract < p.terraceFlatness
-                        ? 0f
-                        : Mathf.SmoothStep(0f, 1f, (fract - p.terraceFlatness) / (1f - p.terraceFlatness));
-                    return (floorY + sf) * p.terraceStep;
-                }
-                return rawHeight;
-            }
-            else
-            {
-                float ox = p.seed * 1.7f, oz = p.seed * 2.3f;
-                return p.baseHeight + Mathf.PerlinNoise((wx + ox) / p.baseScale, (wz + oz) / p.baseScale) * p.baseNoiseHeight;
-            }
+            float ox = p.seed * 1.7f, oz = p.seed * 2.3f;
+            return p.baseHeight + Mathf.PerlinNoise((wx + ox) / p.baseScale, (wz + oz) / p.baseScale) * p.baseNoiseHeight;
         }
 
-        private static float SampleDetailHeightS(in TerrainHeightParams p, float wx, float wz, float baseH)
+        private static float SampleDetailHeightS(in TerrainHeightParams p, float wx, float wz)
         {
             float detailH = 0f;
-            if (!p.enableMinecraftHills)
-            {
-                float angleWander = (Mathf.PerlinNoise((wx + p.seed * 8.7f) / 380f, (wz + p.seed * 12.3f) / 380f) * 2f - 1f) * 30f;
-                float theta = (p.duneDirection + angleWander) * Mathf.Deg2Rad;
-                var windDir = new Vector2(Mathf.Cos(theta), Mathf.Sin(theta));
 
-                float spacingMod = Mathf.PerlinNoise((wx + p.seed * 19.3f) / 450f, (wz + p.seed * 23.7f) / 450f);
-                float activeDuneSpacing = p.duneSpacing * Mathf.Lerp(0.65f, 1.45f, spacingMod);
-                float heightMod = Mathf.PerlinNoise((wx - p.seed * 31.1f) / 280f, (wz - p.seed * 27.9f) / 280f);
-                float activeDuneHeight = p.duneHeight * Mathf.Lerp(0.4f, 1.4f, heightMod);
+            float angleWander = (Mathf.PerlinNoise((wx + p.seed * 8.7f) / 380f, (wz + p.seed * 12.3f) / 380f) * 2f - 1f) * 30f;
+            float theta = (p.duneDirection + angleWander) * Mathf.Deg2Rad;
+            var windDir = new Vector2(Mathf.Cos(theta), Mathf.Sin(theta));
 
-                float coord = wx * windDir.x + wz * windDir.y;
-                float warp  = Mathf.PerlinNoise((wx + p.seed * 3.1f) / p.duneWarpScale, (wz + p.seed * 4.7f) / p.duneWarpScale) * p.duneWarpStrength;
-                float duneCoord = (coord + warp) / activeDuneSpacing;
-                float fraction  = duneCoord - Mathf.Floor(duneCoord);
-                float duneRaw = fraction < p.crestPosition
-                    ? Mathf.Pow(fraction / p.crestPosition, p.windwardExponent)
-                    : ((1f - fraction) / (1f - p.crestPosition));
-                // 平滑圆润化沙丘尖峰，彻底消除因为法线突变和低模网格连接处产生的黑色锯齿折线！
-                float duneH = (duneRaw * duneRaw * (3f - 2f * duneRaw)) * activeDuneHeight;
+            float spacingMod = Mathf.PerlinNoise((wx + p.seed * 19.3f) / 450f, (wz + p.seed * 23.7f) / 450f);
+            float activeDuneSpacing = p.duneSpacing * Mathf.Lerp(0.65f, 1.45f, spacingMod);
+            float heightMod = Mathf.PerlinNoise((wx - p.seed * 31.1f) / 280f, (wz - p.seed * 27.9f) / 280f);
+            float activeDuneHeight = p.duneHeight * Mathf.Lerp(0.4f, 1.4f, heightMod);
 
-                float secTheta = (p.duneDirection + 35f) * Mathf.Deg2Rad;
-                var secWindDir = new Vector2(Mathf.Cos(secTheta), Mathf.Sin(secTheta));
-                float secCoord = wx * secWindDir.x + wz * secWindDir.y;
-                float secWarp  = Mathf.PerlinNoise((wx + p.seed * 14.1f) / (p.duneWarpScale * 0.5f), (wz - p.seed * 11.7f) / (p.duneWarpScale * 0.5f)) * (p.duneWarpStrength * 0.4f);
-                float secDuneCoord = (secCoord + secWarp) / (activeDuneSpacing * 0.45f);
-                float secFraction  = secDuneCoord - Mathf.Floor(secDuneCoord);
-                float secDuneRaw = secFraction < 0.75f
-                    ? Mathf.Pow(secFraction / 0.75f, 2f)
-                    : ((1f - secFraction) / 0.25f);
-                float secDuneH = (secDuneRaw * secDuneRaw * (3f - 2f * secDuneRaw)) * (activeDuneHeight * 0.35f);
-                detailH = duneH + secDuneH;
-            }
+            float coord = wx * windDir.x + wz * windDir.y;
+            float warp  = Mathf.PerlinNoise((wx + p.seed * 3.1f) / p.duneWarpScale, (wz + p.seed * 4.7f) / p.duneWarpScale) * p.duneWarpStrength;
+            float duneCoord = (coord + warp) / activeDuneSpacing;
+            float fraction  = duneCoord - Mathf.Floor(duneCoord);
+            float duneRaw = fraction < p.crestPosition
+                ? Mathf.Pow(fraction / p.crestPosition, p.windwardExponent)
+                : ((1f - fraction) / (1f - p.crestPosition));
+            // 平滑圆润化沙丘尖峰，彻底消除因为法线突变和低模网格连接处产生的黑色锯齿折线！
+            float duneH = (duneRaw * duneRaw * (3f - 2f * duneRaw)) * activeDuneHeight;
+
+            float secTheta = (p.duneDirection + 35f) * Mathf.Deg2Rad;
+            var secWindDir = new Vector2(Mathf.Cos(secTheta), Mathf.Sin(secTheta));
+            float secCoord = wx * secWindDir.x + wz * secWindDir.y;
+            float secWarp  = Mathf.PerlinNoise((wx + p.seed * 14.1f) / (p.duneWarpScale * 0.5f), (wz - p.seed * 11.7f) / (p.duneWarpScale * 0.5f)) * (p.duneWarpStrength * 0.4f);
+            float secDuneCoord = (secCoord + secWarp) / (activeDuneSpacing * 0.45f);
+            float secFraction  = secDuneCoord - Mathf.Floor(secDuneCoord);
+            float secDuneRaw = secFraction < 0.75f
+                ? Mathf.Pow(secFraction / 0.75f, 2f)
+                : ((1f - secFraction) / 0.25f);
+            float secDuneH = (secDuneRaw * secDuneRaw * (3f - 2f * secDuneRaw)) * (activeDuneHeight * 0.35f);
+            detailH = duneH + secDuneH;
 
             float rippleTheta = p.rippleDirection * Mathf.Deg2Rad;
             var rippleDir = new Vector2(Mathf.Cos(rippleTheta), Mathf.Sin(rippleTheta));
             float rippleCoord = (wx * rippleDir.x + wz * rippleDir.y) / p.rippleSpacing;
             float rippleWarp  = Mathf.PerlinNoise(wx / 8f, wz / 8f) * 0.3f;
             float rippleVal   = Mathf.Sin((rippleCoord + rippleWarp) * Mathf.PI * 2f);
-            float rippleFactor = 1.0f;
-            if (p.enableMinecraftHills && p.enableTerracing)
-            {
-                float yVal = baseH / p.terraceStep;
-                float fractVal = yVal - Mathf.Floor(yVal);
-                if (fractVal > 0.05f) rippleFactor = 0.05f;
-            }
-            return detailH + (rippleVal * 0.5f + 0.5f) * p.rippleHeight * rippleFactor;
+
+            return detailH + (rippleVal * 0.5f + 0.5f) * p.rippleHeight;
         }
 
         private static float SampleHeightS(in TerrainHeightParams p, float wx, float wz)
         {
             float baseH = SampleBaseHeightS(in p, wx, wz);
-            return baseH + SampleDetailHeightS(in p, wx, wz, baseH);
+            return baseH + SampleDetailHeightS(in p, wx, wz);
         }
 
         private static float GetStitchedHeightS(
