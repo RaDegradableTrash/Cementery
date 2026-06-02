@@ -555,9 +555,11 @@ namespace EnvironmentSystem
                 float duneCoord = (coord + warp) / activeDuneSpacing;
                 float fraction = duneCoord - Mathf.Floor(duneCoord);
 
-                float duneH = fraction < crestPosition 
-                    ? Mathf.Pow(fraction / crestPosition, windwardExponent) * activeDuneHeight
-                    : ((1f - fraction) / (1f - crestPosition)) * activeDuneHeight;
+                float duneRaw = fraction < crestPosition 
+                    ? Mathf.Pow(fraction / crestPosition, windwardExponent)
+                    : ((1f - fraction) / (1f - crestPosition));
+                // 平滑圆润化沙丘尖峰，彻底消除因为法线突变和低模网格连接处产生的黑色锯齿折线！
+                float duneH = (duneRaw * duneRaw * (3f - 2f * duneRaw)) * activeDuneHeight;
 
                 // 6. Secondary Cross dunes
                 float secondaryTheta = (duneDirection + 35f) * Mathf.Deg2Rad;
@@ -567,9 +569,10 @@ namespace EnvironmentSystem
                 float secDuneCoord = (secCoord + secWarp) / (activeDuneSpacing * 0.45f);
                 float secFraction = secDuneCoord - Mathf.Floor(secDuneCoord);
 
-                float secDuneH = secFraction < 0.75f
-                    ? Mathf.Pow(secFraction / 0.75f, 2f) * (activeDuneHeight * 0.35f)
-                    : ((1f - secFraction) / 0.25f) * (activeDuneHeight * 0.35f);
+                float secDuneRaw = secFraction < 0.75f
+                    ? Mathf.Pow(secFraction / 0.75f, 2f)
+                    : ((1f - secFraction) / 0.25f);
+                float secDuneH = (secDuneRaw * secDuneRaw * (3f - 2f * secDuneRaw)) * (activeDuneHeight * 0.35f);
 
                 detailH = duneH + secDuneH;
             }
@@ -1175,9 +1178,11 @@ namespace EnvironmentSystem
                 float warp  = Mathf.PerlinNoise((wx + p.seed * 3.1f) / p.duneWarpScale, (wz + p.seed * 4.7f) / p.duneWarpScale) * p.duneWarpStrength;
                 float duneCoord = (coord + warp) / activeDuneSpacing;
                 float fraction  = duneCoord - Mathf.Floor(duneCoord);
-                float duneH = fraction < p.crestPosition
-                    ? Mathf.Pow(fraction / p.crestPosition, p.windwardExponent) * activeDuneHeight
-                    : ((1f - fraction) / (1f - p.crestPosition)) * activeDuneHeight;
+                float duneRaw = fraction < p.crestPosition
+                    ? Mathf.Pow(fraction / p.crestPosition, p.windwardExponent)
+                    : ((1f - fraction) / (1f - p.crestPosition));
+                // 平滑圆润化沙丘尖峰，彻底消除因为法线突变和低模网格连接处产生的黑色锯齿折线！
+                float duneH = (duneRaw * duneRaw * (3f - 2f * duneRaw)) * activeDuneHeight;
 
                 float secTheta = (p.duneDirection + 35f) * Mathf.Deg2Rad;
                 var secWindDir = new Vector2(Mathf.Cos(secTheta), Mathf.Sin(secTheta));
@@ -1185,9 +1190,10 @@ namespace EnvironmentSystem
                 float secWarp  = Mathf.PerlinNoise((wx + p.seed * 14.1f) / (p.duneWarpScale * 0.5f), (wz - p.seed * 11.7f) / (p.duneWarpScale * 0.5f)) * (p.duneWarpStrength * 0.4f);
                 float secDuneCoord = (secCoord + secWarp) / (activeDuneSpacing * 0.45f);
                 float secFraction  = secDuneCoord - Mathf.Floor(secDuneCoord);
-                float secDuneH = secFraction < 0.75f
-                    ? Mathf.Pow(secFraction / 0.75f, 2f) * (activeDuneHeight * 0.35f)
-                    : ((1f - secFraction) / 0.25f) * (activeDuneHeight * 0.35f);
+                float secDuneRaw = secFraction < 0.75f
+                    ? Mathf.Pow(secFraction / 0.75f, 2f)
+                    : ((1f - secFraction) / 0.25f);
+                float secDuneH = (secDuneRaw * secDuneRaw * (3f - 2f * secDuneRaw)) * (activeDuneHeight * 0.35f);
                 detailH = duneH + secDuneH;
             }
 

@@ -18,6 +18,11 @@ public class GridInventorySystem : MonoBehaviour
     // 当前操作层级（Y轴）
     public int currentLayer = 0;
 
+    public event System.Action<ItemInstance> OnItemPlaced;
+    public event System.Action<ItemInstance> OnItemRemoved;
+
+    private readonly List<ItemInstance> allItems = new List<ItemInstance>();
+
     void Awake()
     {
         grid = new ItemInstance[gridWidth, gridHeight, gridDepth];
@@ -49,6 +54,10 @@ public class GridInventorySystem : MonoBehaviour
             Vector3Int pos = anchor + offset;
             grid[pos.x, pos.y, pos.z] = instance;
         }
+        
+        allItems.Add(instance);
+        OnItemPlaced?.Invoke(instance);
+        
         return true;
     }
 
@@ -65,6 +74,9 @@ public class GridInventorySystem : MonoBehaviour
             if (InBounds(pos) && grid[pos.x, pos.y, pos.z] == inst)
                 grid[pos.x, pos.y, pos.z] = null;
         }
+        
+        allItems.Remove(inst);
+        OnItemRemoved?.Invoke(inst);
     }
 
     /// <summary>
@@ -86,6 +98,23 @@ public class GridInventorySystem : MonoBehaviour
             return true;
 
         return grid[pos.x, pos.y, pos.z] != null;
+    }
+
+    /// <summary>
+    /// 获取指定坐标处的物品实例，如果没有则返回null
+    /// </summary>
+    public ItemInstance GetItemAt(Vector3Int pos)
+    {
+        if (!InBounds(pos)) return null;
+        return grid[pos.x, pos.y, pos.z];
+    }
+    
+    /// <summary>
+    /// 获取背包中所有放置的物品
+    /// </summary>
+    public IReadOnlyList<ItemInstance> GetAllItems()
+    {
+        return allItems;
     }
 
     // 可扩展：序列化存档、物理属性、层级高亮等

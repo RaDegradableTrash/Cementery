@@ -29,8 +29,8 @@ Shader "Hidden/SnowModification"
                 float warpedRadius = _BrushParams.w; 
                 
                 float t = saturate(1.0 - (dist / warpedRadius));
-                // Use a smoothstep blended with noise for muddy, irregular accumulation
-                float brush = smoothstep(0, 1, pow(t, 2.5)) * _BrushStrength.x * occlusion;
+                // Use a smoothstep blended with noise for muddy, irregular accumulation, with power 4.0 for extremely soft boundaries!
+                float brush = smoothstep(0, 1, pow(t, 4.0)) * _BrushStrength.x * occlusion;
                 
                 return saturate(current + brush);
             }

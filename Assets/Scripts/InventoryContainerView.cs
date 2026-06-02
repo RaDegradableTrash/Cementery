@@ -36,6 +36,9 @@ public class InventoryContainerView : MonoBehaviour
     private int _cachedDepth = -1;
     private float _cachedInset = -1f;
 
+    private Transform _placedItemsRoot;
+    private Dictionary<ItemInstance, GameObject> _placedVisuals = new Dictionary<ItemInstance, GameObject>();
+
     void Start()
     {
         InitVisualRefs();
@@ -46,6 +49,21 @@ public class InventoryContainerView : MonoBehaviour
     {
         InitVisualRefs();
         UpdateGridPlane();
+        if (inventorySystem != null)
+        {
+            inventorySystem.OnItemPlaced += HandleItemPlaced;
+            inventorySystem.OnItemRemoved += HandleItemRemoved;
+            RefreshAllPlacedItems();
+        }
+    }
+
+    void OnDisable()
+    {
+        if (inventorySystem != null)
+        {
+            inventorySystem.OnItemPlaced -= HandleItemPlaced;
+            inventorySystem.OnItemRemoved -= HandleItemRemoved;
+        }
     }
 
     void Update()
@@ -314,5 +332,141 @@ public class InventoryContainerView : MonoBehaviour
             inventoryCameraController = FindObjectOfType<InventoryCameraController>();
 
         return inventoryCameraController != null && inventoryCameraController.IsInventoryActive;
+    }
+
+    void EnsurePlacedItemsRoot()
+    {
+        if (_placedItemsRoot != null)
+            return;
+
+        Transform existing = transform.Find("PlacedItems_Runtime");
+        if (existing != null)
+        {
+            _placedItemsRoot = existing;
+            return;
+        }
+
+        GameObject root = new GameObject("PlacedItems_Runtime");
+        _placedItemsRoot = root.transform;
+        _placedItemsRoot.SetParent(transform, false);
+        _placedItemsRoot.localPosition = Vector3.zero;
+        _placedItemsRoot.localRotation = Quaternion.identity;
+    }
+
+    void HandleItemPlaced(ItemInstance instance)
+    {
+        EnsurePlacedItemsRoot();
+        if (instance == null || instance.item == null) return;
+        
+        GameObject visual;
+        if (instance.item.previewPrefab != null)
+        {
+            visual = Instantiate(instance.item.previewPrefab, _placedItemsRoot);
+        }
+        else
+        {
+            visual = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            visual.transform.SetParent(_placedItemsRoot, false);
+            visual.transform.localScale = new Vector3(0.9f, 0.9f, 0.9f);
+        }
+        
+        visual.name = $"Placed_{instance.item.itemName ?? instance.item.name}";
+        visual.transform.localPosition = instance.anchor;
+        visual.transform.localRotation = instance.rotation;
+        
+        // Disable physics components as this is purely visual inside the inventory
+        var colliders = visual.GetComponentsInChildren<Collider>(true);
+        foreach (var c in colliders) c.enabled = false;
+        var rbs = visual.GetComponentsInChildren<Rigidbody>(true);
+        foreach (var rb in rbs) 
+        {
+            if (Application.isPlaying) Destroy(rb);
+            else DestroyImmediate(rb);
+        }
+        
+        var renderers = visual.GetComponentsInChildren<Renderer>(true);
+        foreach (var r in renderers)
+        {
+            r.enabled = true;
+            r.SetPropertyBlock(null);
+        }
+        
+        SetLayerRecursively(visual, gameObject.layer);
+        _placedVisuals[instance] = visual;
+    }
+
+    void HandleItemRemoved(ItemInstance instance)
+    {
+        if (_placedVisuals.TryGetValue(instance, out GameObject visual))
+        {
+            if (visual != null)
+            {
+                if (Application.isPlaying) Destroy(visual);
+                else DestroyImmediate(visual);
+            }
+            _placedVisuals.Remove(instance);
+        }
+    }
+
+    void RefreshAllPlacedItems()
+    {
+        foreach (var visual in _placedVisuals.Values)
+        {
+            if (visual != null)
+            {
+                if (Application.isPlaying) Destroy(visual);
+                else DestroyImmediate(visual);
+            }
+        }
+        _placedVisuals.Clear();
+        
+        if (inventorySystem == null) return;
+        
+        foreach (var item in inventorySystem.GetAllItems())
+        {
+            HandleItemPlaced(item);
+        }
+    }
+
+    void SetLayerRecursively(GameObject obj, int newLayer)
+    {
+        if (obj == null) return;
+        obj.layer = newLayer;
+        foreach (Transform child in obj.transform)
+        {
+            if (child != null)
+                SetLayerRecursively(child.gameObject, newLayer);
+        }
+    }
+
+    /// <summary>
+    /// Helper for the Controller to pick up items via raycast against the visual renderers
+    /// </summary>
+    public ItemInstance GetItemAtRay(Ray ray)
+    {
+        float nearestDist = float.PositiveInfinity;
+        ItemInstance nearestInstance = null;
+
+        foreach (var kvp in _placedVisuals)
+        {
+            GameObject visual = kvp.Value;
+            if (visual == null) continue;
+
+            Renderer[] renderers = visual.GetComponentsInChildren<Renderer>(true);
+            foreach (var r in renderers)
+            {
+                if (!r.enabled) continue;
+                if (r.bounds.IntersectRay(ray, out float dist))
+                {
+                    if (dist < nearestDist)
+                    {
+                        nearestDist = dist;
+                        nearestInstance = kvp.Key;
+                    }
+                }
+            }
+        }
+
+        return nearestInstance;
     }
 }

@@ -16,13 +16,6 @@ public class InventoryRaycastPlacer : MonoBehaviour
         public Coroutine shakeCoroutine;
     }
 
-    class PlacedItemMarker : MonoBehaviour
-    {
-        public ItemData itemData;
-        public Vector3Int anchor;
-        public Quaternion rotation;
-    }
-
     class CellTile
     {
         public int x;
@@ -90,7 +83,6 @@ public class InventoryRaycastPlacer : MonoBehaviour
     private readonly Dictionary<Vector2Int, bool> _previewFootprintBlocked = new Dictionary<Vector2Int, bool>();
     private readonly HashSet<Vector2Int> _occupiedFailFlashCells = new HashSet<Vector2Int>();
     private Transform _cellRoot;
-    private Transform _placedItemsRoot;
     private Material _runtimeCellMaterial;
     private int _cachedCellWidth = -1;
     private int _cachedCellDepth = -1;
@@ -256,8 +248,6 @@ public class InventoryRaycastPlacer : MonoBehaviour
         // Success Place
         if (inventorySystem.Place(previewItemData, gridPos, previewRotation))
         {
-            CommitPlacedItemVisual(gridPos, previewRotation);
-
             InteractionSystem interaction = GetInteractionSystem();
             if (interaction != null)
             {
@@ -280,92 +270,43 @@ public class InventoryRaycastPlacer : MonoBehaviour
         if (inventoryCamera == null || inventorySystem == null)
             return;
 
-        EnsurePlacedItemsRoot();
-        if (_placedItemsRoot == null)
-            return;
+        InventoryContainerView view = FindObjectOfType<InventoryContainerView>();
+        if (view == null) return;
 
         Ray ray = inventoryCamera.ScreenPointToRay(Input.mousePosition);
-        PlacedItemMarker marker = FindNearestPlacedItemMarker(ray);
-        if (marker == null || marker.itemData == null)
+        ItemInstance instance = view.GetItemAtRay(ray);
+        
+        if (instance == null || instance.item == null)
             return;
 
-        if (inventorySystem.InBounds(marker.anchor))
-            inventorySystem.Remove(marker.anchor);
+        if (inventorySystem.InBounds(instance.anchor))
+            inventorySystem.Remove(instance.anchor);
 
-        previewItemData = marker.itemData;
-        previewRotation = marker.rotation;
-        previewObject = marker.transform;
-        previewRenderers = previewObject != null
-            ? previewObject.GetComponentsInChildren<Renderer>(true)
-            : null;
+        // Recreate the preview since the View destroyed the placed visual
+        previewItemData = instance.item;
+        previewRotation = instance.rotation;
+        
+        GameObject previewGo = instance.item.previewPrefab != null
+            ? Instantiate(instance.item.previewPrefab, inventoryRoot)
+            : CreateFallbackPreview(instance.item);
 
-        if (previewObject != null && previewObject.parent != inventoryRoot)
-            previewObject.SetParent(inventoryRoot, false);
-
-        if (marker != null)
+        if (previewGo != null)
         {
-            if (Application.isPlaying) Destroy(marker);
-            else UnityEngine.Object.DestroyImmediate(marker);
+            previewObject = previewGo.transform;
+            previewObject.localPosition = instance.anchor;
+            previewObject.localRotation = instance.rotation;
+            previewRenderers = previewGo.GetComponentsInChildren<Renderer>(true);
+            DisablePreviewPhysics(previewGo);
+            SetLayerRecursively(previewGo, gridPlane.gameObject.layer);
+            SetPreviewVisible(true);
+            SetPreviewColor(validPreviewColor);
         }
-
-        SetPreviewVisible(true);
-        SetPreviewColor(validPreviewColor);
-
+        
         InteractionSystem interaction = GetInteractionSystem();
         if (interaction != null)
         {
-            // Removed SetPendingInventoryCarryItem logic
+            // Pending carry item logic
         }
-    }
-
-    PlacedItemMarker FindNearestPlacedItemMarker(Ray ray)
-    {
-        if (_placedItemsRoot == null)
-            return null;
-
-        PlacedItemMarker[] markers = _placedItemsRoot.GetComponentsInChildren<PlacedItemMarker>(true);
-        if (markers == null || markers.Length == 0)
-            return null;
-
-        float nearestDistance = float.PositiveInfinity;
-        PlacedItemMarker nearest = null;
-
-        for (int i = 0; i < markers.Length; i++)
-        {
-            PlacedItemMarker marker = markers[i];
-            if (marker == null || marker.itemData == null)
-                continue;
-
-            Renderer[] renderers = marker.GetComponentsInChildren<Renderer>(true);
-            if (renderers == null || renderers.Length == 0)
-                continue;
-
-            float markerNearest = float.PositiveInfinity;
-            bool hit = false;
-            for (int r = 0; r < renderers.Length; r++)
-            {
-                Renderer renderer = renderers[r];
-                if (renderer == null || !renderer.enabled)
-                    continue;
-
-                if (!renderer.bounds.IntersectRay(ray, out float hitDistance))
-                    continue;
-
-                if (hitDistance >= markerNearest)
-                    continue;
-
-                markerNearest = hitDistance;
-                hit = true;
-            }
-
-            if (!hit || markerNearest >= nearestDistance)
-                continue;
-
-            nearestDistance = markerNearest;
-            nearest = marker;
-        }
-
-        return nearest;
     }
 
     void TryTriggerOccupiedFailFlash(Vector3Int anchor, bool anchorInBounds)
@@ -709,94 +650,8 @@ public class InventoryRaycastPlacer : MonoBehaviour
         _cachedCellDepth = depth;
     }
 
-    void EnsurePlacedItemsRoot()
-    {
-        if (_placedItemsRoot != null)
-            return;
+    // Ensure PlacedItemsRoot and CommitPlacedItemVisual logic was completely moved to View.
 
-        Transform existing = inventoryRoot.Find("PlacedItems_Runtime");
-        if (existing != null)
-        {
-            _placedItemsRoot = existing;
-            return;
-        }
-
-        GameObject root = new GameObject("PlacedItems_Runtime");
-        _placedItemsRoot = root.transform;
-        _placedItemsRoot.SetParent(inventoryRoot, false);
-        _placedItemsRoot.localPosition = Vector3.zero;
-        _placedItemsRoot.localRotation = Quaternion.identity;
-    }
-
-    void CommitPlacedItemVisual(Vector3Int anchor, Quaternion rotation)
-    {
-        if (!keepPlacedItemsInInventory)
-            return;
-
-        EnsurePlacedItemsRoot();
-        if (_placedItemsRoot == null)
-            return;
-
-        if (previewObject != null)
-        {
-            Transform placed = previewObject;
-            Renderer[] placedRenderers = previewRenderers;
-
-            if (placed.parent != _placedItemsRoot)
-                placed.SetParent(_placedItemsRoot, false);
-
-            placed.localPosition = anchor;
-            placed.localRotation = rotation;
-            placed.name = $"Placed_{(previewItemData != null ? previewItemData.name : "Item")}";
-
-            AttachPlacedItemMarker(placed.gameObject, previewItemData, anchor, rotation);
-
-            if (placedRenderers != null)
-            {
-                for (int i = 0; i < placedRenderers.Length; i++)
-                {
-                    Renderer r = placedRenderers[i];
-                    if (r == null) continue;
-                    r.enabled = true;
-                    r.SetPropertyBlock(null);
-                }
-            }
-
-            previewObject = null;
-            previewRenderers = null;
-            return;
-        }
-
-        if (previewItemData == null)
-            return;
-
-        GameObject placedGo = previewItemData.previewPrefab != null
-            ? Instantiate(previewItemData.previewPrefab, _placedItemsRoot)
-            : CreateFallbackPreview(previewItemData);
-        if (placedGo == null)
-            return;
-
-        if (placedGo.transform.parent != _placedItemsRoot)
-            placedGo.transform.SetParent(_placedItemsRoot, false);
-
-        placedGo.transform.localPosition = anchor;
-        placedGo.transform.localRotation = rotation;
-        placedGo.name = $"Placed_{previewItemData.name}";
-
-        AttachPlacedItemMarker(placedGo, previewItemData, anchor, rotation);
-
-        DisablePreviewPhysics(placedGo);
-        SetLayerRecursively(placedGo, gridPlane.gameObject.layer);
-
-        Renderer[] renderers = placedGo.GetComponentsInChildren<Renderer>(true);
-        for (int i = 0; i < renderers.Length; i++)
-        {
-            Renderer r = renderers[i];
-            if (r == null) continue;
-            r.enabled = true;
-            r.SetPropertyBlock(null);
-        }
-    }
 
     void ClearCellTiles()
     {
@@ -1068,19 +923,7 @@ public class InventoryRaycastPlacer : MonoBehaviour
             all[i].gameObject.layer = layer;
     }
 
-    void AttachPlacedItemMarker(GameObject go, ItemData itemData, Vector3Int anchor, Quaternion rotation)
-    {
-        if (go == null)
-            return;
-
-        PlacedItemMarker marker = go.GetComponent<PlacedItemMarker>();
-        if (marker == null)
-            marker = go.AddComponent<PlacedItemMarker>();
-
-        marker.itemData = itemData;
-        marker.anchor = anchor;
-        marker.rotation = rotation;
-    }
+    // Removed AttachPlacedItemMarker
 
     public static InventoryRaycastPlacer GetPrimaryPlacer()
     {

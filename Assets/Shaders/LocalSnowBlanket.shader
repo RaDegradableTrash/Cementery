@@ -6,26 +6,35 @@ Shader "Environment/LocalSnowBlanket"
         _DisplacementScale ("Displacement Scale", Float) = 0.2
         _NormalBlend ("Normal Blend", Range(0, 1)) = 0.8
         _SnowColor ("Snow Color", Color) = (0.95, 0.98, 1.0, 1.0)
+        _ShadowSoftness ("Shadow Softness", Range(0, 1)) = 0.6
+        _LambertSoftness ("Lambert Softness", Range(0, 1)) = 0.5
+        _AmbientBoost ("Ambient Boost", Range(0, 3)) = 1.6
+        _ShadowTint ("Shadow Tint (Sky Blue)", Color) = (0.82, 0.92, 1.0, 1.0)
     }
     SubShader
     {
-        Tags { "RenderType"="Opaque" "Queue"="AlphaTest" "RenderPipeline"="UniversalPipeline" }
+        Tags { "RenderType"="Transparent" "Queue"="Geometry+50" "RenderPipeline"="UniversalPipeline" }
         LOD 200
         
-        AlphaToMask On
-        ZWrite On
-        Blend One Zero
+        ZWrite Off
+        Blend SrcAlpha OneMinusSrcAlpha
         Offset -1, -1
 
         Pass
         {
             Name "ForwardLit"
             Tags { "LightMode" = "UniversalForward" }
+            Offset -1, -1
 
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
             #pragma target 3.5
+            
+            // Required for URP shadow receiving
+            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS
+            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS_CASCADE
+            #pragma multi_compile _ _SHADOWS_SOFT
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
@@ -48,44 +57,113 @@ Shader "Environment/LocalSnowBlanket"
             float _Cutoff;
             float _NormalBlend;
             float4 _SnowColor;
+            float _DisplacementScale;
+            float _ShadowSoftness;
+            float _LambertSoftness;
+            float _AmbientBoost;
+            float4 _ShadowTint;
             
             float4 _LocalSnowBounds; // x: minX, y: minZ, z: lengthX, w: lengthZ
             float4x4 _RootWorldToLocal;
             Texture2D _LocalSnowHeightMap;
             SamplerState sampler_LocalSnowHeightMap;
 
-            float GetLocalSnowHeight(float3 positionWS)
+            void GetLocalSnowData(float3 positionWS, out float rawH, out float pillowH, out float3 pixelNormal)
             {
-                // Convert world position to the Root object's local space
                 float4 rootLocalPos = mul(_RootWorldToLocal, float4(positionWS, 1.0));
                 
                 float u = (rootLocalPos.x - _LocalSnowBounds.x) / _LocalSnowBounds.z;
                 float v = (rootLocalPos.z - _LocalSnowBounds.y) / _LocalSnowBounds.w;
                 
-                if (u < 0 || u > 1 || v < 0 || v > 1) return 0;
-                
-                float2 snowData = _LocalSnowHeightMap.SampleLevel(sampler_LocalSnowHeightMap, float2(u, v), 0).rg;
-                float h = snowData.r;
-                float hitY = snowData.g;
-                
-                // Z-Buffer check: if this vertex is significantly below the highest particle hit in this column, it's inside or underneath!
-                if (rootLocalPos.y < hitY - 0.5) 
+                if (u < 0 || u > 1 || v < 0 || v > 1) 
                 {
-                    return 0; // Ignore this vertex!
+                    rawH = 0; pillowH = 0; pixelNormal = float3(0,0,0);
+                    return;
                 }
                 
-                return h;
+                float2 snowData = _LocalSnowHeightMap.SampleLevel(sampler_LocalSnowHeightMap, float2(u, v), 0).rg;
+                rawH = snowData.r;
+                float hitY = snowData.g;
+                
+                // 极度严格的垂直差值遮挡（限 2 厘米内），彻底杜绝室内天花板漏色！
+                if (rootLocalPos.y < hitY - 0.02) 
+                {
+                    rawH = 0; pillowH = 0; pixelNormal = float3(0,0,0);
+                    return;
+                }
+                
+                // 核心：使用 smoothstep 替代含有无限大导数的 pow(..., 0.25)，彻底抹平边缘法线极化！
+                // 核心：使用 smoothstep 且较平缓的过渡曲线
+                float visibleH = saturate(rawH);
+                pillowH = smoothstep(0.0, 1.0, visibleH); 
+                
+                // 增加采样步长以进一步软化和抹平法线阶梯
+                float spread = 0.01;
+                float rawR = _LocalSnowHeightMap.SampleLevel(sampler_LocalSnowHeightMap, float2(u + spread, v), 0).r;
+                float rawL = _LocalSnowHeightMap.SampleLevel(sampler_LocalSnowHeightMap, float2(u - spread, v), 0).r;
+                float rawU = _LocalSnowHeightMap.SampleLevel(sampler_LocalSnowHeightMap, float2(u, v + spread), 0).r;
+                float rawD = _LocalSnowHeightMap.SampleLevel(sampler_LocalSnowHeightMap, float2(u, v - spread), 0).r;
+                
+                float pR = smoothstep(0.0, 1.0, saturate(rawR));
+                float pL = smoothstep(0.0, 1.0, saturate(rawL));
+                float pU = smoothstep(0.0, 1.0, saturate(rawU));
+                float pD = smoothstep(0.0, 1.0, saturate(rawD));
+                
+                // Sobel 算子平滑，彻底消除阶梯圆圈
+                float dHdX = (pR - pL) * 2.0;
+                float dHdZ = (pU - pD) * 2.0;
+                
+                pixelNormal = float3(-dHdX * _DisplacementScale, 0.0, -dHdZ * _DisplacementScale);
+            }
+
+            float hash2D(float2 p) 
+            { 
+                return frac(sin(dot(p, float2(127.1, 311.7))) * 43758.5453123); 
+            }
+            
+            float noise2D(float2 p)
+            {
+                float2 i = floor(p);
+                float2 f = frac(p);
+                float2 u = f * f * (3.0 - 2.0 * f);
+                return lerp(lerp(hash2D(i + float2(0.0,0.0)), hash2D(i + float2(1.0,0.0)), u.x),
+                            lerp(hash2D(i + float2(0.0,1.0)), hash2D(i + float2(1.0,1.0)), u.x), u.y);
+            }
+            
+            float fbm2D(float2 p)
+            {
+                float v = 0.0;
+                float a = 0.5;
+                float2 shift = float2(100.0, 100.0);
+                float2x2 rot = float2x2(0.8, 0.6, -0.6, 0.8);
+                for (int i = 0; i < 3; ++i) {
+                    v += a * noise2D(p);
+                    p = mul(rot, p) * 2.0 + shift;
+                    a *= 0.5;
+                }
+                return v;
             }
 
             Varyings vert(Attributes input)
             {
                 Varyings output;
-                
                 float3 positionWS = TransformObjectToWorld(input.positionOS.xyz);
                 float3 normalWS = TransformObjectToWorldNormal(input.normalOS);
                 
-                // Inflate in world space by exactly 5mm to avoid FBX scale bugs!
-                positionWS += normalWS * 0.005;
+                // 严格的朝上坡度遮罩：只允许平坦的顶部区域进行位移，彻底消除侧壁顺延拉伸！
+                float upDot = dot(normalize(normalWS), float3(0, 1, 0));
+                float slopeMask = smoothstep(0.5, 0.85, upDot);
+                
+                float rawH, pillowH;
+                float3 dummyNormal;
+                GetLocalSnowData(positionWS, rawH, pillowH, dummyNormal);
+                
+                rawH *= slopeMask;
+                
+                // 核心：无硬悬崖，融合 FBM 噪声使之呈现极度饱满且有机的起伏结构！
+                float fade = saturate(rawH / 0.15);
+                float noiseMound = fbm2D(positionWS.xz * 1.2) * 0.06; // 6cm 级有机噪声起伏
+                positionWS += normalWS * ((0.01 + pillowH * _DisplacementScale + noiseMound) * fade);
                 
                 output.positionCS = TransformWorldToHClip(positionWS);
                 output.positionWS = positionWS;
@@ -99,45 +177,75 @@ Shader "Environment/LocalSnowBlanket"
 
             float4 frag(Varyings input) : SV_Target
             {
-                // Only render snow on upward facing surfaces
                 float upDot = dot(normalize(input.normalWS), float3(0, 1, 0));
-                float slopeMask = smoothstep(0.3, 0.6, upDot);
+                // 严格的朝上坡度遮罩：只允许平坦的顶部接收积雪，阻断侧壁顺延！
+                float slopeMask = smoothstep(0.5, 0.85, upDot);
                 
-                float h = GetLocalSnowHeight(input.positionWS) * slopeMask;
-                float alpha = smoothstep(_Cutoff - 0.05, _Cutoff + 0.05, h);
-                clip(alpha - 0.01);
+                float rawH, pillowH;
+                float3 pixelNormal;
+                GetLocalSnowData(input.positionWS, rawH, pillowH, pixelNormal);
+                rawH *= slopeMask;
                 
-                float3 worldNormal = normalize(input.normalWS);
-                float3 upNormal = float3(0, 1, 0);
-                float blendFactor = saturate(h * 2.0) * _NormalBlend * 0.5;
-                float3 finalNormalWS = normalize(lerp(worldNormal, upNormal, blendFactor));
+                // 核心：无硬裁切线！为了让所有雪地边缘（包含高度图硬陡降的区域）都拥有柔和、平滑模糊的过渡边缘，
+                // 我们在计算 Alpha 时对高度图进行 4 邻域平滑模糊采样！
+                float4 rootLocalPos = mul(_RootWorldToLocal, float4(input.positionWS, 1.0));
+                float u = (rootLocalPos.x - _LocalSnowBounds.x) / _LocalSnowBounds.z;
+                float v = (rootLocalPos.z - _LocalSnowBounds.y) / _LocalSnowBounds.w;
+                
+                float spreadH = 0.012; // 局部高度图平滑范围
+                float hC = rawH;
+                float hR = _LocalSnowHeightMap.SampleLevel(sampler_LocalSnowHeightMap, float2(u + spreadH, v), 0).r;
+                float hL = _LocalSnowHeightMap.SampleLevel(sampler_LocalSnowHeightMap, float2(u - spreadH, v), 0).r;
+                float hU = _LocalSnowHeightMap.SampleLevel(sampler_LocalSnowHeightMap, float2(u, v + spreadH), 0).r;
+                float hD = _LocalSnowHeightMap.SampleLevel(sampler_LocalSnowHeightMap, float2(u, v - spreadH), 0).r;
+                
+                if (u < 0.0 || u > 1.0 || v < 0.0 || v > 1.0)
+                {
+                    hR = 0; hL = 0; hU = 0; hD = 0;
+                }
+                
+                float blurredH = (hC + hR + hL + hU + hD) * 0.2;
+                float alpha = saturate(blurredH / 0.18);
+                
+                // 1. 混合高度图法线与高精微观 FBM 噪声法线，模拟蓬松雪堆表面的细密微凹凸，捕捉完美光影细节！
+                float3 baseNormal = normalize(input.normalWS);
+                
+                float2 noiseUV = input.positionWS.xz * 4.0;
+                float deltaE = 0.03;
+                float nL = fbm2D(noiseUV + float2(-deltaE, 0));
+                float nR = fbm2D(noiseUV + float2(deltaE, 0));
+                float nD = fbm2D(noiseUV + float2(0, -deltaE));
+                float nU = fbm2D(noiseUV + float2(0, deltaE));
+                float3 microNormal = normalize(float3(nL - nR, 0.15, nD - nU));
+                
+                float3 normal = normalize(baseNormal + pixelNormal + microNormal * 0.35);
 
-                Light mainLight = GetMainLight(input.shadowCoord);
-                float NdotL = saturate(dot(finalNormalWS, mainLight.direction));
-                // Use wrap lighting to simulate snow subsurface scattering and increase brightness
-                float wrap = 0.4;
-                float NdotLWrap = saturate((dot(finalNormalWS, mainLight.direction) + wrap) / (1.0 + wrap));
+                float4 shadowCoord = TransformWorldToShadowCoord(input.positionWS);
+                Light mainLight = GetMainLight(shadowCoord);
                 
-                float shadowTerm = mainLight.shadowAttenuation; 
-                float litFactor = NdotLWrap * shadowTerm;
+                // 2. 真实光照：采用半兰伯特漫反射模型（支持软化阴影），大幅降低自阴影灰度，模拟雪地次表面散射
+                float NdotL = dot(normal, mainLight.direction);
+                float diffuseLight = saturate(NdotL * (1.0 - _LambertSoftness) + _LambertSoftness);
                 
-                // Boost direct light significantly so snow looks bright white in the sun!
-                float3 directLight = mainLight.color * litFactor * 1.8;
+                // 降低投射阴影（动态阴影）乘区的权重，避免车身等动态阴影在白雪上过黑过灰
+                float castShadow = lerp(_ShadowSoftness, 1.0, mainLight.shadowAttenuation);
                 
-                // Kill specular completely in shadows!
-                float shadowMask = smoothstep(0.1, 0.5, shadowTerm);
+                // Directional diffuse (对漫反射进行提亮，让雪地告别灰暗)
+                float3 lightColor = mainLight.color;
+                float3 diffuse = (_SnowColor.rgb * 1.25) * lightColor * diffuseLight * castShadow;
                 
-                float3 viewDirWS = normalize(_WorldSpaceCameraPos - input.positionWS);
-                float3 halfVector = normalize(mainLight.direction + viewDirWS);
-                float NdotH = saturate(dot(finalNormalWS, halfVector));
+                // 3. 真实环境光：采用标准 SampleSH 采样，自然承接大地图的昼夜光线强弱
+                float3 ambient = SampleSH(normal) * _SnowColor.rgb;
                 
-                // Stronger, sharper specular glints for snow crystals, ONLY in direct sunlight
-                float specularIntensity = pow(NdotH, 32.0) * 0.4 * litFactor * shadowMask; 
+                // 4. 阴影染色与提亮（自然乘区）：
+                // 我们在环境光 (ambient) 上叠加天蓝色阴影 tint 和 boost，这样阴影的亮度会完美与环境光强弱同步，夜晚绝不发光！
+                float shadowMask = saturate(1.0 - (saturate(NdotL) * mainLight.shadowAttenuation));
+                float3 tintedAmbient = ambient * lerp(float3(1.0, 1.0, 1.0), _ShadowTint.rgb * _AmbientBoost * 1.3, shadowMask * 0.85);
                 
-                // Ambient lighting. Make it darker in shadows to feel "deeper"
-                float3 ambient = SampleSH(finalNormalWS) * lerp(0.6, 1.1, shadowMask); 
+                // 5. 蓬松雪晶微弱反光/闪烁效果 (Sparkle)
+                float sparkle = saturate(pow(hash2D(input.positionWS.xz * 150.0), 12.0) * 4.0) * castShadow;
                 
-                float3 finalColor = _SnowColor.rgb * (directLight + ambient) + (specularIntensity * _SnowColor.rgb);
+                float3 finalColor = diffuse + tintedAmbient + sparkle * mainLight.color * 0.25;
                 
                 return float4(finalColor, alpha);
             }

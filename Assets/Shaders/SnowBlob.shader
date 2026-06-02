@@ -88,8 +88,9 @@ Shader "Environment/SnowBlob"
                 // --- 3. Lighting ---
                 Light mainLight = GetMainLight();
                 float NdotL = saturate(dot(finalNormal, mainLight.direction) * 0.5 + 0.5);
-                float3 diffuse = mainLight.color * NdotL * mainLight.shadowAttenuation;
-                float3 ambient = SampleSH(finalNormal) * 1.2;
+                float castShadow = lerp(0.5, 1.0, mainLight.shadowAttenuation);
+                float3 diffuse = mainLight.color * NdotL * castShadow;
+                float3 ambient = SampleSH(finalNormal) * 1.5;
                 
                 float4 snowColor = UNITY_ACCESS_INSTANCED_PROP(Props, _SnowColor);
                 float3 finalColor = snowColor.rgb * (diffuse + ambient);
