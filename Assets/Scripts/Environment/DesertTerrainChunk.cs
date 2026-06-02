@@ -907,30 +907,6 @@ namespace EnvironmentSystem
                 {
                     mr.sharedMaterial = terrainMaterial;
                 }
-                else
-                {
-                    bool needsFallback = mr.sharedMaterial == null || 
-                                         mr.sharedMaterial.shader.name == "Standard" || 
-                                         mr.sharedMaterial.shader.name == "Hidden/InternalErrorShader" ||
-                                         (!mr.sharedMaterial.shader.name.Contains("Universal Render Pipeline") && 
-                                          !mr.sharedMaterial.shader.name.Contains("URP") && 
-                                          !mr.sharedMaterial.shader.name.Contains("Custom") && 
-                                          !mr.sharedMaterial.shader.name.Contains("Triplanar") && 
-                                          !mr.sharedMaterial.shader.name.Contains("Terrain"));
-
-                    if (needsFallback)
-                    {
-                        Shader customTriplanar = Shader.Find("Environment/URPTriplanarEnvironment");
-                        if (customTriplanar != null)
-                        {
-                            mr.sharedMaterial = new Material(customTriplanar);
-                        }
-                        else
-                        {
-                            mr.sharedMaterial = new Material(Shader.Find("Universal Render Pipeline/Lit"));
-                        }
-                    }
-                }
 
                 // 🌟 First Insurance: Force migrate any assigned material to the custom Triplanar sand shader in Play Mode.
                 // Keeps their existing textures (Albedo, Bump/Normal) and color tint completely intact!
