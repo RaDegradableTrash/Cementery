@@ -64,6 +64,36 @@ public class LightControl : MonoBehaviour
         ApplyBrakeState(false, false);
     }
 
+    public bool ControlsLight(Light light)
+    {
+        if (light == null)
+        {
+            return false;
+        }
+
+        return light == brakeLight1
+            || light == brakeLight2
+            || light == brakeLight3
+            || light == brakeLight4
+            || light == headLight1
+            || light == headLight2;
+    }
+
+    public bool ControlsRenderer(Renderer renderer)
+    {
+        if (renderer == null)
+        {
+            return false;
+        }
+
+        return renderer == brakeRenderer1
+            || renderer == brakeRenderer2
+            || renderer == brakeRenderer3
+            || renderer == brakeRenderer4
+            || renderer == headRenderer1
+            || renderer == headRenderer2;
+    }
+
     private void Update()
     {
         bool hasPower = startProcedure == null || startProcedure.HasAnyBatteryOn();

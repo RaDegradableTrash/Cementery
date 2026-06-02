@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public class SimpleLight : MonoBehaviour
@@ -12,6 +13,8 @@ public class SimpleLight : MonoBehaviour
     [SerializeField] private Light targetLight;
     [SerializeField] private Renderer[] targetRenderers;
     [SerializeField] private Light[] targetLights;
+    [SerializeField] private bool autoFindTargets = false;
+    [SerializeField] private bool excludeLightControlTargets = true;
 
     [Header("Emission")]
     [SerializeField] private Color emissionColor = Color.white;
@@ -37,27 +40,223 @@ public class SimpleLight : MonoBehaviour
 
         if (targetRenderers == null || targetRenderers.Length == 0)
         {
-            if (targetRenderer == null)
+            if (targetRenderer != null)
             {
-                targetRenderer = GetComponentInChildren<Renderer>();
+                targetRenderers = new[] { targetRenderer };
             }
-            targetRenderers = targetRenderer != null ? new[] { targetRenderer } : new Renderer[0];
+            else if (autoFindTargets)
+            {
+                Renderer found = FindAutoRenderer();
+                targetRenderers = found != null ? new[] { found } : new Renderer[0];
+            }
+            else
+            {
+                targetRenderers = new Renderer[0];
+            }
         }
 
         if (targetLights == null || targetLights.Length == 0)
         {
-            if (targetLight == null)
+            if (targetLight != null)
             {
-                targetLight = GetComponentInChildren<Light>();
+                targetLights = new[] { targetLight };
             }
-            targetLights = targetLight != null ? new[] { targetLight } : new Light[0];
+            else if (autoFindTargets)
+            {
+                Light found = FindAutoLight();
+                targetLights = found != null ? new[] { found } : new Light[0];
+            }
+            else
+            {
+                targetLights = new Light[0];
+            }
         }
+
+        PruneLightControlTargets();
 
         desiredOn = defaultOn;
         CacheEmissionColor();
         bool effectiveOn = GetEffectiveOn();
         ApplyState(effectiveOn);
         lastEffectiveOn = effectiveOn;
+    }
+
+    private void PruneLightControlTargets()
+    {
+        if (!excludeLightControlTargets)
+        {
+            return;
+        }
+
+        LightControl[] lightControls = FindObjectsOfType<LightControl>();
+        if (lightControls == null || lightControls.Length == 0)
+        {
+            return;
+        }
+
+        if (targetLights != null && targetLights.Length > 0)
+        {
+            HashSet<Light> seenLights = new HashSet<Light>();
+            List<Light> filteredLights = new List<Light>(targetLights.Length);
+            int removed = 0;
+
+            for (int i = 0; i < targetLights.Length; i++)
+            {
+                Light light = targetLights[i];
+                if (light == null)
+                {
+                    continue;
+                }
+
+                if (!seenLights.Add(light))
+                {
+                    continue;
+                }
+
+                if (IsControlledByAny(lightControls, light))
+                {
+                    removed++;
+                    continue;
+                }
+
+                filteredLights.Add(light);
+            }
+
+            if (removed > 0)
+            {
+#if UNITY_EDITOR
+                Debug.LogWarning($"{name}: SimpleLight ignored {removed} Light target(s) owned by LightControl.", this);
+#endif
+            }
+
+            targetLights = filteredLights.ToArray();
+        }
+
+        if (targetRenderers != null && targetRenderers.Length > 0)
+        {
+            HashSet<Renderer> seenRenderers = new HashSet<Renderer>();
+            List<Renderer> filteredRenderers = new List<Renderer>(targetRenderers.Length);
+            int removed = 0;
+
+            for (int i = 0; i < targetRenderers.Length; i++)
+            {
+                Renderer renderer = targetRenderers[i];
+                if (renderer == null)
+                {
+                    continue;
+                }
+
+                if (!seenRenderers.Add(renderer))
+                {
+                    continue;
+                }
+
+                if (IsControlledByAny(lightControls, renderer))
+                {
+                    removed++;
+                    continue;
+                }
+
+                filteredRenderers.Add(renderer);
+            }
+
+            if (removed > 0)
+            {
+#if UNITY_EDITOR
+                Debug.LogWarning($"{name}: SimpleLight ignored {removed} Renderer target(s) owned by LightControl.", this);
+#endif
+            }
+
+            targetRenderers = filteredRenderers.ToArray();
+        }
+    }
+
+    private Light FindAutoLight()
+    {
+        if (!excludeLightControlTargets)
+        {
+            return GetComponentInChildren<Light>();
+        }
+
+        LightControl[] lightControls = FindObjectsOfType<LightControl>();
+        if (lightControls == null || lightControls.Length == 0)
+        {
+            return GetComponentInChildren<Light>();
+        }
+
+        Light[] lights = GetComponentsInChildren<Light>(true);
+        for (int i = 0; i < lights.Length; i++)
+        {
+            Light light = lights[i];
+            if (light != null && !IsControlledByAny(lightControls, light))
+            {
+                return light;
+            }
+        }
+
+        return null;
+    }
+
+    private Renderer FindAutoRenderer()
+    {
+        if (!excludeLightControlTargets)
+        {
+            return GetComponentInChildren<Renderer>();
+        }
+
+        LightControl[] lightControls = FindObjectsOfType<LightControl>();
+        if (lightControls == null || lightControls.Length == 0)
+        {
+            return GetComponentInChildren<Renderer>();
+        }
+
+        Renderer[] renderers = GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer renderer = renderers[i];
+            if (renderer != null && !IsControlledByAny(lightControls, renderer))
+            {
+                return renderer;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsControlledByAny(LightControl[] lightControls, Light light)
+    {
+        if (light == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < lightControls.Length; i++)
+        {
+            LightControl lc = lightControls[i];
+            if (lc != null && lc.ControlsLight(light))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool IsControlledByAny(LightControl[] lightControls, Renderer renderer)
+    {
+        if (renderer == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < lightControls.Length; i++)
+        {
+            LightControl lc = lightControls[i];
+            if (lc != null && lc.ControlsRenderer(renderer))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void Update()
