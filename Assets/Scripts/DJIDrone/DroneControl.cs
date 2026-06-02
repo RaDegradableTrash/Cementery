@@ -3,24 +3,37 @@ using System.Collections.Generic;
 using UnityEngine;
 
 [DisallowMultipleComponent]
+[RequireComponent(typeof(Rigidbody))]
 public class DroneControl : MonoBehaviour
 {
     [System.Serializable]
-    public struct ArmPoseLink
+    public struct TransformPair
     {
-        public Transform arm;
-        public Transform targetPose;
+        public Transform targetPart;        
+        public Transform landingAnchor;     
+        public Transform flyingAnchor;      
     }
 
-    [Header("Transforms")]
+    [Header("Transforms & Inspire 3 Joints")]
     [SerializeField] private Transform movementRoot;
-    [SerializeField] private Transform bodyVisual;
     [SerializeField] private Transform altitudeRayOrigin;
+    [SerializeField] private TransformPair[] inspire3Parts;
+    [SerializeField] private float morphLerpSpeed = 2f; 
 
-    [Header("Movement (Physics-like)")]
+    [Header("Gimbal Camera (云台相机)")]
+    [SerializeField] private Transform gimbalCamera;
+    [SerializeField] private float gimbalPitchSpeed = 45f;
+    [SerializeField] private float gimbalYawSpeed = 45f;
+    [SerializeField] private float gimbalResetSpeed = 8f;
+    [SerializeField] private float maxGimbalPitch = 85f;
+    [SerializeField] private float minGimbalPitch = -85f;
+    [SerializeField] private float gimbalInertiaStrength = 0.15f;
+    [SerializeField] private float bodyFollowGimbalSpeed = 3f;
+
+    [Header("Movement (Physics-based)")]
     [SerializeField] private float maxHorizontalSpeed = 12f;
     [SerializeField] private float horizontalAcceleration = 35f;
-    [SerializeField] private float horizontalDrag = 3f; // 类似空气阻尼，越大停得越快
+    [SerializeField] private float horizontalDrag = 3f; 
     
     [SerializeField] private float maxVerticalSpeed = 6f;
     [SerializeField] private float verticalAcceleration = 20f;
@@ -35,96 +48,85 @@ public class DroneControl : MonoBehaviour
     [SerializeField] private float maxRollDeg = 15f;
     [SerializeField] private float tiltResponsiveness = 10f;
 
-    [Header("Wind & Drift (Weather Simulation)")]
-    [Tooltip("恶劣天气强度：数值越大，无操作时漂移越厉害")]
-    [SerializeField] private float weatherDriftIntensity = 1.5f;
-    [Tooltip("漂移频率：数值越大，频率越快（风越乱）")]
+    [Header("Wind & Drift (高度动态风力)")]
+    [Tooltip("高空最大恶劣天气强度（风力上限值）")]
+    [SerializeField] private float weatherDriftIntensity = 2.0f;
+    [Tooltip("风力达到最大值所需的高度（超过该高度风力不再增强）")]
+    [SerializeField] private float maxHeightForMaxWind = 100f;
     [SerializeField] private float driftSpeed = 1.0f;
 
     [Header("Propellers")]
     [SerializeField] private Transform[] propellers;
-    [SerializeField] private float basePropellerSpeed = 1200f; // 基础怠速转速
-    [SerializeField] private float maxPropellerSpeed = 2500f;  // 极限全出力转速
-    [SerializeField] private float propellerAcceleration = 5f; // 转速改变的平滑度
+    [SerializeField] private float basePropellerSpeed = 1200f; 
+    [SerializeField] private float maxPropellerSpeed = 2500f;  
+    [SerializeField] private float propellerAcceleration = 5f; 
 
-    [Header("Altitude Ray")]
-    [SerializeField] private float altitudeRayMaxDistance = 50f;
+    [Header("Altitude & Flight Ceiling")]
+    [SerializeField] private float altitudeRayMaxDistance = 500f; 
     [SerializeField] private LayerMask altitudeRayLayers = ~0;
-
-    [Header("Arms (Auto by Altitude)")]
-    [SerializeField] private ArmPoseLink[] arms;
-    [SerializeField] private float armDeployDistance = 2.0f;
-    [SerializeField] private float armRetractDistance = 2.5f;
-    [SerializeField] private float armPoseLerpSpeed = 10f;
+    
+    [Tooltip("切换到形态1（降落姿态）的触发高度极限值")]
+    [SerializeField] private float landingStateDistance = 2.5f;
+    
+    [Tooltip("近地彻底切断代码控制、让物体自由摔落的临界高度")]
+    [SerializeField] private float groundCutoffDistance = 0.2f;
+    
+    [Tooltip("无人机最高飞行限制高度")]
+    [SerializeField] private float maxFlightAltitude = 300f;
+    [Tooltip("触发超高时，强制往下压回的速度")]
+    [SerializeField] private float ceilingPushDownSpeed = 4f;
 
     public float CurrentAltitude { get; private set; } = float.PositiveInfinity;
     public bool HasAltitudeHit { get; private set; }
 
-    // 内部物理变量
+    private Rigidbody _rb;
+
+    // 内部物理速度
     private Vector3 _currentHorizontalVelocity = Vector3.zero;
     private float _currentVerticalVelocity = 0f;
     private float _currentYawVelocity = 0f;
     private float _yawDeg;
 
-    // 内部螺旋桨变量
+    // 云台内部旋转
+    private float _gimbalLocalPitch = 0f;
+    private float _gimbalLocalYaw = 0f;
+
+    // 螺旋桨转速
     private float _currentPropellerRotationSpeed;
 
-    // 噪声时间戳
+    // 噪声随机起点
     private float _noiseTimerX;
     private float _noiseTimerY;
     private float _noiseTimerZ;
 
-    private Vector3[] _armBaseLocalPositions;
-    private Quaternion[] _armBaseLocalRotations;
-    private bool _armsDeployed;
-    private Quaternion _bodyBaseLocalRotation = Quaternion.identity;
     private readonly RaycastHit[] _altitudeHits = new RaycastHit[16];
+
+    private bool _isInLandingState = true;
+    private bool _isFlightControlCutoff = false; 
+    private Quaternion _targetBodyTiltRotation = Quaternion.identity;
 
     private void Awake()
     {
         if (movementRoot == null) movementRoot = transform;
-        if (altitudeRayOrigin == null) altitudeRayOrigin = movementRoot;
+        _rb = movementRoot.GetComponent<Rigidbody>();
+        
+        _rb.useGravity = false; 
+        _rb.collisionDetectionMode = CollisionDetectionMode.Continuous; 
 
-        if (bodyVisual == movementRoot) bodyVisual = null;
-        if (bodyVisual != null) _bodyBaseLocalRotation = bodyVisual.localRotation;
+        if (altitudeRayOrigin == null) altitudeRayOrigin = movementRoot;
 
         _yawDeg = movementRoot.eulerAngles.y;
 
-        // 随机化噪声起点，防止多台无人机飘得一模一样
         _noiseTimerX = Random.Range(0f, 100f);
         _noiseTimerY = Random.Range(100f, 200f);
         _noiseTimerZ = Random.Range(200f, 300f);
 
         _currentPropellerRotationSpeed = basePropellerSpeed;
 
-        CacheArmBasePoses();
-    }
-
-    private void CacheArmBasePoses()
-    {
-        if (arms == null || arms.Length == 0)
-        {
-            _armBaseLocalPositions = null;
-            _armBaseLocalRotations = null;
-            return;
-        }
-
-        _armBaseLocalPositions = new Vector3[arms.Length];
-        _armBaseLocalRotations = new Quaternion[arms.Length];
-
-        for (int i = 0; i < arms.Length; i++)
-        {
-            Transform arm = arms[i].arm;
-            if (arm == null)
-            {
-                _armBaseLocalPositions[i] = Vector3.zero;
-                _armBaseLocalRotations[i] = Quaternion.identity;
-                continue;
-            }
-
-            _armBaseLocalPositions[i] = arm.localPosition;
-            _armBaseLocalRotations[i] = arm.localRotation;
-        }
+        // 开机自检回正镜头
+        _gimbalLocalPitch = 0f;
+        _gimbalLocalYaw = 0f;
+        if (gimbalCamera != null) gimbalCamera.localRotation = Quaternion.identity;
     }
 
     private void Update()
@@ -132,28 +134,44 @@ public class DroneControl : MonoBehaviour
         float dt = Time.deltaTime;
 
         ReadAltitude();
-        UpdateMovement(dt);
-        UpdateTilt(dt);
+        GatherInputAndPhysics(dt);
+        UpdateInspire3Morph(dt);
         UpdatePropellers(dt);
-        UpdateArms(dt);
+    }
+
+    private void LateUpdate()
+    {
+        UpdateGimbalCamera(Time.deltaTime);
+    }
+
+    private void FixedUpdate()
+    {
+        if (_rb == null) return;
+
+        // 如果触发了近地切断，飞控完全松手，开启重力，交由物理引擎纯刚体摔落地面
+        if (_isFlightControlCutoff)
+        {
+            _rb.useGravity = true; 
+            // 慢慢让倾斜回正到地平线，避免歪着脖子摔倒
+            Quaternion flatRotation = Quaternion.Euler(0f, _yawDeg, 0f);
+            _rb.MoveRotation(Quaternion.Slerp(_rb.rotation, flatRotation, Time.fixedDeltaTime * 5f));
+            return;
+        }
+
+        // 正常飞行状态，关闭物理自带重力（由虚拟速度全权接管）
+        _rb.useGravity = false;
+        _rb.velocity = _currentHorizontalVelocity + (Vector3.up * _currentVerticalVelocity);
+        _rb.MoveRotation(_targetBodyTiltRotation);
     }
 
     private void ReadAltitude()
     {
         HasAltitudeHit = false;
         CurrentAltitude = float.PositiveInfinity;
-
         if (altitudeRayOrigin == null) return;
 
         Vector3 origin = altitudeRayOrigin.position;
-
-        int hitCount = Physics.RaycastNonAlloc(
-            origin,
-            Vector3.down,
-            _altitudeHits,
-            altitudeRayMaxDistance,
-            altitudeRayLayers,
-            QueryTriggerInteraction.Ignore);
+        int hitCount = Physics.RaycastNonAlloc(origin, Vector3.down, _altitudeHits, altitudeRayMaxDistance, altitudeRayLayers, QueryTriggerInteraction.Ignore);
 
         float best = float.PositiveInfinity;
         for (int i = 0; i < hitCount; i++)
@@ -162,10 +180,7 @@ public class DroneControl : MonoBehaviour
             if (c == null) continue;
 
             Transform hitTransform = c.transform;
-            if (movementRoot != null && (hitTransform == movementRoot || hitTransform.IsChildOf(movementRoot)))
-            {
-                continue;
-            }
+            if (movementRoot != null && (hitTransform == movementRoot || hitTransform.IsChildOf(movementRoot))) continue;
 
             float d = _altitudeHits[i].distance;
             if (d < best) best = d;
@@ -178,26 +193,81 @@ public class DroneControl : MonoBehaviour
         }
     }
 
-    private void UpdateMovement(float dt)
+    private void GatherInputAndPhysics(float dt)
     {
-        // 1. 获取原始输入
+        // 1. 落地状态判断与近地切断检查
+        bool wantsToMoveOrUp = Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.Z);
+        
+        if (HasAltitudeHit && CurrentAltitude <= groundCutoffDistance && _currentVerticalVelocity <= 0.05f && !wantsToMoveOrUp)
+        {
+            _isFlightControlCutoff = true;
+            _currentHorizontalVelocity = Vector3.zero;
+            _currentVerticalVelocity = 0f;
+            return;
+        }
+
+        // 2. 如果之前被切断了，但现在玩家按下了 Z 键（起飞申请）
+        if (_isFlightControlCutoff && Input.GetKey(KeyCode.Z))
+        {
+            _isFlightControlCutoff = false; 
+            movementRoot.position += Vector3.up * 0.1f; // 强制向上拔离0.1米
+            _currentVerticalVelocity = 1.0f; 
+        }
+
+        if (_isFlightControlCutoff) return;
+
+        // 3. 核心机制：检查玩家当前是否有任何针对无人机本体的主动操控输入
+        bool hasFlightInput = Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.S) || 
+                              Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.D) || 
+                              Input.GetKey(KeyCode.Z) || Input.GetKey(KeyCode.C) || 
+                              Input.GetKey(KeyCode.Q) || Input.GetKey(KeyCode.E);
+
+        // 如果【玩家没有任何输入】，直接启动强力消能刹车，洗清残余速度和空中撞击产生的惯性Bug
+        if (!hasFlightInput)
+        {
+            // 以平时加速数倍的高效率（8f）瞬间斩断变量内囤积的速度
+            _currentHorizontalVelocity = Vector3.MoveTowards(_currentHorizontalVelocity, Vector3.zero, dt * horizontalAcceleration * 8f);
+            _currentVerticalVelocity = Mathf.MoveTowards(_currentVerticalVelocity, 0f, dt * verticalAcceleration * 8f);
+            _currentYawVelocity = Mathf.MoveTowards(_currentYawVelocity, 0f, dt * yawAccelerationDeg * 8f);
+
+            // 强行把物理刚体的实际速度强制归零，防止由于撞墙反弹力矩继续自我飘逸
+            if (_rb != null)
+            {
+                _rb.velocity = Vector3.MoveTowards(_rb.velocity, Vector3.zero, dt * 50f);
+            }
+
+            // 机身姿态高速度回正水平，进入死锁定点悬停姿态
+            _targetBodyTiltRotation = Quaternion.Slerp(_targetBodyTiltRotation, Quaternion.Euler(0f, _yawDeg, 0f), dt * tiltResponsiveness * 2f);
+            return; // 零输入逻辑执行完毕，直接跳出后续加速与风力飘逸计算，确保绝对钉死在原地
+        }
+
+        // 4. 获取飞行按键输入（仅在hasFlightInput为true时才会往下执行）
         float inputX = 0f;
-        float inputZ = 0f; // 修复：W应该增加Z(向前)，S减小Z(向后)
+        float inputZ = 0f; 
         float inputY = 0f;
 
         if (Input.GetKey(KeyCode.A)) inputX -= 1f;
         if (Input.GetKey(KeyCode.D)) inputX += 1f;
-        if (Input.GetKey(KeyCode.W)) inputZ += 1f; // 修复此处：改为 += 
-        if (Input.GetKey(KeyCode.S)) inputZ -= 1f; // 修复此处：改为 -= 
+        if (Input.GetKey(KeyCode.W)) inputZ += 1f; 
+        if (Input.GetKey(KeyCode.S)) inputZ -= 1f; 
 
-        if (Input.GetKey(KeyCode.UpArrow)) inputY += 1f;
-        if (Input.GetKey(KeyCode.DownArrow)) inputY -= 1f;
+        // 限高检查
+        bool isOverCeiling = HasAltitudeHit && CurrentAltitude >= maxFlightAltitude;
+        if (Input.GetKey(KeyCode.Z) && !isOverCeiling) inputY += 1f; 
+        if (Input.GetKey(KeyCode.C)) inputY -= 1f;
+
+        // 5. 自动靠拢镜头 (Yaw)
+        if (Mathf.Abs(_gimbalLocalYaw) > 0.01f)
+        {
+            float yawTarget = _yawDeg + _gimbalLocalYaw;
+            _yawDeg = Mathf.LerpAngle(_yawDeg, yawTarget, bodyFollowGimbalSpeed * dt);
+            _gimbalLocalYaw = Mathf.LerpAngle(_gimbalLocalYaw, 0f, bodyFollowGimbalSpeed * dt);
+        }
 
         float yawInput = 0f;
         if (Input.GetKey(KeyCode.Q)) yawInput -= 1f;
         if (Input.GetKey(KeyCode.E)) yawInput += 1f;
 
-        // 2. 计算航向角（Yaw）的模拟惯性
         if (Mathf.Abs(yawInput) > 0.01f)
         {
             _currentYawVelocity += yawInput * yawAccelerationDeg * dt;
@@ -208,15 +278,13 @@ public class DroneControl : MonoBehaviour
         }
         _currentYawVelocity = Mathf.Clamp(_currentYawVelocity, -maxYawSpeedDeg, maxYawSpeedDeg);
         _yawDeg = Mathf.Repeat(_yawDeg + _currentYawVelocity * dt, 360f);
+
         Quaternion yawRotation = Quaternion.Euler(0f, _yawDeg, 0f);
 
-        // 3. 计算本地坐标系下的目标移动向量
-        Vector3 localInputMove = new Vector3(inputX, 0f, inputZ);
-        localInputMove = Vector3.ClampMagnitude(localInputMove, 1f);
+        // 6. 基础运动推力计算
+        Vector3 localInputMove = Vector3.ClampMagnitude(new Vector3(inputX, 0f, inputZ), 1f);
         Vector3 worldInputMove = yawRotation * localInputMove;
 
-        // 4. 水平与垂直速度的物理惯性计算 (加速与阻尼)
-        // 水平
         if (worldInputMove.sqrMagnitude > 0.01f)
         {
             _currentHorizontalVelocity += worldInputMove * horizontalAcceleration * dt;
@@ -227,7 +295,6 @@ public class DroneControl : MonoBehaviour
         }
         _currentHorizontalVelocity = Vector3.ClampMagnitude(_currentHorizontalVelocity, maxHorizontalSpeed);
 
-        // 垂直
         if (Mathf.Abs(inputY) > 0.01f)
         {
             _currentVerticalVelocity += inputY * verticalAcceleration * dt;
@@ -238,78 +305,95 @@ public class DroneControl : MonoBehaviour
         }
         _currentVerticalVelocity = Mathf.Clamp(_currentVerticalVelocity, -maxVerticalSpeed, maxVerticalSpeed);
 
-        // 5. 计算恶劣环境下的随机飘忽定量（柏林噪声模拟风力）
+        // 限高强力下压拦截
+        if (isOverCeiling)
+        {
+            _currentVerticalVelocity = Mathf.MoveTowards(_currentVerticalVelocity, -ceilingPushDownSpeed, verticalAcceleration * dt);
+        }
+
+        // 7. 【高度动态增强风力系统】
         _noiseTimerX += dt * driftSpeed;
-        _noiseTimerY += dt * driftSpeed;
+        _noiseTimerY += dt * dt * driftSpeed;
         _noiseTimerZ += dt * driftSpeed;
 
-        // 产生 -1 到 1 的平滑随机噪声
         float driftX = (Mathf.PerlinNoise(_noiseTimerX, 0f) - 0.5f) * 2f;
         float driftY = (Mathf.PerlinNoise(0f, _noiseTimerY) - 0.5f) * 2f;
         float driftZ = (Mathf.PerlinNoise(_noiseTimerZ, _noiseTimerZ) - 0.5f) * 2f;
-        Vector3 rawDriftVector = new Vector3(driftX, driftY, driftZ) * weatherDriftIntensity;
 
-        // 动态弱化机制：当玩家操作推杆越剧烈，水平方向的环境影响越小，保证操作手感
+        float currentHeightFactor = 0f;
+        if (HasAltitudeHit)
+        {
+            currentHeightFactor = Mathf.Clamp01(CurrentAltitude / maxHeightForMaxWind);
+        }
+        
+        Vector3 dynamicWindVector = new Vector3(driftX, driftY, driftZ) * (weatherDriftIntensity * currentHeightFactor);
         float inputIntensity = localInputMove.magnitude; 
-        float horizontalDriftFactor = Mathf.Lerp(1.0f, 0.15f, inputIntensity); // 有操作时水平漂移缩减至15%
+        float horizontalDriftFactor = Mathf.Lerp(1.0f, 0.15f, inputIntensity); 
         
         Vector3 finalDrift = new Vector3(
-            rawDriftVector.x * horizontalDriftFactor,
-            rawDriftVector.y, // 依照要求：高度上下不受操作弱化影响
-            rawDriftVector.z * horizontalDriftFactor
+            dynamicWindVector.x * horizontalDriftFactor,
+            dynamicWindVector.y, 
+            dynamicWindVector.z * horizontalDriftFactor
         );
 
-        // 6. 最终合并应用位移
-        Vector3 finalVelocity = _currentHorizontalVelocity + (Vector3.up * _currentVerticalVelocity) + finalDrift;
-        movementRoot.position += finalVelocity * dt;
+        _currentHorizontalVelocity += new Vector3(finalDrift.x, 0f, finalDrift.z);
+        _currentVerticalVelocity += finalDrift.y;
 
-        // 7. 旋转应用
-        if (bodyVisual != null)
+        // 8. 计算机体视觉物理倾斜
+        Vector3 localVelocity = Quaternion.Inverse(yawRotation) * _currentHorizontalVelocity;
+        float targetPitch = (localVelocity.z / maxHorizontalSpeed) * maxPitchDeg;
+        float targetRoll = -(localVelocity.x / maxHorizontalSpeed) * maxRollDeg;
+        Quaternion tiltRotation = Quaternion.Euler(targetPitch, 0f, targetRoll);
+        
+        float t = 1f - Mathf.Exp(-Mathf.Max(0.01f, tiltResponsiveness) * dt);
+        _targetBodyTiltRotation = Quaternion.Slerp(_targetBodyTiltRotation, yawRotation * tiltRotation, t);
+    }
+
+    private void UpdateInspire3Morph(float dt)
+    {
+        if (inspire3Parts == null || inspire3Parts.Length == 0) return;
+
+        if (_isFlightControlCutoff || (HasAltitudeHit && CurrentAltitude < landingStateDistance))
         {
-            movementRoot.rotation = yawRotation;
+            _isInLandingState = true;
         }
         else
         {
-            // 如果没有分离身体，则将倾斜融入根节点（由于没有输入时会有滑行惯性，倾斜应该基于当前的实际速度而非按键输入）
-            Vector3 localVelocity = Quaternion.Inverse(yawRotation) * _currentHorizontalVelocity;
-            float targetPitch = (localVelocity.z / maxHorizontalSpeed) * maxPitchDeg;
-            float targetRoll = -(localVelocity.x / maxHorizontalSpeed) * maxRollDeg;
-            Quaternion tiltRotation = Quaternion.Euler(targetPitch, 0f, targetRoll);
-            movementRoot.rotation = yawRotation * tiltRotation;
+            _isInLandingState = false;
         }
-    }
 
-    private void UpdateTilt(float dt)
-    {
-        if (bodyVisual == null) return;
+        float t = 1f - Mathf.Exp(-Mathf.Max(0.01f, morphLerpSpeed) * dt);
+        for (int i = 0; i < inspire3Parts.Length; i++)
+        {
+            Transform part = inspire3Parts[i].targetPart;
+            if (part == null) continue;
 
-        // 视觉倾斜基于无人机【当前的实际移动速度占比】来决定，这样由于惯性滑行时，机身也会有真实的反向回正倾斜感
-        Quaternion yawRotation = Quaternion.Euler(0f, _yawDeg, 0f);
-        Vector3 localVelocity = Quaternion.Inverse(yawRotation) * _currentHorizontalVelocity;
+            Transform anchor = _isInLandingState ? inspire3Parts[i].landingAnchor : inspire3Parts[i].flyingAnchor;
+            if (anchor == null) continue;
 
-        // 前进时前倾，后退时后倾；向左时左倾，向右时右倾
-        float targetPitch = (localVelocity.z / maxHorizontalSpeed) * maxPitchDeg;
-        float targetRoll = -(localVelocity.x / maxHorizontalSpeed) * maxRollDeg;
-        
-        Quaternion targetLocal = _bodyBaseLocalRotation * Quaternion.Euler(targetPitch, 0f, targetRoll);
-
-        float t = 1f - Mathf.Exp(-Mathf.Max(0.01f, tiltResponsiveness) * dt);
-        bodyVisual.localRotation = Quaternion.Slerp(bodyVisual.localRotation, targetLocal, t);
+            part.localPosition = Vector3.Lerp(part.localPosition, anchor.localPosition, t);
+            part.localRotation = Quaternion.Slerp(part.localRotation, anchor.localRotation, t);
+        }
     }
 
     private void UpdatePropellers(float dt)
     {
         if (propellers == null || propellers.Length == 0) return;
 
-        // 根据玩家的操作强度（速度和油门）动态改变旋转速率
-        float horizontalRatio = _currentHorizontalVelocity.magnitude / maxHorizontalSpeed;
-        float verticalRatio = Mathf.Abs(_currentVerticalVelocity) / maxVerticalSpeed;
-        float powerFactor = Mathf.Max(horizontalRatio, verticalRatio);
-
-        // 计算目标转速：有操作就向maxPropellerSpeed靠拢，无操作回到怠速basePropellerSpeed
-        float targetSpeed = Mathf.Lerp(basePropellerSpeed, maxPropellerSpeed, powerFactor);
+        float targetSpeed = basePropellerSpeed;
         
-        // 平滑过渡转速（模拟电机加速声浪和物理过渡）
+        if (!_isFlightControlCutoff)
+        {
+            float horizontalRatio = _currentHorizontalVelocity.magnitude / maxHorizontalSpeed;
+            float verticalRatio = Mathf.Abs(_currentVerticalVelocity) / maxVerticalSpeed;
+            float powerFactor = Mathf.Max(horizontalRatio, verticalRatio);
+            targetSpeed = Mathf.Lerp(basePropellerSpeed, maxPropellerSpeed, powerFactor);
+        }
+        else
+        {
+            targetSpeed = basePropellerSpeed * 0.3f; 
+        }
+
         _currentPropellerRotationSpeed = Mathf.Lerp(_currentPropellerRotationSpeed, targetSpeed, dt * propellerAcceleration);
 
         float angle = _currentPropellerRotationSpeed * dt;
@@ -317,71 +401,72 @@ public class DroneControl : MonoBehaviour
         {
             Transform p = propellers[i];
             if (p == null) continue;
-            
-            // 沿其自身的 Y 轴（Space.Self）进行正确的持续旋转
-            p.Rotate(0f, angle, 0f, Space.Self);
+            p.Rotate(0f, 0f, angle, Space.Self); 
         }
     }
 
-    private void UpdateArms(float dt)
+    private void UpdateGimbalCamera(float dt)
     {
-        if (arms == null || arms.Length == 0) return;
-        if (_armBaseLocalPositions == null || _armBaseLocalRotations == null) CacheArmBasePoses();
-        if (_armBaseLocalPositions == null || _armBaseLocalRotations == null) return;
+        if (gimbalCamera == null) return;
 
-        bool hasAlt = HasAltitudeHit;
-        float alt = CurrentAltitude;
-
-        if (!hasAlt)
+        if (Input.GetKey(KeyCode.RightShift))
         {
-            _armsDeployed = false;
+            _gimbalLocalPitch = Mathf.Lerp(_gimbalLocalPitch, 0f, dt * gimbalResetSpeed);
+            _gimbalLocalYaw = Mathf.Lerp(_gimbalLocalYaw, 0f, dt * gimbalResetSpeed);
         }
         else
         {
-            float deploy = Mathf.Max(0f, armDeployDistance);
-            float retract = Mathf.Max(deploy, armRetractDistance);
+            float camPitchInput = 0f;
+            float camYawInput = 0f;
 
-            if (_armsDeployed)
-            {
-                if (alt > retract) _armsDeployed = false;
-            }
-            else
-            {
-                if (alt < deploy) _armsDeployed = true;
-            }
+            if (Input.GetKey(KeyCode.UpArrow)) camPitchInput -= 1f;    
+            if (Input.GetKey(KeyCode.DownArrow)) camPitchInput += 1f;  
+            if (Input.GetKey(KeyCode.LeftArrow)) camYawInput -= 1f;   
+            if (Input.GetKey(KeyCode.RightArrow)) camYawInput += 1f;  
+
+            _gimbalLocalPitch += camPitchInput * gimbalPitchSpeed * dt;
+            _gimbalLocalPitch = Mathf.Clamp(_gimbalLocalPitch, minGimbalPitch, maxGimbalPitch);
+            _gimbalLocalYaw += camYawInput * gimbalYawSpeed * dt;
         }
 
-        float t = 1f - Mathf.Exp(-Mathf.Max(0.01f, armPoseLerpSpeed) * dt);
-        for (int i = 0; i < arms.Length; i++)
+        Quaternion inertiaOffset = Quaternion.identity;
+        if (!_isFlightControlCutoff)
         {
-            Transform arm = arms[i].arm;
-            if (arm == null) continue;
+            Quaternion justBodyTilt = Quaternion.Inverse(Quaternion.Euler(0f, _yawDeg, 0f)) * _targetBodyTiltRotation;
+            inertiaOffset = Quaternion.Slerp(Quaternion.identity, justBodyTilt, gimbalInertiaStrength);
+        }
 
-            Vector3 targetPos;
-            Quaternion targetRot;
+        Quaternion worldGimbalBase = Quaternion.Euler(0f, _yawDeg + _gimbalLocalYaw, 0f);
+        Quaternion targetWorldRotation = worldGimbalBase * Quaternion.Euler(_gimbalLocalPitch, 0f, 0f) * inertiaOffset;
 
-            if (_armsDeployed)
-            {
-                Transform targetPose = arms[i].targetPose;
-                if (targetPose != null)
-                {
-                    targetPos = targetPose.localPosition;
-                    targetRot = targetPose.localRotation;
-                }
-                else
-                {
-                    targetPos = _armBaseLocalPositions[i];
-                    targetRot = _armBaseLocalRotations[i];
-                }
-            }
-            else
-            {
-                targetPos = _armBaseLocalPositions[i];
-                targetRot = _armBaseLocalRotations[i];
-            }
+        gimbalCamera.rotation = targetWorldRotation;
+    }
 
-            arm.localPosition = Vector3.Lerp(arm.localPosition, targetPos, t);
-            arm.localRotation = Quaternion.Slerp(arm.localRotation, targetRot, t);
+    private void OnCollisionEnter(Collision collision)
+    {
+        if (_isFlightControlCutoff) return;
+
+        // 碰撞自愈第一步：立即强制捕获实际碰撞后的残余物理状态，刷新虚拟变量
+        if (_rb != null)
+        {
+            Vector3 actualVelocity = _rb.velocity;
+            _currentHorizontalVelocity = new Vector3(actualVelocity.x, 0f, actualVelocity.z);
+            _currentVerticalVelocity = actualVelocity.y;
+        }
+
+        // 碰撞自愈第二步：瞬间强制回正视觉倾斜角，避免物理扭矩在碰撞表面叠加发生连环旋转卡死
+        _targetBodyTiltRotation = Quaternion.Euler(0f, _yawDeg, 0f);
+    }
+
+    private void OnCollisionStay(Collision collision)
+    {
+        if (_isFlightControlCutoff) return;
+
+        // 贴墙滑行、卡障碍物擦拭时的连续压制，防止数据反弹和蓄力冲锋
+        if (_rb != null && !Input.anyKey)
+        {
+            _currentHorizontalVelocity = Vector3.MoveTowards(_currentHorizontalVelocity, new Vector3(_rb.velocity.x, 0f, _rb.velocity.z), Time.deltaTime * 50f);
+            _currentVerticalVelocity = Mathf.MoveTowards(_currentVerticalVelocity, _rb.velocity.y, Time.deltaTime * 50f);
         }
     }
 }
