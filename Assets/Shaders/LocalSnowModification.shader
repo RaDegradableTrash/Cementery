@@ -30,7 +30,14 @@ Shader "Hidden/LocalSnowModification"
                 
                 float newSnow = saturate(current.r + brush);
                 float currentY = current.g;
-                float newY = (brush > 0.01) ? max(currentY, _BrushStrength.y) : currentY;
+                float newY = currentY;
+                if (brush > 0.01) {
+                    if (currentY < -500.0) {
+                        newY = _BrushStrength.y;
+                    } else {
+                        newY = max(currentY, _BrushStrength.y);
+                    }
+                }
                 
                 return float4(newSnow, newY, 0, 1);
             }

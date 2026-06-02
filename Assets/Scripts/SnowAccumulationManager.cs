@@ -52,6 +52,7 @@ public class SnowAccumulationManager : MonoBehaviour
         snowHeightMap = new RenderTexture(1024, 1024, 0, RenderTextureFormat.RHalf);
         snowHeightMap.name = "SnowHeightMap";
         snowHeightMap.filterMode = FilterMode.Bilinear;
+        snowHeightMap.wrapMode = TextureWrapMode.Clamp;
         
         // CLEAR garbage data from RenderTexture initialization!
         RenderTexture.active = snowHeightMap;

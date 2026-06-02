@@ -85,7 +85,23 @@ Shader "Environment/LocalSnowBlanket"
                 rawH = snowData.r;
                 float hitY = snowData.g;
                 
-                // 极度严格的垂直差值遮挡（限 2 厘米内），彻底杜绝室内天花板漏色！
+                // 如果当前像素没有直接的粒子撞击记录，但周围邻域有积雪（发生柔和溢出过渡），
+                // 我们必须借用邻域里最接近的有效 hitY 写入作为遮挡依据，否则未初始化高度 (-1000) 会放行所有底部和内部天花板顶点！
+                if (hitY < -500.0)
+                {
+                    float deltaH = 0.015;
+                    float gR = _LocalSnowHeightMap.SampleLevel(sampler_LocalSnowHeightMap, float2(u + deltaH, v), 0).g;
+                    float gL = _LocalSnowHeightMap.SampleLevel(sampler_LocalSnowHeightMap, float2(u - deltaH, v), 0).g;
+                    float gU = _LocalSnowHeightMap.SampleLevel(sampler_LocalSnowHeightMap, float2(u, v + deltaH), 0).g;
+                    float gD = _LocalSnowHeightMap.SampleLevel(sampler_LocalSnowHeightMap, float2(u, v - deltaH), 0).g;
+                    
+                    if (gR > -500.0) hitY = gR;
+                    else if (gL > -500.0) hitY = gL;
+                    else if (gU > -500.0) hitY = gU;
+                    else if (gD > -500.0) hitY = gD;
+                }
+                
+                // 极度严格的垂直差值遮挡（限 2 厘米内），彻底杜绝室内天花板和侧壁在未初始化边界的漏色！
                 if (rootLocalPos.y < hitY - 0.02) 
                 {
                     rawH = 0; pillowH = 0; pixelNormal = float3(0,0,0);
@@ -150,9 +166,9 @@ Shader "Environment/LocalSnowBlanket"
                 float3 positionWS = TransformObjectToWorld(input.positionOS.xyz);
                 float3 normalWS = TransformObjectToWorldNormal(input.normalOS);
                 
-                // 严格的朝上坡度遮罩：只允许平坦的顶部区域进行位移，彻底消除侧壁顺延拉伸！
+                // 极度严格的平坦朝上坡度遮罩（0.75 - 0.95）：排除车顶边缘微小弧度的圆角/斜坡，完全锁死任何垂直面拉伸位移！
                 float upDot = dot(normalize(normalWS), float3(0, 1, 0));
-                float slopeMask = smoothstep(0.5, 0.85, upDot);
+                float slopeMask = smoothstep(0.75, 0.95, upDot);
                 
                 float rawH, pillowH;
                 float3 dummyNormal;
@@ -177,9 +193,17 @@ Shader "Environment/LocalSnowBlanket"
 
             float4 frag(Varyings input) : SV_Target
             {
+                // 【绝对防御】：只有当法线朝上超过 0.85 时，才计算雪，彻底杀死垂直面（如车门、墙壁）上的所有积雪计算
+                float3 normalWS = normalize(input.normalWS);
+                if (dot(normalWS, float3(0, 1, 0)) < 0.85) 
+                {
+                    discard;
+                    return float4(0,0,0,0);
+                }
+                
                 float upDot = dot(normalize(input.normalWS), float3(0, 1, 0));
-                // 严格的朝上坡度遮罩：只允许平坦的顶部接收积雪，阻断侧壁顺延！
-                float slopeMask = smoothstep(0.5, 0.85, upDot);
+                // 极度严格的朝上坡度遮罩：只允许近乎完美水平的顶面（upDot > 0.75）进行渲染，彻底切断边缘向下溢出！
+                float slopeMask = smoothstep(0.75, 0.95, upDot);
                 
                 float rawH, pillowH;
                 float3 pixelNormal;

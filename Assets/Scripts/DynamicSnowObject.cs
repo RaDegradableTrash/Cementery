@@ -27,6 +27,7 @@ public class DynamicSnowObject : MonoBehaviour
 
         localSnowMap = new RenderTexture(width, depth, 0, RenderTextureFormat.ARGBHalf);
         localSnowMap.filterMode = FilterMode.Bilinear;
+        localSnowMap.wrapMode = TextureWrapMode.Clamp;
         // Initialize to black
         RenderTexture.active = localSnowMap;
         GL.Clear(false, true, new Color(0, -1000f, 0, 0)); // R: snow height, G: highest hit Y
@@ -52,6 +53,19 @@ public class DynamicSnowObject : MonoBehaviour
         foreach (var r in renderers)
         {
             if (r.name.Contains("SnowLayer")) continue;
+            
+            // 物理名称过滤：彻底排除车轮、轮胎、车内地板、方向盘、座椅、玻璃等不可能落雪的内部或底盘部件！
+            string lowerName = r.name.ToLower();
+            if (lowerName.Contains("wheel") || lowerName.Contains("tire") || 
+                lowerName.Contains("interior") || lowerName.Contains("floor") || 
+                lowerName.Contains("seat") || lowerName.Contains("steering") || 
+                lowerName.Contains("glass") || lowerName.Contains("window") ||
+                lowerName.Contains("cabin") || lowerName.Contains("door") || 
+                lowerName.Contains("underside") || lowerName.Contains("chassis"))
+            {
+                continue;
+            }
+
             MeshFilter mf = r.GetComponent<MeshFilter>();
             if (mf == null || mf.sharedMesh == null) continue;
 
