@@ -57,7 +57,7 @@ public class SnowParticleSystem : MonoBehaviour
         // 3. Emission Module setup
         var emission = partSystem.emission;
         emission.enabled = true;
-        emission.rateOverTime = 300f;  
+        emission.rateOverTime = 500f;  
 
         // 4. Shape Module setup: 圆形范围 (Circle)
         var shape = partSystem.shape;
@@ -74,7 +74,7 @@ public class SnowParticleSystem : MonoBehaviour
         collision.dampen = 1f; 
         collision.lifetimeLoss = 1f; 
         collision.collidesWith = ~0; 
-        collision.quality = ParticleSystemCollisionQuality.High; // High drops collisions on 130k poly terrains!
+        collision.quality = ParticleSystemCollisionQuality.Medium; // High drops collisions on 130k poly terrains!
         collision.voxelSize = 0.2f; // Increase voxel resolution to 20cm to eliminate grid-snapping lines!
 
         // 6. 生成并应用柔和的雪花材质
@@ -131,6 +131,37 @@ public class SnowParticleSystem : MonoBehaviour
             Vector3 pos = collisionEvents[i].intersection;
             Vector3 normal = collisionEvents[i].normal;
 
+            // 判定是否碰到了地形
+            bool isTerrain = (other.GetComponentInParent<DesertTerrainChunk>() != null || other.name.Contains("Terrain"));
+
+            // 1. 坡度合法性检验 (Slope Check)：
+            // 【极其重要】：Medium 质量的碰撞使用了体素网格（Voxel Grid）。
+            // 沙丘的斜坡在体素网格中表现为“阶梯状”。如果粒子正好打在阶梯的垂直侧面上，法线就是纯侧向的 (Dot=0)。
+            // 如果我们在这里对地形进行法线坡度拦截，就会产生完全没有积雪的“Z字形/阶梯形小路”！
+            // 由于地形的 Shader 中已经有严格的 upDot < 0.55 的 discard 渲染拦截，所以我们在这里完全放行地形的碰撞！
+            if (!isTerrain && Vector3.Dot(normal, Vector3.up) < 0.7f)
+            {
+                continue;
+            }
+
+            // 2. 物理射线遮罩校验 (Sky Visibility Occlusion Check)：
+            // 地形起伏大且有低模凹凸时，0.02m 的起点极易因射中自身相邻面或小碎石而导致误判定（自遮挡）。
+            // 因此，如果是地形，我们将起点抬高至上方 0.5 米发射射线，过滤自遮挡干扰！
+            float raycastOffset = isTerrain ? 0.5f : 0.02f;
+            RaycastHit hit;
+            if (Physics.Raycast(pos + Vector3.up * raycastOffset, Vector3.up, out hit, 30f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+            {
+                // 如果是地形，且上方遮挡点非常近（可能射中了极陡峭的山崖上部），我们也忽略此遮挡
+                if (isTerrain && hit.distance < 1.0f)
+                {
+                    // 忽略，视作地形自交
+                }
+                else
+                {
+                    continue; 
+                }
+            }
+
             // 如果撞到的不是地形，就意味着撞到了车子、石头等动态或静态物体
             if (other.GetComponentInParent<DesertTerrainChunk>() == null && !other.name.Contains("Terrain"))
             {
@@ -142,7 +173,8 @@ public class SnowParticleSystem : MonoBehaviour
                 
                 if (dynamicObj != null)
                 {
-                    dynamicObj.AddSnowLocal(pos, particleSnowRadius, particleSnowAmount);
+                    // 局部物体（车身等）保持精细的小半径，防止一颗雪把全车刷白
+                    dynamicObj.AddSnowLocal(pos, 0.4f, particleSnowAmount * 1.5f);
                 }
                 continue; // 撞到物体的雪花不会再穿透到地上！
             }
@@ -157,7 +189,9 @@ public class SnowParticleSystem : MonoBehaviour
             
             if (SnowAccumulationManager.Instance != null)
             {
-                SnowAccumulationManager.Instance.AddSnowAtPoint(pos, particleSnowRadius, particleSnowAmount);
+                // 【核心修复】：为地形使用超大的柔和笔刷半径（3.5米）！
+                // 这能保证落下的雪花能迅速且均匀地在地面晕染开来并连成一大片，彻底消灭“一块一块的斑秃”感！
+                SnowAccumulationManager.Instance.AddSnowAtPoint(pos, 3.5f, particleSnowAmount * 0.6f);
             }
         }
     }

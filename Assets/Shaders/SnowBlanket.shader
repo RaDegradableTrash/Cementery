@@ -148,9 +148,9 @@ Shader "Environment/SnowBlanket"
                 float3 positionWS = TransformObjectToWorld(input.positionOS.xyz);
                 float3 normalWS = TransformObjectToWorldNormal(input.normalOS);
                 
-                // 核心：在顶点阶段计算朝上坡度遮罩，严格限制只有顶面进行顶点位移，彻底消除侧面拉伸！
+                // 核心：在顶点阶段计算朝上坡度遮罩，使用紧凑过渡 (0.51-0.56) 确保沙丘斜坡顶点能满额拉伸，同时消除垂直侧面拉伸！
                 float upDot = dot(normalize(normalWS), float3(0, 1, 0));
-                float slopeMask = smoothstep(0.1, 0.6, upDot);
+                float slopeMask = smoothstep(0.51, 0.56, upDot);
                 
                 float rawH, pillowH;
                 float3 dummyNormal;
@@ -175,9 +175,10 @@ Shader "Environment/SnowBlanket"
 
             float4 frag(Varyings input) : SV_Target
             {
-                // 【绝对防御】：只有当法线朝上超过 0.85 时，才计算雪，彻底杀死垂直面和陡峭峭壁上的所有积雪计算
+                // 【绝对防御】：只有当法线朝上超过 0.55 (即斜度小于约 56 度) 时，才计算雪，
+                // 这样能完美容纳沙丘的波浪形陡坡积雪（防止低模产生波浪形无雪带），同时依然彻底杀死垂直峭壁面上的积雪计算
                 float3 baseNormalInput = normalize(input.normalWS);
-                if (dot(baseNormalInput, float3(0, 1, 0)) < 0.85) 
+                if (dot(baseNormalInput, float3(0, 1, 0)) < 0.55) 
                 {
                     discard;
                     return float4(0,0,0,0);
@@ -215,12 +216,11 @@ Shader "Environment/SnowBlanket"
                 float3 microNormal = normalize(float3(nL - nR, 0.15, nD - nU));
                 
                 float3 normal = normalize(baseNormal + pixelNormal + microNormal * 0.35);
-
+ 
                 // 核心修复：引入垂直度遮罩 (Verticality Mask)
-                // 只有当表面朝向接近正上方 (upDot > 0.3) 时才显示积雪，并在 0.3 到 0.7 之间极其丝滑地淡出，
-                // 彻底断绝任何垂直面（如车身侧面、悬崖峭壁）的贴图拉伸与“披落”！
+                // 使用紧凑的 smoothstep (0.51-0.56) 确保沙丘斜面处的积雪不发生半透明淡出，保持 100% 满额积雪厚度与不透明度！
                 float upDot = dot(normal, float3(0, 1, 0));
-                float verticality = smoothstep(0.3, 0.7, upDot);
+                float verticality = smoothstep(0.51, 0.56, upDot);
                 alpha *= verticality;
 
                 float4 shadowCoord = TransformWorldToShadowCoord(input.positionWS);

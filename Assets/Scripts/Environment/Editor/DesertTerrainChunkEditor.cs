@@ -10,7 +10,7 @@ namespace EnvironmentSystem
     /// and recursive neighbor dirty marking and mesh asset serialization.
     /// </summary>
     [CustomEditor(typeof(DesertTerrainChunk))]
-    public class DesertTerrainChunkEditor : Editor
+    public class DesertTerrainChunkEditor : UnityEditor.Editor
     {
         public override void OnInspectorGUI()
         {
