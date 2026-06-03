@@ -83,6 +83,7 @@ public class PremodeledContainer : MonoBehaviour
 
         // 1. 生成纯视觉体（先留在世界坐标作为动画起点）
         GameObject newVisual = Instantiate(prefab, currentWorldPos, currentWorldRot);
+        newVisual.transform.localScale = pickupScale;
         
         // 🌟 降维打击：直接剥离所有碰撞体和刚体，让它变成纯粹老实的“幽灵渲染网格”，绝不引发物理崩溃！
         StripAllPhysicsComponents(newVisual);
@@ -155,7 +156,14 @@ public class PremodeledContainer : MonoBehaviour
             visual.transform.SetParent(targetSpot);
             visual.transform.localPosition = Vector3.zero;
             visual.transform.localRotation = Quaternion.identity;
-            visual.transform.localScale = keepScale;
+            
+            // 锁定世界 scale：计算 compensation，防止父级 scale 缩放导致物体变形
+            Vector3 parentLossy = targetSpot.lossyScale;
+            visual.transform.localScale = new Vector3(
+                Mathf.Approximately(parentLossy.x, 0f) ? keepScale.x : keepScale.x / parentLossy.x,
+                Mathf.Approximately(parentLossy.y, 0f) ? keepScale.y : keepScale.y / parentLossy.y,
+                Mathf.Approximately(parentLossy.z, 0f) ? keepScale.z : keepScale.z / parentLossy.z
+            );
         }
     }
 
