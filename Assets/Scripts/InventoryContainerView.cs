@@ -142,6 +142,29 @@ public class InventoryContainerView : MonoBehaviour
         scale.x = targetWidth / meshWidth;
         scale.z = targetDepth / meshDepth;
         gridPlane.localScale = scale;
+
+        // 让外围长方体 CubeSpace_PackStorage 始终包裹并对齐该网格空间
+        Transform cubeSpace = transform.Find("CubeSpace_PackStorage");
+        if (cubeSpace == null)
+        {
+            GameObject obj = GameObject.Find("CubeSpace_PackStorage");
+            if (obj != null)
+                cubeSpace = obj.transform;
+        }
+
+        if (cubeSpace != null)
+        {
+            cubeSpace.localPosition = new Vector3(
+                (inventorySystem.gridWidth - 1f) * 0.5f,
+                (inventorySystem.gridHeight - 1f) * 0.5f,
+                (inventorySystem.gridDepth - 1f) * 0.5f
+            );
+            cubeSpace.localScale = new Vector3(
+                inventorySystem.gridWidth,
+                inventorySystem.gridHeight,
+                inventorySystem.gridDepth
+            );
+        }
     }
 
     void EnsureGridLineRoot()
