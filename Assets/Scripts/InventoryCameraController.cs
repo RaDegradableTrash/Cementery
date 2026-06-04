@@ -65,9 +65,61 @@ public class InventoryCameraController : MonoBehaviour
 
     void Awake()
     {
+        // 强制启用快捷键，防止编辑器序列化丢失或被意外设为 false
+        allowToggleInventoryKey = true;
+
+        // 动态补全相机与背包根节点引用
+        if (mainCamera == null)
+        {
+            mainCamera = Camera.main;
+            if (mainCamera == null)
+            {
+                GameObject mainCamObj = GameObject.FindWithTag("MainCamera");
+                if (mainCamObj != null)
+                    mainCamera = mainCamObj.GetComponent<Camera>();
+            }
+        }
+
+        if (inventoryCamera == null)
+        {
+            Camera[] allCameras = FindObjectsOfType<Camera>(true);
+            foreach (Camera cam in allCameras)
+            {
+                if (cam.name.Contains("PackStorage") || cam.name.Contains("Inventory"))
+                {
+                    inventoryCamera = cam;
+                    break;
+                }
+            }
+        }
+
+        if (inventoryRoot == null)
+        {
+            GridInventorySystem sys = FindObjectOfType<GridInventorySystem>(true);
+            if (sys != null)
+            {
+                inventoryRoot = sys.gameObject;
+                inventorySystem = sys;
+            }
+            else
+            {
+                GameObject rootObj = GameObject.Find("InventoryRootEmpty_PackStorage");
+                if (rootObj == null) rootObj = GameObject.Find("InventoryRoot");
+                if (rootObj != null)
+                {
+                    inventoryRoot = rootObj;
+                    inventorySystem = rootObj.GetComponent<GridInventorySystem>();
+                }
+            }
+        }
+        else if (inventorySystem == null)
+        {
+            inventorySystem = inventoryRoot.GetComponent<GridInventorySystem>();
+            if (inventorySystem == null)
+                inventorySystem = FindObjectOfType<GridInventorySystem>(true);
+        }
+
         EnsurePrimaryController();
-        if (!IsPrimaryController())
-            allowToggleInventoryKey = false;
     }
 
     void Start()
@@ -191,7 +243,7 @@ public class InventoryCameraController : MonoBehaviour
 
     public static InventoryCameraController GetPrimaryController()
     {
-        if (_primaryController == null)
+        if (_primaryController == null || (_primaryController.mainCamera != null && !_primaryController.mainCamera.enabled))
             _primaryController = SelectPrimaryController();
 
         return _primaryController;
@@ -229,13 +281,18 @@ public class InventoryCameraController : MonoBehaviour
         if (controller.inventorySystem != null) score += 4;
         if (controller.inventoryRoot != null) score += 2;
         if (controller.inventoryCamera != null) score += 1;
-        if (controller.mainCamera != null) score += 1;
+        if (controller.mainCamera != null)
+        {
+            score += 1;
+            if (controller.mainCamera.enabled)
+                score += 10; // Prioritize controllers with an active main camera (local player)
+        }
         return score;
     }
 
     void EnsurePrimaryController()
     {
-        if (_primaryController == null)
+        if (_primaryController == null || (_primaryController.mainCamera != null && !_primaryController.mainCamera.enabled))
             _primaryController = SelectPrimaryController();
     }
 

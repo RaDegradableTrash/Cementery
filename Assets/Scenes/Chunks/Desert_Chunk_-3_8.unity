@@ -139,7 +139,8 @@ Material:
   m_EnableInstancingVariants: 0
   m_DoubleSidedGI: 0
   m_CustomRenderQueue: -1
-  stringTagMap: {}
+  stringTagMap:
+    RenderType: Opaque
   disabledShaderPasses: []
   m_LockedProperties: 
   m_SavedProperties:
@@ -274,16 +275,8 @@ MonoBehaviour:
   width: 64
   depth: 64
   cellSize: 2
+  snowResolutionMultiplier: 4
   seed: 42
-  enableMinecraftHills: 0
-  hillMaxHeight: 35
-  hillNoiseScale: 120
-  octaves: 5
-  lacunarity: 2.1
-  gain: 0.48
-  enableTerracing: 1
-  terraceStep: 5
-  terraceFlatness: 0.8
   baseScale: 200
   baseHeight: 10
   baseNoiseHeight: 15
@@ -322,7 +315,7 @@ MeshCollider:
   serializedVersion: 5
   m_Convex: 0
   m_CookingOptions: 30
-  m_Mesh: {fileID: 4300000, guid: 6dc8cfa6354504533a1e0ba0bd961628, type: 2}
+  m_Mesh: {fileID: 0}
 --- !u!23 &1221635265
 MeshRenderer:
   m_ObjectHideFlags: 0

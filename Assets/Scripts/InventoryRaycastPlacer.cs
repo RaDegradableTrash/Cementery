@@ -192,6 +192,11 @@ public class InventoryRaycastPlacer : MonoBehaviour
                 {
                     Vector3 targetPos = anchorInBounds ? (Vector3)gridPos : (localPlaneHit + _dragOffset);
                     
+                    // 限制预览物体的拖拽坐标在网格边界内，确保预览残影不会飞到长方体外
+                    targetPos.x = Mathf.Clamp(targetPos.x, 0f, inventorySystem.gridWidth - 1f);
+                    targetPos.y = Mathf.Clamp(targetPos.y, 0f, inventorySystem.gridHeight - 1f);
+                    targetPos.z = Mathf.Clamp(targetPos.z, 0f, inventorySystem.gridDepth - 1f);
+                    
                     if (_snapPreviewNextFrame)
                     {
                         previewObject.localPosition = targetPos;

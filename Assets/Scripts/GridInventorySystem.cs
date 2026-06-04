@@ -8,9 +8,9 @@ using UnityEngine;
 public class GridInventorySystem : MonoBehaviour
 {
     [Header("Grid Volume Size")] // 背包空间尺寸
-    public int gridWidth = 6;
+    public int gridWidth = 3;
     public int gridHeight = 4;
-    public int gridDepth = 6;
+    public int gridDepth = 2;
 
     // 三维数组存储物品实例
     private ItemInstance[,,] grid;
@@ -25,6 +25,13 @@ public class GridInventorySystem : MonoBehaviour
 
     void Awake()
     {
+        // 如果是旧的默认尺寸(6, 4, 6)，则自动迁移到新的默认尺寸长2(Depth=2) 宽3(Width=3) 高4(Height=4)
+        if (gridWidth == 6 && gridHeight == 4 && gridDepth == 6)
+        {
+            gridWidth = 3;
+            gridHeight = 4;
+            gridDepth = 2;
+        }
         grid = new ItemInstance[gridWidth, gridHeight, gridDepth];
     }
 
