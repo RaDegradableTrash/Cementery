@@ -62,11 +62,12 @@ namespace EnvironmentSystem
         public int depth = 64;       // Vertices along Z
         public float cellSize = 2f;  // Space between vertices (meters)
         public int snowResolutionMultiplier = 4; // Modifier for high-res snow mesh
+        
+        [Tooltip("If true, the chunk will lock its current saved mesh asset and skip rebuilding from noise at runtime.")]
+        public bool useSavedMeshAsset = true;
 
         [Header("Global Seed")]
         public int seed = 42;
-
-
 
         [Header("Legacy Rolling Dunes (传统沙丘 - 升级后混沌起伏)")]
         public float baseScale = 200f;       // Scale of large base hills
@@ -125,6 +126,7 @@ namespace EnvironmentSystem
 
     public void UpdateResolution()
     {
+        if (useSavedMeshAsset) return; // 🚀 Skip rebuilding if sculpted
         if (_asyncBuildRunning) return;
 
         Transform snowLayerTransform = transform.Find("SnowLayer");
@@ -163,9 +165,19 @@ namespace EnvironmentSystem
             {
                 Build();
             }
-            else
+            else if (!useSavedMeshAsset) // 🚀 Skip rebuilding if sculpted
             {
                 UpdateResolution(); // Ensure high-res mesh is built if missing
+            }
+            else
+            {
+                // 🚀 For sculpted chunks, explicitly assign the mesh to the collider and sync snow layer at startup
+                if (TryGetComponent<MeshCollider>(out var col))
+                {
+                    col.sharedMesh = null;
+                    col.sharedMesh = filter.sharedMesh;
+                }
+                SyncSnowLayer();
             }
         }
 
@@ -179,6 +191,7 @@ namespace EnvironmentSystem
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
             if (!Application.isPlaying) return;
+            if (useSavedMeshAsset) return; // 🚀 Skip rebuilding if sculpted
             if (!_asyncBuildRunning)
             {
                 StartCoroutine(BuildAsyncCoroutine(delayFrames: 2));
@@ -194,6 +207,7 @@ namespace EnvironmentSystem
         [ContextMenu("Rebuild Desert Chunk")]
         public void Build()
         {
+            if (useSavedMeshAsset) return; // 🚀 Skip rebuilding if sculpted
             Mesh mesh = GenerateMesh();
             ApplyMesh(mesh);
         }
@@ -203,6 +217,8 @@ namespace EnvironmentSystem
         /// </summary>
         public void BuildSeamlessWithNeighbors(bool propagate = true)
         {
+            if (useSavedMeshAsset) return; // 🚀 Skip rebuilding if sculpted
+
             List<DesertTerrainChunk> neighbors = FindLoadedNeighbors(
                 out var left, out var right, out var down, out var up,
                 out var leftDown, out var leftUp, out var rightDown, out var rightUp
@@ -339,15 +355,16 @@ namespace EnvironmentSystem
 
             int vw = width + 1;
             int vd = depth + 1;
+            int mainVerts = vw * vd;
 
-            if (vertices.Length != vw * vd)
+            if (vertices.Length < mainVerts)
             {
-                Debug.LogWarning("[DesertTerrainChunk] Existing mesh vertex count mismatch. Regenerating seamless mesh.");
+                Debug.LogWarning("[DesertTerrainChunk] Existing mesh vertex count is too small. Regenerating seamless mesh.");
                 BuildSeamlessWithNeighbors();
                 return;
             }
 
-            // Apply fine detail noise
+            // Apply fine detail noise only to surface vertices
             float ox = seed * 4.1f;
             float oz = seed * 5.9f;
 
@@ -367,7 +384,42 @@ namespace EnvironmentSystem
                 }
             }
 
-            // Seamless analytical normals based on updated vertices
+            // Rebuild/update skirt vertices to match the refined surface vertices
+            int leftSB = mainVerts;
+            int rightSB = mainVerts + vd;
+            int bottomSB = mainVerts + 2 * vd;
+            int topSB = mainVerts + 2 * vd + vw;
+            const float SkirtDepth = 40f;
+
+            if (vertices.Length == mainVerts + 2 * vd + 2 * vw)
+            {
+                // Left skirt (x=0 column)
+                for (int z = 0; z < vd; z++)
+                {
+                    int mi = z * vw;
+                    vertices[leftSB + z] = vertices[mi] + new Vector3(0f, -SkirtDepth, 0f);
+                }
+                // Right skirt (x=width column)
+                for (int z = 0; z < vd; z++)
+                {
+                    int mi = z * vw + width;
+                    vertices[rightSB + z] = vertices[mi] + new Vector3(0f, -SkirtDepth, 0f);
+                }
+                // Bottom skirt (z=0 row)
+                for (int x = 0; x < vw; x++)
+                {
+                    int mi = x;
+                    vertices[bottomSB + x] = vertices[mi] + new Vector3(0f, -SkirtDepth, 0f);
+                }
+                // Top skirt (z=depth row)
+                for (int x = 0; x < vw; x++)
+                {
+                    int mi = depth * vw + x;
+                    vertices[topSB + x] = vertices[mi] + new Vector3(0f, -SkirtDepth, 0f);
+                }
+            }
+
+            // Seamless analytical normals based on updated surface vertices
             for (int z = 0; z < vd; z++)
             {
                 for (int x = 0; x < vw; x++)
@@ -385,15 +437,28 @@ namespace EnvironmentSystem
                 }
             }
 
+            // Set skirt normals to face outward
+            if (vertices.Length == mainVerts + 2 * vd + 2 * vw)
+            {
+                for (int z = 0; z < vd; z++) normals[leftSB + z] = Vector3.left;
+                for (int z = 0; z < vd; z++) normals[rightSB + z] = Vector3.right;
+                for (int x = 0; x < vw; x++) normals[bottomSB + x] = Vector3.back;
+                for (int x = 0; x < vw; x++) normals[topSB + x] = Vector3.forward;
+            }
+
             mesh.vertices = vertices;
             mesh.normals = normals;
             mesh.RecalculateBounds();
+
+            useSavedMeshAsset = true;
 
             if (TryGetComponent<MeshCollider>(out var col))
             {
                 col.sharedMesh = null;
                 col.sharedMesh = mesh;
             }
+
+            UpdateSnowLayer(mesh);
 
             Debug.Log("[DesertTerrainChunk] Refined existing terrain with fine micro-details.");
         }
@@ -885,6 +950,15 @@ namespace EnvironmentSystem
             }
         }
 
+        public void SyncSnowLayer()
+        {
+            MeshFilter filter = GetComponent<MeshFilter>();
+            if (filter != null && filter.sharedMesh != null)
+            {
+                UpdateSnowLayer(filter.sharedMesh);
+            }
+        }
+
         private void OnValidate()
         {
             if (width < 2) width = 2;
@@ -1316,13 +1390,19 @@ namespace EnvironmentSystem
         /// </summary>
         private IEnumerator BuildAsyncCoroutine(int delayFrames = 2)
         {
+            if (useSavedMeshAsset)
+            {
+                _asyncBuildRunning = false;
+                yield break;
+            }
+
             _asyncBuildRunning = true;
 
             // Stagger across frames to prevent 25 chunks all computing at frame 0
             for (int i = 0; i < delayFrames; i++)
                 yield return null;
 
-            if (!this || !gameObject.activeInHierarchy)
+            if (!this || !gameObject.activeInHierarchy || useSavedMeshAsset)
             {
                 _asyncBuildRunning = false;
                 yield break;
@@ -1482,11 +1562,67 @@ namespace EnvironmentSystem
 
             MeshFilter filter = snowLayerObj.GetComponent<MeshFilter>();
             if (filter == null) filter = snowLayerObj.AddComponent<MeshFilter>();
+
+            // Always instantiate a copy so we don't modify the main terrain mesh asset directly!
+            Mesh snowMesh = Instantiate(originalMesh);
+            snowMesh.name = "SnowLayerMesh_Flattened";
+
+            // Flatten skirt vertices to have 0 area triangles (preventing normal interpolation rendering on skirts)
+            int vertexCount = snowMesh.vertexCount;
+            int S = Mathf.RoundToInt(-2f + Mathf.Sqrt(4f + vertexCount));
+            if (S * S + 4 * S == vertexCount)
+            {
+                int vw = S;
+                int vd = S;
+                int mainVerts = vw * vd;
+                Vector3[] verts = snowMesh.vertices;
+
+                int leftSB = mainVerts;
+                int rightSB = mainVerts + vd;
+                int bottomSB = mainVerts + 2 * vd;
+                int topSB = mainVerts + 2 * vd + vw;
+
+                // Left skirt (x=0 column)
+                for (int z = 0; z < vd; z++)
+                {
+                    int mi = z * vw;
+                    verts[leftSB + z] = verts[mi];
+                }
+                // Right skirt (x=width column)
+                for (int z = 0; z < vd; z++)
+                {
+                    int mi = z * vw + (vw - 1);
+                    verts[rightSB + z] = verts[mi];
+                }
+                // Bottom skirt (z=0 row)
+                for (int x = 0; x < vw; x++)
+                {
+                    int mi = x;
+                    verts[bottomSB + x] = verts[mi];
+                }
+                // Top skirt (z=depth row)
+                for (int x = 0; x < vw; x++)
+                {
+                    int mi = (vd - 1) * vw + x;
+                    verts[topSB + x] = verts[mi];
+                }
+
+                snowMesh.vertices = verts;
+                snowMesh.RecalculateBounds();
+            }
+
             if (filter.sharedMesh != null && filter.sharedMesh != originalMesh)
             {
-                Destroy(filter.sharedMesh);
+                if (Application.isPlaying)
+                {
+                    Destroy(filter.sharedMesh);
+                }
+                else
+                {
+                    DestroyImmediate(filter.sharedMesh);
+                }
             }
-            filter.sharedMesh = originalMesh;
+            filter.sharedMesh = snowMesh;
 
             MeshRenderer renderer = snowLayerObj.GetComponent<MeshRenderer>();
             if (renderer == null) renderer = snowLayerObj.AddComponent<MeshRenderer>();

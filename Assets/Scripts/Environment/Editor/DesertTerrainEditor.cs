@@ -168,6 +168,7 @@ namespace EnvironmentSystem
 
                             // 3. Copy settings from the editor window
                             CopyChunkSettings(settings, chunk);
+                            chunk.useSavedMeshAsset = true;
 
                             // Position offset in the grid
                             float worldOffsetX = x * chunk.width * chunk.cellSize;

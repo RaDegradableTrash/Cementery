@@ -77,8 +77,8 @@ namespace EnvironmentSystem
             _brushMode = (BrushMode)EditorGUILayout.EnumPopup("Sculpt Mode", _brushMode);
             _falloffStyle = (FalloffStyle)EditorGUILayout.EnumPopup("Falloff (Cliff Style)", _falloffStyle);
 
-            _brushRadius = EditorGUILayout.Slider("Brush Radius (Size)", _brushRadius, 1f, 100f);
-            _brushStrength = EditorGUILayout.Slider("Brush Strength", _brushStrength, 0.05f, 5f);
+            _brushRadius = EditorGUILayout.Slider("Brush Radius (Size)", _brushRadius, 1f, 500f);
+            _brushStrength = EditorGUILayout.Slider("Brush Strength", _brushStrength, 0.05f, 50f);
 
             if (_brushMode == BrushMode.Flatten)
             {
@@ -98,6 +98,24 @@ namespace EnvironmentSystem
             if (GUILayout.Button("🔗 一键融合与抚平地表裂隙 (Auto-Fuse Seams & Cracks)", GUILayout.Height(35)))
             {
                 FuseAllSeams();
+            }
+            GUI.backgroundColor = Color.white;
+
+            GUILayout.Space(5);
+
+            GUI.backgroundColor = new Color(0.1f, 0.6f, 0.9f);
+            if (GUILayout.Button("🌍 一键缝合全图所有区块接缝 (Batch Fuse ALL Chunks in Project)", GUILayout.Height(35)))
+            {
+                FuseAllMapChunksBatch();
+            }
+            GUI.backgroundColor = Color.white;
+
+            GUILayout.Space(5);
+
+            GUI.backgroundColor = new Color(0.4f, 0.7f, 0.9f);
+            if (GUILayout.Button("✨ 一键微调所有地形细节 (Refine All Chunks)", GUILayout.Height(35)))
+            {
+                RefineAllChunks();
             }
             GUI.backgroundColor = Color.white;
 
@@ -130,9 +148,69 @@ namespace EnvironmentSystem
 
         private void SaveSculptChangesToDisk()
         {
+            CacheSceneChunks();
+            var allChunks = _cachedSceneChunks;
+            int savedMeshesCount = 0;
+
+            foreach (var chunk in allChunks)
+            {
+                if (chunk != null && chunk.useSavedMeshAsset)
+                {
+                    SaveMeshAsset(chunk);
+                    savedMeshesCount++;
+
+                    EditorUtility.SetDirty(chunk);
+                    if (chunk.gameObject.scene != null && chunk.gameObject.scene.name != null)
+                    {
+                        UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(chunk.gameObject.scene);
+                    }
+                }
+            }
+
+            // Save open scenes
+            UnityEditor.SceneManagement.EditorSceneManager.SaveOpenScenes();
+
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
-            EditorUtility.DisplayDialog("Saved Successfully", "All sculpt modifications have been successfully written to your local .asset mesh files!", "Excellent!");
+            EditorUtility.DisplayDialog("Saved Successfully", $"Successfully saved {savedMeshesCount} sculpt modifications, serialized mesh assets, and updated scene chunk settings to disk!", "Excellent!");
+        }
+
+        private void SaveMeshAsset(DesertTerrainChunk targetChunk)
+        {
+            if (targetChunk.TryGetComponent<MeshFilter>(out var filter) && filter.sharedMesh != null)
+            {
+                string assetPath = AssetDatabase.GetAssetPath(filter.sharedMesh);
+                bool isWriteableCustomAsset = !string.IsNullOrEmpty(assetPath) && assetPath.EndsWith(".asset") && assetPath.Contains("/Meshes/");
+
+                if (isWriteableCustomAsset)
+                {
+                    EditorUtility.SetDirty(filter.sharedMesh);
+                }
+                else
+                {
+                    string folderPath = "Assets/Scenes/Chunks/Meshes";
+                    if (!System.IO.Directory.Exists(folderPath))
+                    {
+                        System.IO.Directory.CreateDirectory(folderPath);
+                        AssetDatabase.Refresh();
+                    }
+
+                    string meshPath = $"{folderPath}/Mesh_{targetChunk.name}.asset";
+                    
+                    Mesh standaloneMesh = Instantiate(filter.sharedMesh);
+                    standaloneMesh.name = $"Mesh_{targetChunk.name}";
+
+                    AssetDatabase.CreateAsset(standaloneMesh, meshPath);
+                    filter.sharedMesh = standaloneMesh;
+                    
+                    if (targetChunk.TryGetComponent<MeshCollider>(out var col))
+                    {
+                        col.sharedMesh = standaloneMesh;
+                    }
+
+                    Debug.Log($"[ChunkMergeSplitTool] Saved new stitched mesh to disk asset: {meshPath}");
+                }
+            }
         }
 
         private void ReactivateAllChunks()
@@ -469,6 +547,8 @@ namespace EnvironmentSystem
                         chunk.gameObject.SetActive(true);
                     }
 
+                    chunk.useSavedMeshAsset = true; // 🚀 Prevent noise regeneration!
+
                     mesh.vertices = vertices;
                     mesh.RecalculateBounds();
                     mesh.UploadMeshData(false);
@@ -513,26 +593,20 @@ namespace EnvironmentSystem
                 CacheSceneChunks();
             }
             var allChunks = _cachedSceneChunks;
-            float epsilon = 0.01f;
-            Dictionary<Vector2Int, float> worldHeightMap = new Dictionary<Vector2Int, float>();
 
+            // Pre-cache all chunk grids in the registry
+            ChunkRegistry.Clear();
+            foreach (var chunk in allChunks)
+            {
+                ChunkRegistry.Register(chunk);
+            }
+
+            var chunkData = new Dictionary<DesertTerrainChunk, Vector3[]>();
             foreach (var chunk in allChunks)
             {
                 MeshFilter mf = chunk.GetComponent<MeshFilter>();
                 if (mf == null || mf.sharedMesh == null) continue;
-
-                Vector3[] verts = mf.sharedMesh.vertices;
-                Vector3 chunkPos = chunk.transform.position;
-
-                foreach (var v in verts)
-                {
-                    Vector3 wPos = chunkPos + v;
-                    Vector2Int key = new Vector2Int(
-                        Mathf.RoundToInt(wPos.x / epsilon),
-                        Mathf.RoundToInt(wPos.z / epsilon)
-                    );
-                    worldHeightMap[key] = wPos.y;
-                }
+                chunkData[chunk] = mf.sharedMesh.vertices;
             }
 
             // Recalculate seamless normals for modified chunks
@@ -546,33 +620,92 @@ namespace EnvironmentSystem
                 Vector3[] vertices = mesh.vertices;
                 Vector3[] normals = new Vector3[vertices.Length];
                 Vector3 chunkPos = chunk.transform.position;
+                Vector2Int gc = chunk.GridCoord;
 
                 int vw = chunk.width + 1;
                 int vd = chunk.depth + 1;
+                int mainVerts = vw * vd;
                 float cellSize = chunk.cellSize;
+
+                var leftChunk = ChunkRegistry.Get(gc.x - 1, gc.y);
+                var rightChunk = ChunkRegistry.Get(gc.x + 1, gc.y);
+                var bottomChunk = ChunkRegistry.Get(gc.x, gc.y - 1);
+                var topChunk = ChunkRegistry.Get(gc.x, gc.y + 1);
+
+                var leftVerts = leftChunk != null && chunkData.TryGetValue(leftChunk, out var lv) ? lv : null;
+                var rightVerts = rightChunk != null && chunkData.TryGetValue(rightChunk, out var rv) ? rv : null;
+                var bottomVerts = bottomChunk != null && chunkData.TryGetValue(bottomChunk, out var bv) ? bv : null;
+                var topVerts = topChunk != null && chunkData.TryGetValue(topChunk, out var tv) ? tv : null;
 
                 for (int z = 0; z < vd; z++)
                 {
                     for (int x = 0; x < vw; x++)
                     {
                         int index = z * vw + x;
-                        float localX = x * cellSize;
-                        float localZ = z * cellSize;
-
-                        float worldX = chunkPos.x + localX;
-                        float worldZ = chunkPos.z + localZ;
-
                         float currentY = vertices[index].y + chunkPos.y;
 
-                        float hL = GetHeightFromMap(worldX - cellSize, worldZ, worldHeightMap, epsilon, currentY);
-                        float hR = GetHeightFromMap(worldX + cellSize, worldZ, worldHeightMap, epsilon, currentY);
-                        float hD = GetHeightFromMap(worldX, worldZ - cellSize, worldHeightMap, epsilon, currentY);
-                        float hU = GetHeightFromMap(worldX, worldZ + cellSize, worldHeightMap, epsilon, currentY);
+                        // Query Left Height
+                        float hL = currentY;
+                        if (x > 0)
+                        {
+                            hL = vertices[z * vw + (x - 1)].y + chunkPos.y;
+                        }
+                        else if (leftVerts != null)
+                        {
+                            hL = leftVerts[z * vw + (chunk.width - 1)].y + leftChunk.transform.position.y;
+                        }
+
+                        // Query Right Height
+                        float hR = currentY;
+                        if (x < chunk.width)
+                        {
+                            hR = vertices[z * vw + (x + 1)].y + chunkPos.y;
+                        }
+                        else if (rightVerts != null)
+                        {
+                            hR = rightVerts[z * vw + 1].y + rightChunk.transform.position.y;
+                        }
+
+                        // Query Bottom Height
+                        float hD = currentY;
+                        if (z > 0)
+                        {
+                            hD = vertices[(z - 1) * vw + x].y + chunkPos.y;
+                        }
+                        else if (bottomVerts != null)
+                        {
+                            hD = bottomVerts[(chunk.depth - 1) * vw + x].y + bottomChunk.transform.position.y;
+                        }
+
+                        // Query Top Height
+                        float hU = currentY;
+                        if (z < chunk.depth)
+                        {
+                            hU = vertices[(z + 1) * vw + x].y + chunkPos.y;
+                        }
+                        else if (topVerts != null)
+                        {
+                            hU = topVerts[1 * vw + x].y + topChunk.transform.position.y;
+                        }
 
                         Vector3 tangentX = new Vector3(cellSize * 2f, hR - hL, 0);
                         Vector3 tangentZ = new Vector3(0, hU - hD, cellSize * 2f);
                         normals[index] = Vector3.Cross(tangentZ, tangentX).normalized;
                     }
+                }
+
+                // Properly calculate and set outward-facing normals for the skirt vertices
+                int leftSB = mainVerts;
+                int rightSB = mainVerts + vd;
+                int bottomSB = mainVerts + 2 * vd;
+                int topSB = mainVerts + 2 * vd + vw;
+
+                if (vertices.Length == mainVerts + 2 * vd + 2 * vw)
+                {
+                    for (int z = 0; z < vd; z++) normals[leftSB + z] = Vector3.left;
+                    for (int z = 0; z < vd; z++) normals[rightSB + z] = Vector3.right;
+                    for (int x = 0; x < vw; x++) normals[bottomSB + x] = Vector3.back;
+                    for (int x = 0; x < vw; x++) normals[topSB + x] = Vector3.forward;
                 }
 
                 mesh.normals = normals;
@@ -614,108 +747,224 @@ namespace EnvironmentSystem
         {
             CacheSceneChunks();
             var allChunks = _cachedSceneChunks;
-            float epsilon = 0.01f;
 
-            // Key: rounded grid coordinate in world space (X, Z)
-            // Value: List of vertex references that lie at this X/Z coordinate
-            var vertexGroups = new Dictionary<Vector2Int, List<VertexRef>>();
+            // Pre-cache all chunk grids in the registry
+            ChunkRegistry.Clear();
+            foreach (var chunk in allChunks)
+            {
+                ChunkRegistry.Register(chunk);
+            }
 
-            // Read vertices from all chunks
             var chunkData = new Dictionary<DesertTerrainChunk, (Mesh mesh, Vector3[] verts)>();
             foreach (var chunk in allChunks)
             {
                 MeshFilter mf = chunk.GetComponent<MeshFilter>();
                 if (mf == null || mf.sharedMesh == null) continue;
+                chunkData[chunk] = (mf.sharedMesh, mf.sharedMesh.vertices);
+            }
 
-                Mesh mesh = mf.sharedMesh;
-                Vector3[] verts = mesh.vertices;
-                chunkData[chunk] = (mesh, verts);
+            HashSet<DesertTerrainChunk> modified = new HashSet<DesertTerrainChunk>();
 
-                Vector3 chunkPos = chunk.transform.position;
-
-                for (int i = 0; i < verts.Length; i++)
+            // Phase 1: Sew boundaries exactly using grid-aligned vertices (Run 2 times for corner convergence)
+            for (int pass = 0; pass < 2; pass++)
+            {
+                foreach (var chunk in allChunks)
                 {
-                    Vector3 wPos = chunkPos + verts[i];
-                    Vector2Int key = new Vector2Int(
-                        Mathf.RoundToInt(wPos.x / epsilon),
-                        Mathf.RoundToInt(wPos.z / epsilon)
-                    );
+                    if (!chunkData.TryGetValue(chunk, out var data)) continue;
+                    Vector2Int gc = chunk.GridCoord;
+                    int vw = chunk.width + 1;
+                    int vd = chunk.depth + 1;
 
-                    if (!vertexGroups.TryGetValue(key, out var list))
+                    // 1. Align Left border with Right border of Left chunk
+                    var leftChunk = ChunkRegistry.Get(gc.x - 1, gc.y);
+                    if (leftChunk != null && chunkData.TryGetValue(leftChunk, out var leftData))
                     {
-                        list = new List<VertexRef>();
-                        vertexGroups[key] = list;
+                        for (int z = 0; z < vd; z++)
+                        {
+                            int myIdx = z * vw; // x = 0
+                            int otherIdx = z * vw + chunk.width; // x = width
+                            
+                            float myWorldY = data.verts[myIdx].y + chunk.transform.position.y;
+                            float otherWorldY = leftData.verts[otherIdx].y + leftChunk.transform.position.y;
+                            
+                            float avgWorldY = (myWorldY + otherWorldY) * 0.5f;
+                            
+                            data.verts[myIdx].y = avgWorldY - chunk.transform.position.y;
+                            leftData.verts[otherIdx].y = avgWorldY - leftChunk.transform.position.y;
+                            
+                            modified.Add(chunk);
+                            modified.Add(leftChunk);
+                        }
                     }
 
-                    list.Add(new VertexRef
+                    // 2. Align Bottom border with Top border of Bottom chunk
+                    var bottomChunk = ChunkRegistry.Get(gc.x, gc.y - 1);
+                    if (bottomChunk != null && chunkData.TryGetValue(bottomChunk, out var bottomData))
                     {
-                        chunk = chunk,
-                        mesh = mesh,
-                        vertices = verts,
-                        index = i
-                    });
+                        for (int x = 0; x < vw; x++)
+                        {
+                            int myIdx = x; // z = 0
+                            int otherIdx = chunk.depth * vw + x; // z = depth
+                            
+                            float myWorldY = data.verts[myIdx].y + chunk.transform.position.y;
+                            float otherWorldY = bottomData.verts[otherIdx].y + bottomChunk.transform.position.y;
+                            
+                            float avgWorldY = (myWorldY + otherWorldY) * 0.5f;
+                            
+                            data.verts[myIdx].y = avgWorldY - chunk.transform.position.y;
+                            bottomData.verts[otherIdx].y = avgWorldY - bottomChunk.transform.position.y;
+                            
+                            modified.Add(chunk);
+                            modified.Add(bottomChunk);
+                        }
+                    }
                 }
             }
 
-            // Align heights of duplicate vertices (seams) using Y-clustering (separates surface from skirt)
-            int fusedCount = 0;
-            HashSet<DesertTerrainChunk> modified = new HashSet<DesertTerrainChunk>();
-
-            foreach (var kvp in vertexGroups)
+            // Phase 2: Smooth 1-ring boundary vertices
+            var smoothedHeights = new Dictionary<(DesertTerrainChunk chunk, int index), float>();
+            foreach (var chunk in allChunks)
             {
-                var list = kvp.Value;
-                if (list.Count > 1)
+                if (!chunkData.TryGetValue(chunk, out var data)) continue;
+                Vector2Int gc = chunk.GridCoord;
+                int vw = chunk.width + 1;
+                int vd = chunk.depth + 1;
+
+                var leftChunk = ChunkRegistry.Get(gc.x - 1, gc.y);
+                var rightChunk = ChunkRegistry.Get(gc.x + 1, gc.y);
+                var bottomChunk = ChunkRegistry.Get(gc.x, gc.y - 1);
+                var topChunk = ChunkRegistry.Get(gc.x, gc.y + 1);
+
+                var leftData = leftChunk != null && chunkData.TryGetValue(leftChunk, out var ld) ? ld.verts : null;
+                var rightData = rightChunk != null && chunkData.TryGetValue(rightChunk, out var rd) ? rd.verts : null;
+                var bottomData = bottomChunk != null && chunkData.TryGetValue(bottomChunk, out var bd) ? bd.verts : null;
+                var topData = topChunk != null && chunkData.TryGetValue(topChunk, out var td) ? td.verts : null;
+
+                for (int z = 0; z < vd; z++)
                 {
-                    // Sort by world Y height to cluster surface and skirt vertices separately
-                    list.Sort((a, b) => {
-                        float ay = a.chunk.transform.position.y + a.vertices[a.index].y;
-                        float by = b.chunk.transform.position.y + b.vertices[b.index].y;
-                        return ay.CompareTo(by);
-                    });
-
-                    // Cluster vertices where Y distance is less than 3.0 meters
-                    int startIdx = 0;
-                    for (int i = 1; i <= list.Count; i++)
+                    for (int x = 0; x < vw; x++)
                     {
-                        bool endOfCluster = (i == list.Count);
-                        if (!endOfCluster)
+                        bool isNearBoundary = (x <= 1 || x >= chunk.width - 1 || z <= 1 || z >= chunk.depth - 1);
+                        if (!isNearBoundary) continue;
+
+                        int myIdx = z * vw + x;
+                        float currentWorldY = data.verts[myIdx].y + chunk.transform.position.y;
+
+                        float sumNeighborY = 0f;
+                        int neighborCount = 0;
+
+                        // Query Left
+                        if (x > 0)
                         {
-                            float yCurrent = list[i].chunk.transform.position.y + list[i].vertices[list[i].index].y;
-                            float yPrev = list[i - 1].chunk.transform.position.y + list[i - 1].vertices[list[i - 1].index].y;
-                            if (Mathf.Abs(yCurrent - yPrev) > 3.0f) // 3 meters distance threshold
-                            {
-                                endOfCluster = true;
-                            }
+                            sumNeighborY += data.verts[z * vw + (x - 1)].y + chunk.transform.position.y;
+                            neighborCount++;
+                        }
+                        else if (leftData != null)
+                        {
+                            sumNeighborY += leftData[z * vw + (chunk.width - 1)].y + leftChunk.transform.position.y;
+                            neighborCount++;
                         }
 
-                        if (endOfCluster)
+                        // Query Right
+                        if (x < chunk.width)
                         {
-                            int clusterSize = i - startIdx;
-                            if (clusterSize > 1)
-                            {
-                                // Calculate average world Y of this specific cluster
-                                float sumY = 0f;
-                                for (int c = startIdx; c < i; c++)
-                                {
-                                    sumY += list[c].chunk.transform.position.y + list[c].vertices[list[c].index].y;
-                                }
-                                float avgY = sumY / clusterSize;
-
-                                // Set height for all vertices in this cluster
-                                for (int c = startIdx; c < i; c++)
-                                {
-                                    var vr = list[c];
-                                    float localY = avgY - vr.chunk.transform.position.y;
-                                    if (!Mathf.Approximately(vr.vertices[vr.index].y, localY))
-                                    {
-                                        vr.vertices[vr.index].y = localY;
-                                        modified.Add(vr.chunk);
-                                    }
-                                }
-                                fusedCount++;
-                            }
-                            startIdx = i;
+                            sumNeighborY += data.verts[z * vw + (x + 1)].y + chunk.transform.position.y;
+                            neighborCount++;
                         }
+                        else if (rightData != null)
+                        {
+                            sumNeighborY += rightData[z * vw + 1].y + rightChunk.transform.position.y;
+                            neighborCount++;
+                        }
+
+                        // Query Bottom
+                        if (z > 0)
+                        {
+                            sumNeighborY += data.verts[(z - 1) * vw + x].y + chunk.transform.position.y;
+                            neighborCount++;
+                        }
+                        else if (bottomData != null)
+                        {
+                            sumNeighborY += bottomData[(chunk.depth - 1) * vw + x].y + bottomChunk.transform.position.y;
+                            neighborCount++;
+                        }
+
+                        // Query Top
+                        if (z < chunk.depth)
+                        {
+                            sumNeighborY += data.verts[(z + 1) * vw + x].y + chunk.transform.position.y;
+                            neighborCount++;
+                        }
+                        else if (topData != null)
+                        {
+                            sumNeighborY += topData[1 * vw + x].y + topChunk.transform.position.y;
+                            neighborCount++;
+                        }
+
+                        if (neighborCount > 0)
+                        {
+                            float avgNeighborY = sumNeighborY / neighborCount;
+                            float smoothedWorldY = Mathf.Lerp(currentWorldY, avgNeighborY, 0.5f);
+                            smoothedHeights[(chunk, myIdx)] = smoothedWorldY - chunk.transform.position.y;
+                        }
+                    }
+                }
+            }
+
+            // Apply smoothed heights
+            foreach (var kvp in smoothedHeights)
+            {
+                var chunk = kvp.Key.chunk;
+                int idx = kvp.Key.index;
+                float targetLocalY = kvp.Value;
+                
+                var data = chunkData[chunk];
+                if (!Mathf.Approximately(data.verts[idx].y, targetLocalY))
+                {
+                    data.verts[idx].y = targetLocalY;
+                    modified.Add(chunk);
+                }
+            }
+
+            // Phase 3: Rebuild/update skirt vertices for all modified chunks
+            foreach (var chunk in modified)
+            {
+                var data = chunkData[chunk];
+                int vw = chunk.width + 1;
+                int vd = chunk.depth + 1;
+                int mainVerts = vw * vd;
+                const float SkirtDepth = 40f;
+
+                int leftSB = mainVerts;
+                int rightSB = mainVerts + vd;
+                int bottomSB = mainVerts + 2 * vd;
+                int topSB = mainVerts + 2 * vd + vw;
+
+                if (data.verts.Length == mainVerts + 2 * vd + 2 * vw)
+                {
+                    // Left skirt (x=0 column)
+                    for (int z = 0; z < vd; z++)
+                    {
+                        int mi = z * vw;
+                        data.verts[leftSB + z] = data.verts[mi] + new Vector3(0f, -SkirtDepth, 0f);
+                    }
+                    // Right skirt (x=width column)
+                    for (int z = 0; z < vd; z++)
+                    {
+                        int mi = z * vw + chunk.width;
+                        data.verts[rightSB + z] = data.verts[mi] + new Vector3(0f, -SkirtDepth, 0f);
+                    }
+                    // Bottom skirt (z=0 row)
+                    for (int x = 0; x < vw; x++)
+                    {
+                        int mi = x;
+                        data.verts[bottomSB + x] = data.verts[mi] + new Vector3(0f, -SkirtDepth, 0f);
+                    }
+                    // Top skirt (z=depth row)
+                    for (int x = 0; x < vw; x++)
+                    {
+                        int mi = chunk.depth * vw + x;
+                        data.verts[topSB + x] = data.verts[mi] + new Vector3(0f, -SkirtDepth, 0f);
                     }
                 }
             }
@@ -727,11 +976,12 @@ namespace EnvironmentSystem
                 Undo.RecordObject(data.mesh, "Fuse Seams");
                 Undo.RecordObject(chunk, "Fuse Seams");
 
+                chunk.useSavedMeshAsset = true;
+
                 data.mesh.vertices = data.verts;
                 data.mesh.RecalculateBounds();
                 data.mesh.UploadMeshData(false);
 
-                // Force update GPU vertex buffer
                 var mf = chunk.GetComponent<MeshFilter>();
                 if (mf != null)
                 {
@@ -745,8 +995,26 @@ namespace EnvironmentSystem
                     col.sharedMesh = data.mesh;
                 }
 
-                EditorUtility.SetDirty(data.mesh);
-                EditorUtility.SetDirty(chunk);
+                chunk.SyncSnowLayer();
+
+            }
+
+            // Force useSavedMeshAsset = true for ALL chunks in the project so they never rebuild from noise at runtime
+            foreach (var chunk in allChunks)
+            {
+                if (chunk != null)
+                {
+                    if (!chunk.useSavedMeshAsset)
+                    {
+                        Undo.RecordObject(chunk, "Enable useSavedMeshAsset");
+                        chunk.useSavedMeshAsset = true;
+                        EditorUtility.SetDirty(chunk);
+                        if (chunk.gameObject.scene != null && chunk.gameObject.scene.name != null)
+                        {
+                            UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(chunk.gameObject.scene);
+                        }
+                    }
+                }
             }
 
             // Recalculate seamless normals for all affected chunks
@@ -757,7 +1025,99 @@ namespace EnvironmentSystem
             }
             RecalculateNormalsForModifiedChunks();
 
-            EditorUtility.DisplayDialog("Fusion Complete", $"Successfully aligned and fused {fusedCount} seam coordinates across {modified.Count} chunks. No more cracks!", "Fantastic!");
+            EditorUtility.DisplayDialog("Fusion & Smooth Complete", $"Successfully aligned, smoothed, and fused seam coordinates across {modified.Count} chunks. No more cracks!", "Fantastic!");
+        }
+
+        private void RefineAllChunks()
+        {
+            CacheSceneChunks();
+            var allChunks = _cachedSceneChunks;
+            
+            int refinedCount = 0;
+            foreach (var chunk in allChunks)
+            {
+                if (chunk == null) continue;
+                MeshFilter mf = chunk.GetComponent<MeshFilter>();
+                if (mf == null || mf.sharedMesh == null) continue;
+
+                chunk.useSavedMeshAsset = true;
+                chunk.RefineExistingTerrain();
+                refinedCount++;
+            }
+
+            // Recalculate normals seamlessly
+            _modifiedChunks.Clear();
+            foreach (var chunk in allChunks)
+            {
+                if (chunk != null) _modifiedChunks.Add(chunk);
+            }
+            RecalculateNormalsForModifiedChunks();
+
+            EditorUtility.DisplayDialog("Refinement Complete", $"Successfully refined details for {refinedCount} chunks in the scene!", "Excellent!");
+        }
+
+        private void FuseAllMapChunksBatch()
+        {
+            if (!EditorUtility.DisplayDialog("一键缝合全图所有区块？", 
+                "该操作将自动在编辑器中以叠加方式加载项目内所有的地形区块场景，执行无缝对齐与平滑抚平，然后自动存盘并恢复初始场景。该操作由于需要读取保存所有网格资产，会消耗约10-30秒，是否继续？", "确认缝合全图", "取消"))
+            {
+                return;
+            }
+
+            // Save current scene layout
+            string originalScenePath = UnityEngine.SceneManagement.SceneManager.GetActiveScene().path;
+            if (!string.IsNullOrEmpty(originalScenePath))
+            {
+                UnityEditor.SceneManagement.EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo();
+            }
+
+            // Find all chunk scenes
+            string chunksFolder = "Assets/Scenes/Chunks";
+            if (!System.IO.Directory.Exists(chunksFolder))
+            {
+                EditorUtility.DisplayDialog("错误", $"找不到地形区块目录: {chunksFolder}", "OK");
+                return;
+            }
+
+            string[] files = System.IO.Directory.GetFiles(chunksFolder, "*.unity", System.IO.SearchOption.TopDirectoryOnly);
+            if (files.Length == 0)
+            {
+                EditorUtility.DisplayDialog("提示", "未找到任何地形区块场景文件 (*.unity)", "OK");
+                return;
+            }
+
+            try
+            {
+                int count = 0;
+                foreach (var file in files)
+                {
+                    count++;
+                    string normalizedPath = file.Replace('\\', '/');
+                    EditorUtility.DisplayProgressBar("正在加载全图区块", $"加载 {System.IO.Path.GetFileName(file)} ({count}/{files.Length})", (float)count / files.Length);
+                    
+                    // Open scene additively
+                    UnityEditor.SceneManagement.EditorSceneManager.OpenScene(normalizedPath, UnityEditor.SceneManagement.OpenSceneMode.Additive);
+                }
+            }
+            finally
+            {
+                EditorUtility.ClearProgressBar();
+            }
+
+            // Run the fusion on all loaded chunks!
+            Debug.Log("[ChunkMergeSplitTool] Loaded all map scenes. Starting batch fusion...");
+            FuseAllSeams();
+
+            // Save everything
+            SaveSculptChangesToDisk();
+
+            // Re-open original scene to clean up hierarchy
+            if (!string.IsNullOrEmpty(originalScenePath))
+            {
+                UnityEditor.SceneManagement.EditorSceneManager.OpenScene(originalScenePath, UnityEditor.SceneManagement.OpenSceneMode.Single);
+            }
+            
+            EditorUtility.DisplayDialog("全图缝合完成", $"成功加载并一键对齐、平滑、保存了全图 {files.Length} 个关卡场景的所有接缝！", "太棒了！");
         }
 
         private void ForceRecalculateAllNormals()

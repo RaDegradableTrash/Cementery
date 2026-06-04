@@ -111,6 +111,7 @@ public class PlayerController : NetworkBehaviour
 
         _rb.freezeRotation = true;
         _rb.useGravity = true;
+        _rb.drag = 0f; // 🚀 Cancel any falling speed limit / air drag, matching vehicle gravity physics
         _rb.isKinematic = false; // Force non-kinematic initialization to ensure physics simulation is active!
         _rb.interpolation = RigidbodyInterpolation.Interpolate;
         _rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;

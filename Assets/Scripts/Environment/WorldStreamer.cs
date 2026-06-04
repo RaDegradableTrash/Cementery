@@ -64,25 +64,47 @@ namespace EnvironmentSystem
             if (Time.time < _nextCheckTime) return;
             _nextCheckTime = Time.time + checkInterval;
 
-            // 1. Auto-detect target if none assigned
-            if (trackingTarget == null)
+            // 1. Auto-detect target dynamically to support switching between Player and RV
+            trackingTarget = null;
+            GameObject player = GameObject.FindGameObjectWithTag("Player");
+            if (player != null && player.activeInHierarchy)
             {
-                GameObject player = GameObject.FindGameObjectWithTag("Player");
-                if (player != null)
+                var rv = FindObjectOfType<RVSystem.RVController>();
+                var rvStateMachine = FindObjectOfType<RVSystem.RVStateMachine>();
+                
+                if (rvStateMachine != null && rvStateMachine.currentState == RVSystem.RVState.Active)
                 {
-                    trackingTarget = player.transform;
+                    trackingTarget = rvStateMachine.transform;
                 }
-                else
+                else if (rv != null && rv.gameObject.activeInHierarchy)
                 {
-                    var rv = FindObjectOfType<RVSystem.RVController>();
-                    if (rv != null)
+                    // If player is hidden (renderers disabled, meaning driving), track the RV
+                    var r = player.GetComponentInChildren<Renderer>();
+                    if (r != null && !r.enabled)
                     {
                         trackingTarget = rv.transform;
                     }
-                    else if (Camera.main != null)
+                    else
                     {
-                        trackingTarget = Camera.main.transform;
+                        trackingTarget = player.transform;
                     }
+                }
+                else
+                {
+                    trackingTarget = player.transform;
+                }
+            }
+            
+            if (trackingTarget == null)
+            {
+                var rv = FindObjectOfType<RVSystem.RVController>();
+                if (rv != null && rv.gameObject.activeInHierarchy)
+                {
+                    trackingTarget = rv.transform;
+                }
+                else if (Camera.main != null)
+                {
+                    trackingTarget = Camera.main.transform;
                 }
             }
 

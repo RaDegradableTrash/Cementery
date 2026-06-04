@@ -11,6 +11,7 @@ Shader "Environment/SnowBlanket"
         _LambertSoftness ("Lambert Softness", Range(0, 1)) = 0.5
         _AmbientBoost ("Ambient Boost", Range(0, 3)) = 1.6
         _ShadowTint ("Shadow Tint (Sky Blue)", Color) = (0.82, 0.92, 1.0, 1.0)
+        _GlobalSnowHeightMap ("Global Snow Height Map (Default Black)", 2D) = "black" {}
     }
     SubShader
     {
