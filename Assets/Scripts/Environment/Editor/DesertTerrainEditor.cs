@@ -122,15 +122,16 @@ namespace EnvironmentSystem
 
         private void BakeChunks()
         {
-            if (!Directory.Exists(scenesPath))
+            if (!System.IO.Directory.Exists(scenesPath))
             {
-                Directory.CreateDirectory(scenesPath);
+                System.IO.Directory.CreateDirectory(scenesPath);
             }
 
+
             string meshesPath = Path.Combine(scenesPath, "Meshes");
-            if (!Directory.Exists(meshesPath))
+            if (!System.IO.Directory.Exists(meshesPath))
             {
-                Directory.CreateDirectory(meshesPath);
+                System.IO.Directory.CreateDirectory(meshesPath);
             }
 
             AssetDatabase.Refresh();
