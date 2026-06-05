@@ -62,7 +62,12 @@ namespace RVSystem
             {
                 if (cameraController != null)
                 {
-                    if (cameraController.interiorCamera != null) cameraController.interiorCamera.SetActive(true);
+                    if (cameraController.interiorCamera != null)
+                    {
+                        cameraController.interiorCamera.SetActive(true);
+                        var camComp = cameraController.interiorCamera.GetComponent<Camera>();
+                        if (camComp != null) camComp.enabled = true;
+                    }
                 }
                 if (player != null)
                 {

@@ -52,12 +52,12 @@ public class SnowParticleSystem : MonoBehaviour
         // 下落速度降至当前的 30% (之前是0.5)
         main.gravityModifier = 0.15f; 
         main.simulationSpace = ParticleSystemSimulationSpace.World;
-        main.maxParticles = 5000; 
+        main.maxParticles = Application.platform == RuntimePlatform.WebGLPlayer ? 2000 : 5000; 
 
         // 3. Emission Module setup
         var emission = partSystem.emission;
         emission.enabled = true;
-        emission.rateOverTime = 500f;  
+        emission.rateOverTime = Application.platform == RuntimePlatform.WebGLPlayer ? 150f : 500f;  
 
         // 4. Shape Module setup: 圆形范围 (Circle)
         var shape = partSystem.shape;

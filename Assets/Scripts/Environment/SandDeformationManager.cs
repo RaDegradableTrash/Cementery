@@ -94,10 +94,11 @@ namespace EnvironmentSystem
         private void Update()
         {
             // 🌟 Second Insurance: Periodically sweep the scene to auto-bind dynamically spawned, 
-            // enabled, or respawned players and vehicles at runtime (every 1.2 seconds)
+            // enabled, or respawned players and vehicles at runtime (every 4 seconds on WebGL, 1.2 on PC)
             if (Time.time >= _nextSweepTime)
             {
-                _nextSweepTime = Time.time + 1.2f;
+                float interval = Application.platform == RuntimePlatform.WebGLPlayer ? 4.0f : 1.2f;
+                _nextSweepTime = Time.time + interval;
                 AutoBindDynamicDeformers();
             }
 
@@ -133,6 +134,41 @@ namespace EnvironmentSystem
 
         private void AutoBindDynamicDeformers()
         {
+            // WebGL Performance Guard: Skip extremely heavy scene-wide FindObjectsOfType searches
+            if (Application.platform == RuntimePlatform.WebGLPlayer)
+            {
+                var webglWheelColliders = Object.FindObjectsOfType<WheelCollider>(true);
+                foreach (var wc in webglWheelColliders)
+                {
+                    if (wc != null && wc.GetComponent<SandDeformer>() == null)
+                    {
+                        var deformer = wc.gameObject.AddComponent<SandDeformer>();
+                        deformer.radius = 0.58f;
+                        deformer.depth = 0.22f;
+                        deformer.rimWidth = 0.22f;
+                        deformer.rimHeight = 0.065f;
+                        deformer.stampSpacing = 0.75f;
+                        deformer.lifetime = 32f;
+                    }
+                }
+
+                var webglPlayers = GameObject.FindGameObjectsWithTag("Player");
+                foreach (var player in webglPlayers)
+                {
+                    if (player != null && player.GetComponent<SandDeformer>() == null)
+                    {
+                        var deformer = player.AddComponent<SandDeformer>();
+                        deformer.radius = 0.35f;
+                        deformer.depth = 0.12f;
+                        deformer.rimWidth = 0.12f;
+                        deformer.rimHeight = 0.035f;
+                        deformer.stampSpacing = 0.6f;
+                        deformer.lifetime = 24f;
+                    }
+                }
+                return;
+            }
+
             // 1. Detect and bind to ALL WheelColliders universally in the entire scene!
             // Decouples the system from any specific class names (RVController, CarControl, etc.)
             var wheelColliders = Object.FindObjectsOfType<WheelCollider>(true);

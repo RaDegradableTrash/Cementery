@@ -55,6 +55,13 @@ public class ScreenSpaceGodraysFeature : ScriptableRendererFeature
             return;
         }
 
+        // WebGL Performance overrides
+        if (Application.platform == RuntimePlatform.WebGLPlayer)
+        {
+            settings.samples = Mathf.Min(settings.samples, 8);
+            settings.downsample = Mathf.Max(settings.downsample, 4);
+        }
+
         _godraysPass.Setup(settings);
         renderer.EnqueuePass(_godraysPass);
     }

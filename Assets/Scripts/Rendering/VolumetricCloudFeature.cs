@@ -133,6 +133,14 @@ public class VolumetricCloudFeature : ScriptableRendererFeature
         if (_baseNoiseTex == null) _baseNoiseTex = GenerateBaseNoise();
         if (_detailNoiseTex == null) _detailNoiseTex = GenerateDetailNoise();
 
+        // WebGL Performance overrides
+        if (Application.platform == RuntimePlatform.WebGLPlayer)
+        {
+            settings.resolutionScale = CloudSettings.ResolutionScale.Quarter;
+            settings.maxSteps = Mathf.Min(settings.maxSteps, 8);
+            settings.farStepCount = Mathf.Min(settings.farStepCount, 2);
+        }
+
         _cloudPass.Setup(settings, _baseNoiseTex, _detailNoiseTex);
         renderer.EnqueuePass(_cloudPass);
     }

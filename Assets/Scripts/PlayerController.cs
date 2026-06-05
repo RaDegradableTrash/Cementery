@@ -136,6 +136,29 @@ public class PlayerController : NetworkBehaviour
         if (inventoryCameraController == null)
             inventoryCameraController = InventoryCameraController.GetPrimaryController();
 
+        // FORCE all other cameras in the scene to disable at startup, ensuring Player's camera is the sole initial camera
+        Camera[] allCameras = FindObjectsOfType<Camera>(true);
+        Camera playerCamera = GetComponentInChildren<Camera>(true);
+        foreach (Camera cam in allCameras)
+        {
+            if (playerCamera != null && cam == playerCamera)
+            {
+                cam.enabled = true;
+                cam.gameObject.SetActive(true);
+                cam.tag = "MainCamera";
+                continue;
+            }
+            if (!cam.transform.IsChildOf(transform))
+            {
+                Debug.Log($"[CameraSetup] Disabling non-player camera: {cam.name} on startup");
+                cam.enabled = false;
+                if (cam.CompareTag("MainCamera"))
+                {
+                    cam.tag = "Untagged";
+                }
+            }
+        }
+
         if (mouseLook == null && Camera.main != null)
             mouseLook = Camera.main.GetComponent<MouseLook>();
     }

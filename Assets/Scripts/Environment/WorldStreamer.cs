@@ -142,10 +142,16 @@ namespace EnvironmentSystem
         {
             List<string> requiredList = new List<string>();
 
-            // 5x5 grid (25 chunks) instead of 7x7 (49) for much better performance
-            for (int dx = -2; dx <= 2; dx++)
+            // 3x3 grid (9 chunks) on WebGL instead of 5x5 (25 chunks) for much better performance
+            int range = 2;
+            if (Application.platform == RuntimePlatform.WebGLPlayer)
             {
-                for (int dz = -2; dz <= 2; dz++)
+                range = 1;
+            }
+
+            for (int dx = -range; dx <= range; dx++)
+            {
+                for (int dz = -range; dz <= range; dz++)
                 {
                     int gx = centerGridX + dx;
                     int gz = centerGridZ + dz;
@@ -154,7 +160,8 @@ namespace EnvironmentSystem
                 }
             }
 
-            Debug.Log($"<color=#38bdf8><b>[WorldStreamer]</b></color> Grid updated! Center ({centerGridX}, {centerGridZ}). Loading 5x5 grid.");
+            int gridSizeDim = range * 2 + 1;
+            Debug.Log($"<color=#38bdf8><b>[WorldStreamer]</b></color> Grid updated! Center ({centerGridX}, {centerGridZ}). Loading {gridSizeDim}x{gridSizeDim} grid.");
             RequestChunks(requiredList);
         }
 
