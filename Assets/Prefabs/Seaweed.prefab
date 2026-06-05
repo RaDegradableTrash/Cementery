@@ -358,6 +358,9 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 6399126031646511510}
+  - component: {fileID: 1788628957771215485}
+  - component: {fileID: 3672316034689930998}
+  - component: {fileID: 366803300460630701}
   m_Layer: 0
   m_Name: Seaweed
   m_TagString: Untagged
@@ -390,6 +393,99 @@ Transform:
   - {fileID: 5445377118069033290}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1788628957771215485
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2157870103959123063}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a5a518e5c83714f02b8576e1879e4923, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  interactable: 1
+  carryable: 1
+  collectable: 0
+  isHeavy: 0
+  canBePushed: 0
+  canBePlacedOnFloor: 1
+  canBePlacedOnWall: 0
+  canBePlacedOnCeiling: 0
+  isFlippingRestricted_Wall: 0
+  isFlippingRestricted_Ceiling: 0
+  isStairs: 0
+  interactMessage: 
+  collectMessage: 
+  collectItemData: {fileID: 0}
+  collectGrowTime: 0.15
+  collectShrinkTime: 0.22
+  onInteract:
+    m_PersistentCalls:
+      m_Calls: []
+  onPickUp:
+    m_PersistentCalls:
+      m_Calls: []
+  onDrop:
+    m_PersistentCalls:
+      m_Calls: []
+  onCollect:
+    m_PersistentCalls:
+      m_Calls: []
+--- !u!54 &3672316034689930998
+Rigidbody:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2157870103959123063}
+  serializedVersion: 4
+  m_Mass: 1
+  m_Drag: 0
+  m_AngularDrag: 0.05
+  m_CenterOfMass: {x: 0, y: 0, z: 0}
+  m_InertiaTensor: {x: 1, y: 1, z: 1}
+  m_InertiaRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ImplicitCom: 1
+  m_ImplicitTensor: 1
+  m_UseGravity: 1
+  m_IsKinematic: 0
+  m_Interpolate: 0
+  m_Constraints: 0
+  m_CollisionDetection: 0
+--- !u!114 &366803300460630701
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2157870103959123063}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 91e33ba25558a48f3868508255068980, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  swaySpeed: 3
+  swayAmount: 10
+  stemTransform: {fileID: 21919016424316100}
+  leafTransforms:
+  - {fileID: 3682743072239260514}
+  - {fileID: 6603925139964663709}
+  - {fileID: 8785444184603627868}
+  - {fileID: 1591492964628824841}
+  - {fileID: 8011283127198272590}
+  - {fileID: 5815082487256826184}
+  - {fileID: 4005720396341480605}
+  - {fileID: 5445377118069033290}
+  jumpForce: 6
+  scatterForce: 1.5
 --- !u!1 &3625811105920788799
 GameObject:
   m_ObjectHideFlags: 0

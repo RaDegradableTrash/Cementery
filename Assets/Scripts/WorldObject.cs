@@ -100,6 +100,12 @@ public class WorldObject : MonoBehaviour
     /// <summary>True while this object is currently carried by the player.</summary>
     public bool IsCarried => _isCarried;
 
+    public Vector3 BaseScale
+    {
+        get => _baseScale;
+        set => _baseScale = value;
+    }
+
     void Awake()
     {
         // Extract design-time pitch and roll by stripping yaw

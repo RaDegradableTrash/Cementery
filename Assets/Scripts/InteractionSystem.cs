@@ -1085,6 +1085,19 @@ public class InteractionSystem : MonoBehaviour
         // 4. 左键松开执行放下或 Tab 放置
         if (Input.GetMouseButtonUp(0) && _carriedRb != null)
         {
+            if (_carriedWo != null && _carriedWo.GetComponent<Kelp>() != null)
+            {
+                PlantPot pot = GetLookedAtPot();
+                if (pot != null && pot.CanPlant())
+                {
+                    pot.PlantKelp(_carriedWo);
+                    ExitPlacementMode();
+                    ConsumeCarriedObjectSilently();
+                    ClearPrompts();
+                    return;
+                }
+            }
+
             if (_isPlacementMode && _isPlacementValid)
             {
                 ExecutePlacement();
@@ -1243,6 +1256,51 @@ public class InteractionSystem : MonoBehaviour
     }
 
     public bool HasCarriedObject() => _carriedRb != null;
+
+    public WorldObject CarriedWorldObject => _carriedWo;
+
+    public void ConsumeCarriedObjectSilently()
+    {
+        if (_carriedRb == null) return;
+        RestoreCarryFriction();
+        _carriedWo?.SetCarriedState(false);
+        
+        PlayerController pc = GetComponent<PlayerController>();
+        if (pc != null) pc.SpeedMultiplier = 1f;
+
+        _carriedTransform = null;
+        _carriedWo = null;
+        _carriedRb = null;
+        _carriedCols = null;
+        _playerCols = null;
+        _carriedOriginalMaterials = null;
+        _carryRayLocalDir = Vector3.forward;
+        _carryRayDistance = 0f;
+        _carryPitchRollOffset = Quaternion.identity;
+        _carriedRadius = 0f;
+    }
+
+    public void ShowInfoMessage(string message) => ShowInfo(message);
+
+    private PlantPot GetLookedAtPot()
+    {
+        if (_lookedAt != null)
+        {
+            PlantPot pot = _lookedAt.GetComponent<PlantPot>() ?? _lookedAt.GetComponentInParent<PlantPot>();
+            if (pot != null) return pot;
+        }
+        
+        if (playerCamera != null)
+        {
+            Ray ray = new Ray(playerCamera.transform.position, playerCamera.transform.forward);
+            if (Physics.Raycast(ray, out RaycastHit hit, interactRange, interactMask, QueryTriggerInteraction.Ignore))
+            {
+                PlantPot pot = hit.collider.GetComponentInParent<PlantPot>();
+                if (pot != null) return pot;
+            }
+        }
+        return null;
+    }
 
     public void DropCarriedObjectIfAny()
     {

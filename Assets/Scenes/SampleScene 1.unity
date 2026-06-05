@@ -26,7 +26,7 @@ RenderSettings:
   m_AmbientIntensity: 1
   m_AmbientMode: 1
   m_SubtractiveShadowColor: {r: 0.16398183, g: 0.39746675, b: 0.5188679, a: 1}
-  m_SkyboxMaterial: {fileID: 932971852}
+  m_SkyboxMaterial: {fileID: 905982945}
   m_HaloStrength: 0.5
   m_FlareStrength: 1
   m_FlareFadeSpeed: 3
@@ -8148,6 +8148,46 @@ BoxCollider:
   serializedVersion: 3
   m_Size: {x: 4.0952487, y: 2.882748, z: 0.08415603}
   m_Center: {x: 2.5050461, y: 1.8229015, z: 10.274145}
+--- !u!21 &905982945
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Runtime_DayNightSkybox
+  m_Shader: {fileID: 106, guid: 0000000000000000f000000000000000, type: 0}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords:
+  - _SUNDISK_HIGH_QUALITY
+  m_InvalidKeywords: []
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs: []
+    m_Ints: []
+    m_Floats:
+    - _AtmosphereThickness: 0.6572174
+    - _Exposure: 0.78033435
+    - _GodrayPower: 2.6
+    - _GodrayStrength: 0
+    - _SunDisk: 2
+    - _SunSize: 0.035
+    - _SunSizeConvergence: 5
+    - _SunSoftness: 0.0018
+    m_Colors:
+    - _GodrayTint: {r: 1, g: 0.82, b: 0.62, a: 1}
+    - _GroundColor: {r: 0.2240661, g: 0.23893502, b: 0.26694104, a: 1}
+    - _SkyTint: {r: 0.35381258, g: 0.38523534, b: 0.4402284, a: 1}
+    - _SunColor: {r: 1, g: 0.956, b: 0.84, a: 1}
+  m_BuildTextureStacks: []
 --- !u!1 &907893025
 GameObject:
   m_ObjectHideFlags: 0
@@ -8440,46 +8480,6 @@ BoxCollider:
   serializedVersion: 3
   m_Size: {x: 0.22554016, y: 3.2636747, z: 0.32899854}
   m_Center: {x: 4.2625046, y: 2.0251281, z: 1.7100639}
---- !u!21 &932971852
-Material:
-  serializedVersion: 8
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_Name: Runtime_DayNightSkybox
-  m_Shader: {fileID: 106, guid: 0000000000000000f000000000000000, type: 0}
-  m_Parent: {fileID: 0}
-  m_ModifiedSerializedProperties: 0
-  m_ValidKeywords:
-  - _SUNDISK_HIGH_QUALITY
-  m_InvalidKeywords: []
-  m_LightmapFlags: 4
-  m_EnableInstancingVariants: 0
-  m_DoubleSidedGI: 0
-  m_CustomRenderQueue: -1
-  stringTagMap: {}
-  disabledShaderPasses: []
-  m_LockedProperties: 
-  m_SavedProperties:
-    serializedVersion: 3
-    m_TexEnvs: []
-    m_Ints: []
-    m_Floats:
-    - _AtmosphereThickness: 0.6572174
-    - _Exposure: 0.78033435
-    - _GodrayPower: 2.6
-    - _GodrayStrength: 0
-    - _SunDisk: 2
-    - _SunSize: 0.035
-    - _SunSizeConvergence: 5
-    - _SunSoftness: 0.0018
-    m_Colors:
-    - _GodrayTint: {r: 1, g: 0.82, b: 0.62, a: 1}
-    - _GroundColor: {r: 0.2240661, g: 0.23893502, b: 0.26694104, a: 1}
-    - _SkyTint: {r: 0.35381258, g: 0.38523534, b: 0.4402284, a: 1}
-    - _SunColor: {r: 1, g: 0.956, b: 0.84, a: 1}
-  m_BuildTextureStacks: []
 --- !u!1 &934955583
 GameObject:
   m_ObjectHideFlags: 0
@@ -20190,28 +20190,16 @@ PrefabInstance:
     m_TransformParent: {fileID: 0}
     m_Modifications:
     - target: {fileID: 3952182951522274053, guid: a7876180900064c26af2431fefde83d4, type: 3}
-      propertyPath: m_LocalScale.x
-      value: 40
-      objectReference: {fileID: 0}
-    - target: {fileID: 3952182951522274053, guid: a7876180900064c26af2431fefde83d4, type: 3}
-      propertyPath: m_LocalScale.y
-      value: 40
-      objectReference: {fileID: 0}
-    - target: {fileID: 3952182951522274053, guid: a7876180900064c26af2431fefde83d4, type: 3}
-      propertyPath: m_LocalScale.z
-      value: 40
-      objectReference: {fileID: 0}
-    - target: {fileID: 3952182951522274053, guid: a7876180900064c26af2431fefde83d4, type: 3}
       propertyPath: m_LocalPosition.x
-      value: -3.6894941
+      value: -5.2
       objectReference: {fileID: 0}
     - target: {fileID: 3952182951522274053, guid: a7876180900064c26af2431fefde83d4, type: 3}
       propertyPath: m_LocalPosition.y
-      value: -3.5900497
+      value: -2.75
       objectReference: {fileID: 0}
     - target: {fileID: 3952182951522274053, guid: a7876180900064c26af2431fefde83d4, type: 3}
       propertyPath: m_LocalPosition.z
-      value: -3.63
+      value: -2.07
       objectReference: {fileID: 0}
     - target: {fileID: 3952182951522274053, guid: a7876180900064c26af2431fefde83d4, type: 3}
       propertyPath: m_LocalRotation.w
@@ -20245,11 +20233,50 @@ PrefabInstance:
       propertyPath: m_Name
       value: Flowerpot
       objectReference: {fileID: 0}
+    - target: {fileID: 8739245372143011165, guid: a7876180900064c26af2431fefde83d4, type: 3}
+      propertyPath: kelpPrefab
+      value: 
+      objectReference: {fileID: 8494497834220649684}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
-    m_AddedComponents: []
+    m_AddedComponents:
+    - targetCorrespondingSourceObject: {fileID: 7290208239951138055, guid: a7876180900064c26af2431fefde83d4, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 61581040541566239}
   m_SourcePrefab: {fileID: 100100000, guid: a7876180900064c26af2431fefde83d4, type: 3}
+--- !u!1 &61581040541566232 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 7290208239951138055, guid: a7876180900064c26af2431fefde83d4, type: 3}
+  m_PrefabInstance: {fileID: 61581040541566231}
+  m_PrefabAsset: {fileID: 0}
+--- !u!54 &61581040541566239
+Rigidbody:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 61581040541566232}
+  serializedVersion: 4
+  m_Mass: 20
+  m_Drag: 0
+  m_AngularDrag: 0.05
+  m_CenterOfMass: {x: 0, y: 0, z: 0}
+  m_InertiaTensor: {x: 1, y: 1, z: 1}
+  m_InertiaRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ImplicitCom: 1
+  m_ImplicitTensor: 1
+  m_UseGravity: 1
+  m_IsKinematic: 0
+  m_Interpolate: 0
+  m_Constraints: 0
+  m_CollisionDetection: 0
 --- !u!1 &65232382158261798
 GameObject:
   m_ObjectHideFlags: 0
@@ -81044,6 +81071,11 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 0837e391d79e74b938c0f2de6968e523, type: 3}
+--- !u!1 &8494497834220649684 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 2157870103959123063, guid: 0837e391d79e74b938c0f2de6968e523, type: 3}
+  m_PrefabInstance: {fileID: 8494497834220649683}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &8500624280630283414
 GameObject:
   m_ObjectHideFlags: 0
