@@ -103,6 +103,20 @@ public class PlantPot : MonoBehaviour
         kelp.OnPlanted(spot);
         kelp.SetGrowthScale(_progress);
 
+        // Ignore collisions between Pot and Kelp
+        Collider[] potColliders = GetComponentsInChildren<Collider>();
+        Collider[] kelpColliders = kelp.GetComponentsInChildren<Collider>();
+        foreach (var potCol in potColliders)
+        {
+            foreach (var kelpCol in kelpColliders)
+            {
+                if (potCol != null && kelpCol != null)
+                {
+                    Physics.IgnoreCollision(potCol, kelpCol, true);
+                }
+            }
+        }
+
         if (InteractionSystem.Instance != null)
         {
             InteractionSystem.Instance.ShowInfoMessage("Kelp Planted!");
@@ -176,6 +190,20 @@ public class PlantPot : MonoBehaviour
                 Rigidbody spawnedRb = spawned.GetComponent<Rigidbody>();
                 Kelp spawnedKelp = spawned.GetComponent<Kelp>();
                 WorldObject spawnedWo = spawned.GetComponent<WorldObject>();
+
+                // Ignore collisions between Pot and newly spawned Kelp
+                Collider[] potColliders = GetComponentsInChildren<Collider>();
+                Collider[] spawnedColliders = spawned.GetComponentsInChildren<Collider>();
+                foreach (var potCol in potColliders)
+                {
+                    foreach (var kelpCol in spawnedColliders)
+                    {
+                        if (potCol != null && kelpCol != null)
+                        {
+                            Physics.IgnoreCollision(potCol, kelpCol, true);
+                        }
+                    }
+                }
 
                 if (spawnedWo != null)
                 {

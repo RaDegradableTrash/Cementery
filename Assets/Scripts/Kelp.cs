@@ -136,10 +136,10 @@ public class Kelp : MonoBehaviour
         _isPlanted = true;
         _isWild = false;
 
-        // Parent to the planting spot and zero out transforms
+        // Parent to the planting spot and zero out position, but align rotation to be upright
         transform.parent = spot;
         transform.localPosition = Vector3.zero;
-        transform.localRotation = Quaternion.identity;
+        transform.rotation = Quaternion.LookRotation(spot.forward, Vector3.up);
 
         // Disable physics/colliders
         _rb.isKinematic = true;

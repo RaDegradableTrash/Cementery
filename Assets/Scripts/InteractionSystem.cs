@@ -1503,7 +1503,17 @@ public class InteractionSystem : MonoBehaviour
         for (int i = 0; i < _carriedCols.Length; i++)
         {
             if (_carriedCols[i] != null)
+            {
+                if (enabled)
+                {
+                    Kelp k = _carriedCols[i].GetComponentInParent<Kelp>();
+                    if (k != null && _carriedWo != null && _carriedWo.GetComponent<PlantPot>() != null)
+                    {
+                        continue;
+                    }
+                }
                 _carriedCols[i].enabled = enabled;
+            }
         }
     }
 
