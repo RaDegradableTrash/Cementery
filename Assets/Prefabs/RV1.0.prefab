@@ -29071,6 +29071,9 @@ GameObject:
   - component: {fileID: 2777670550690570721}
   - component: {fileID: 7327323077327689845}
   - component: {fileID: 2219798474069181026}
+  - component: {fileID: 4267334488472843161}
+  - component: {fileID: 4263752776743321010}
+  - component: {fileID: 2083336579160963371}
   m_Layer: 0
   m_Name: RV1.0
   m_TagString: Untagged
@@ -29205,8 +29208,23 @@ MonoBehaviour:
   steeringRange: 37
   steeringRangeAtMaxSpeed: 10
   centreOfGravityOffset: -2.5
+  finalDriveRatio: 0.04
+  forwardGearRatios:
+  - 3.5
+  - 2
+  - 1.4
+  - 1
+  - 0.75
+  - 0.6
+  reverseGearRatio: 3
+  engineMinRpm: 500
+  upshiftRpm: 2200
+  downshiftRpm: 1200
+  shiftDuration: 1
   activeControl: 0
   speedDisplay: {fileID: 0}
+  rpmDisplay: {fileID: 0}
+  gearDisplay: {fileID: 0}
   speedMultiplier: 0.3
   steeringWheel: {fileID: 697320770152057489}
   steeringWheelLocalAxis: {x: 0, y: 0, z: 1}
@@ -29421,6 +29439,154 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   startProcedure: {fileID: 0}
+--- !u!82 &4267334488472843161
+AudioSource:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4354734181588970037}
+  m_Enabled: 1
+  serializedVersion: 4
+  OutputAudioMixerGroup: {fileID: 0}
+  m_audioClip: {fileID: 0}
+  m_PlayOnAwake: 1
+  m_Volume: 1
+  m_Pitch: 1
+  Loop: 0
+  Mute: 0
+  Spatialize: 0
+  SpatializePostEffects: 0
+  Priority: 128
+  DopplerLevel: 1
+  MinDistance: 1
+  MaxDistance: 500
+  Pan2D: 0
+  rolloffMode: 0
+  BypassEffects: 0
+  BypassListenerEffects: 0
+  BypassReverbZones: 0
+  rolloffCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    - serializedVersion: 3
+      time: 1
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  panLevelCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  spreadCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  reverbZoneMixCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+--- !u!114 &4263752776743321010
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4354734181588970037}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9a3484e805e4c8542a213a38e26b2f1f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  currentRPM: 550
+  minRPM: 500
+  maxRPM: 2500
+  accelSpeed: 400
+  decelSpeed: 350
+  masterVolume: 0.35
+  pulseWidth: 0.12
+  pulseSharpness: 0.6
+  exhaustResonance: 0.7
+  exhaustDrone: 0.4
+  intakeSound: 0.5
+  turboWhine: 0.6
+  mechanicalNoise: 0.07
+  cylinderImbalance: 0.15
+  engineLoad: 0
+--- !u!169 &2083336579160963371
+AudioLowPassFilter:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4354734181588970037}
+  m_Enabled: 1
+  serializedVersion: 3
+  m_LowpassResonanceQ: 1
+  lowpassLevelCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0.009731696
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
 --- !u!1 &4373205130072088326
 GameObject:
   m_ObjectHideFlags: 0

@@ -48,11 +48,26 @@ public class CarControl : MonoBehaviour
     public float steeringRangeAtMaxSpeed = 10;
     public float centreOfGravityOffset = -1f;
 
+    [Header("Transmission (Auto)")]
+    [SerializeField] private float finalDriveRatio = 3.42f;
+    [SerializeField] private float[] forwardGearRatios = new float[] { 3.5f, 2.0f, 1.4f, 1.0f, 0.75f, 0.6f };
+    [SerializeField] private float reverseGearRatio = 3.0f;
+    [SerializeField] private float engineMinRpm = 500f;
+    [SerializeField] private float upshiftRpm = 2200f;
+    [SerializeField] private float downshiftRpm = 1200f;
+    [SerializeField] private float shiftDuration = 0.5f;
+
+    private int currentTransmissionGear = 0;
+    private float shiftTimer = 0f;
+    private float smoothEngineRpm = 500f;
+
     [Header("Control Override")]
     [SerializeField] private bool activeControl = false;
     public bool ActiveControl { get => activeControl; set => activeControl = value; }
     
     [SerializeField] private TextMeshProUGUI speedDisplay;
+    [SerializeField] private TextMeshProUGUI rpmDisplay;
+    [SerializeField] private TextMeshProUGUI gearDisplay;
     [SerializeField] private float speedMultiplier = 1f;
     [SerializeField] private Transform steeringWheel;
     [SerializeField] private Vector3 steeringWheelLocalAxis = new Vector3(0, 0, 1);
@@ -95,6 +110,7 @@ public class CarControl : MonoBehaviour
     private float currentSpeedKmh;
     private float l6ThrottleCurrent;
     private readonly HashSet<WheelControl> sixLockWheelSet = new HashSet<WheelControl>();
+    private ScaniaV8EngineSimulator engineSimulator;
 
     public void SetGear(GearMode gear)
     {
@@ -145,7 +161,8 @@ public class CarControl : MonoBehaviour
         bool targetSix = IsSixLockGear(targetGear);
         if (currentSix || targetSix)
         {
-            return GetMaxWheelRpm() <= sixLockSwitchMaxWheelRpm;
+            bool isHandBraking = activeControl && Input.GetKey(KeyCode.Space);
+            return GetMaxWheelRpm() <= sixLockSwitchMaxWheelRpm || isHandBraking;
         }
         return true;
     }
@@ -211,6 +228,17 @@ public class CarControl : MonoBehaviour
         return maxRpm;
     }
 
+    private float GetStableWheelRpm(float forwardSpeed)
+    {
+        float radius = 0.35f; // Fallback radius
+        if (wheels != null && wheels.Length > 0 && wheels[0] != null && wheels[0].WheelCollider != null)
+        {
+            radius = wheels[0].WheelCollider.radius;
+        }
+        // Wheel RPM = Velocity (m/s) * 60 / (2 * PI * Radius)
+        return (Mathf.Abs(forwardSpeed) * 60f) / (2f * Mathf.PI * radius);
+    }
+
     // Start is called before the first frame update
     void Start()
     {
@@ -227,6 +255,7 @@ public class CarControl : MonoBehaviour
         // Find all child GameObjects that have the WheelControl script attached
         wheels = GetComponentsInChildren<WheelControl>();
         BuildSixLockWheelSet();
+        engineSimulator = GetComponent<ScaniaV8EngineSimulator>();
         // Record initial local rotation of steering wheel (if assigned)
         if (steeringWheel != null)
         {
@@ -393,6 +422,81 @@ public class CarControl : MonoBehaviour
                 l6ThrottleCurrent = Mathf.MoveTowards(l6ThrottleCurrent, 0f, l6ThrottleFall * Time.deltaTime);
             }
         }
+
+        // --- 6-Speed Transmission & Engine RPM Calculation ---
+        float currentGearRatio = 0f;
+        string gearString = currentGear.ToString();
+
+        if (currentGear == GearMode.Reverse) {
+            currentGearRatio = reverseGearRatio;
+            gearString = "R";
+        } else if (currentGear == GearMode.Drive || currentGear == GearMode.Sport || IsSixLockGear(currentGear)) {
+            if (currentTransmissionGear < 0) currentTransmissionGear = 0;
+            if (currentTransmissionGear >= forwardGearRatios.Length) currentTransmissionGear = forwardGearRatios.Length - 1;
+            currentGearRatio = forwardGearRatios[currentTransmissionGear];
+            gearString = "D" + (currentTransmissionGear + 1);
+        } else if (currentGear == GearMode.Park) {
+            gearString = "P";
+        } else if (currentGear == GearMode.Neutral) {
+            gearString = "N";
+        }
+        
+        if (gearDisplay != null) {
+            gearDisplay.text = gearString;
+        }
+
+        // 使用物理底盘速度(forwardSpeed)算出来的稳定期望轮速，防止因为轮子打滑导致 RPM 来回乱跳
+        float absWheelRpm = GetStableWheelRpm(forwardSpeed);
+        float calculatedEngineRpm = absWheelRpm * currentGearRatio * finalDriveRatio;
+        float targetEngineRpm = Mathf.Max(engineMinRpm, calculatedEngineRpm);
+
+        // Auto-Shift Logic
+        if (shiftTimer <= 0f && (currentGear == GearMode.Drive || currentGear == GearMode.Sport || IsSixLockGear(currentGear)))
+        {
+            if (targetEngineRpm > upshiftRpm && currentTransmissionGear < forwardGearRatios.Length - 1)
+            {
+                currentTransmissionGear++;
+                shiftTimer = shiftDuration;
+            }
+            else if (targetEngineRpm < downshiftRpm && currentTransmissionGear > 0)
+            {
+                currentTransmissionGear--;
+                shiftTimer = shiftDuration;
+            }
+        }
+
+        if (shiftTimer > 0f)
+        {
+            shiftTimer -= Time.deltaTime;
+            appliedThrottleInput = 0f;      // 换挡期间切断动力
+            targetEngineRpm = engineMinRpm; // 换挡期间转速下降
+        }
+        else if (currentGear == GearMode.Park || currentGear == GearMode.Neutral)
+        {
+            targetEngineRpm = engineMinRpm + Mathf.Abs(throttleInput) * (upshiftRpm - engineMinRpm);
+        }
+
+        if (!engineOn)
+        {
+            targetEngineRpm = 0f;
+            appliedThrottleInput = 0f;
+        }
+
+        // Smooth RPM interpolation
+        float rpmLerpSpeed = (targetEngineRpm > smoothEngineRpm) ? 5f : 3f;
+        smoothEngineRpm = Mathf.Lerp(smoothEngineRpm, targetEngineRpm, Time.deltaTime * rpmLerpSpeed);
+
+        if (engineSimulator != null)
+        {
+            engineSimulator.currentRPM = smoothEngineRpm;
+            engineSimulator.engineLoad = Mathf.Lerp(engineSimulator.engineLoad, Mathf.Abs(appliedThrottleInput), Time.deltaTime * 5f);
+        }
+
+        if (rpmDisplay != null)
+        {
+            rpmDisplay.text = Mathf.Round(smoothEngineRpm).ToString() + " RPM";
+        }
+        // --------------------------------------------------
 
         bool steerInputActive = Mathf.Abs(hInputRaw) > 0.01f;
         float targetSteerAngle = hInputRaw * currentMaxWheelSteerAngle;
