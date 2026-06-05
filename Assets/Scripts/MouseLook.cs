@@ -280,7 +280,7 @@ public class MouseLook : MonoBehaviour
     // ── Cursor ────────────────────────────────────────────────────────────────
     void HandleCursorToggle()
     {
-        if (Input.GetKeyDown(KeyCode.Escape))
+        if (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
             ReleaseCursor();
         else if (Input.GetMouseButtonDown(0) && Cursor.lockState != CursorLockMode.Locked)
             LockCursor();
