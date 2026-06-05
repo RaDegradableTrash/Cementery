@@ -45,6 +45,14 @@ public class KeyBindingUI : MonoBehaviour {
         if (profileDropdown != null) profileDropdown.onValueChanged.AddListener(OnProfileDropdownChanged);
     }
 
+    void OnDisable() {
+        StopAllCoroutines();
+        isListening = false;
+        IsRebinding = false;
+        activeRebindItem = null;
+        activeRebindButton = null;
+    }
+
     private void InitializeProfileDropdown() {
         if (profileDropdown == null) return;
 
@@ -174,7 +182,15 @@ public class KeyBindingUI : MonoBehaviour {
     }
 
     IEnumerator WaitForInput() {
-        // Wait until any key is pressed or mouse click is detected
+        // 1. Skip the frame in which the click occurred to prevent instant self-triggering
+        yield return null;
+
+        // 2. Wait until all mouse clicks are fully released
+        while (Input.GetMouseButton(0) || Input.GetMouseButton(1) || Input.GetMouseButton(2)) {
+            yield return null;
+        }
+
+        // 3. Now wait until a new key is pressed or mouse click is detected
         yield return new WaitUntil(() => Input.anyKeyDown || 
             Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(1) || Input.GetMouseButtonDown(2));
 

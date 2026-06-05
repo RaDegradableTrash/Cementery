@@ -277,9 +277,11 @@ public class MouseLook : MonoBehaviour
         return null;
     }
 
-    // ── Cursor ────────────────────────────────────────────────────────────────
     void HandleCursorToggle()
     {
+        // If the menu was closed on this exact frame, skip cursor releasing
+        if (Time.frameCount == GameMenuManager.ClosedFrameCount) return;
+
         if (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
             ReleaseCursor();
         else if (Input.GetMouseButtonDown(0) && Cursor.lockState != CursorLockMode.Locked)

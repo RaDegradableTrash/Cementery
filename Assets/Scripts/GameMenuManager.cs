@@ -16,6 +16,7 @@ public class GameMenuManager : MonoBehaviour
     [SerializeField] private GameObject placeholder4;
     
     public static bool IsMenuOpen = false;
+    public static int ClosedFrameCount = -1;
 
     // Use a list/stack to keep track of menu navigation history
     private List<GameObject> menuHistory = new List<GameObject>();
@@ -93,6 +94,7 @@ public class GameMenuManager : MonoBehaviour
     public void CloseMenu()
     {
         IsMenuOpen = false;
+        ClosedFrameCount = Time.frameCount;
         menuHistory.Clear();
         DeactivateAllPanels();
 

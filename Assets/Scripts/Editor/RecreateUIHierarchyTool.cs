@@ -237,6 +237,12 @@ public class RecreateUIHierarchyTool : EditorWindow {
         viewRect.anchorMin = Vector2.zero;
         viewRect.anchorMax = Vector2.one;
         viewRect.sizeDelta = Vector2.zero;
+
+        // Add transparent Image to capture scroll and drag events on empty background spaces
+        Image viewImg = viewportObj.AddComponent<Image>();
+        viewImg.color = new Color(0, 0, 0, 0);
+        viewImg.raycastTarget = true;
+
         viewportObj.AddComponent<RectMask2D>();
         scrollComponent.viewport = viewRect;
 
