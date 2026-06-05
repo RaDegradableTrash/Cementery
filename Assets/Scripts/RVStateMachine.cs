@@ -38,14 +38,37 @@ namespace RVSystem
         public void SetState(RVState newState)
         {
             currentState = newState;
+            
+            var cameraController = GetComponent<RVCameraController>();
+            if (cameraController == null) cameraController = GetComponentInParent<RVCameraController>();
+
             if (newState == RVState.Parked)
             {
                 controller.StopVehicle();
-                // Logic to enable player movement inside would be here
+                
+                if (cameraController != null)
+                {
+                    if (cameraController.interiorCamera != null) cameraController.interiorCamera.SetActive(false);
+                    if (cameraController.exteriorCamera != null) cameraController.exteriorCamera.SetActive(false);
+                }
+                if (player != null)
+                {
+                    player.SetActive(true);
+                    var playerCam = player.GetComponentInChildren<Camera>(true);
+                    if (playerCam != null) playerCam.enabled = true;
+                }
             }
             else
             {
-                // Logic to lock player to cabin but allow control
+                if (cameraController != null)
+                {
+                    if (cameraController.interiorCamera != null) cameraController.interiorCamera.SetActive(true);
+                }
+                if (player != null)
+                {
+                    var playerCam = player.GetComponentInChildren<Camera>();
+                    if (playerCam != null) playerCam.enabled = false;
+                }
             }
         }
     }

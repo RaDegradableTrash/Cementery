@@ -100,6 +100,8 @@ public class PlayerController : NetworkBehaviour
     public LayerMask groundMask = ~0;
     public int groundCheckInterval = 2;
     private int _groundCheckFrameCounter;
+    private bool _hasSetupKinematic = false;
+    private float _startupTime;
 
     // ── Lifecycle ────────────────────────────────────────────────────────────
     void Awake()
@@ -112,9 +114,10 @@ public class PlayerController : NetworkBehaviour
         _rb.freezeRotation = true;
         _rb.useGravity = true;
         _rb.drag = 0f; // 🚀 Cancel any falling speed limit / air drag, matching vehicle gravity physics
-        _rb.isKinematic = false; // Force non-kinematic initialization to ensure physics simulation is active!
+        _rb.isKinematic = true; // Start kinematic to prevent falling through terrain before it loads!
         _rb.interpolation = RigidbodyInterpolation.Interpolate;
         _rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+        _startupTime = Time.time;
 
         // Apply zero-friction material to prevent sticking to walls
         PhysicMaterial pm = new PhysicMaterial("PlayerMaterial") { dynamicFriction = 0f, staticFriction = 0f, frictionCombine = PhysicMaterialCombine.Minimum };
@@ -155,13 +158,33 @@ public class PlayerController : NetworkBehaviour
         }
         else
         {
-            // Ensure local owner's rigidbody is 100% active and affected by gravity!
-            if (_rb != null) _rb.isKinematic = false;
+            // Defer unfreezing until terrain is ready
         }
     }
 
     void Update()
     {
+        if (!_hasSetupKinematic)
+        {
+            bool shouldEnable = false;
+            if (EnvironmentSystem.WorldStreamer.Instance != null)
+            {
+                if (EnvironmentSystem.WorldStreamer.Instance.HasLoadedAnyChunks)
+                    shouldEnable = true;
+            }
+            else
+            {
+                if (Time.time - _startupTime > 1.0f)
+                    shouldEnable = true;
+            }
+
+            if (shouldEnable)
+            {
+                if (_rb != null) _rb.isKinematic = false;
+                _hasSetupKinematic = true;
+            }
+        }
+
         // 逻辑修正：如果网络管理器没启动（单机测试），或者网络已启动且你是房主/本地玩家，才允许执行逻辑
         bool isNetworkActive = NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening;
         if (isNetworkActive && (!IsSpawned || !IsOwner)) return;

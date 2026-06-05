@@ -13,8 +13,19 @@ namespace RVSystem
 
         void Start()
         {
-            interiorCamera.SetActive(true);
-            exteriorCamera.SetActive(false);
+            var stateMachine = GetComponent<RVStateMachine>();
+            if (stateMachine == null) stateMachine = GetComponentInParent<RVStateMachine>();
+
+            if (stateMachine != null && stateMachine.currentState == RVState.Parked)
+            {
+                if (interiorCamera != null) interiorCamera.SetActive(false);
+                if (exteriorCamera != null) exteriorCamera.SetActive(false);
+            }
+            else
+            {
+                if (interiorCamera != null) interiorCamera.SetActive(true);
+                if (exteriorCamera != null) exteriorCamera.SetActive(false);
+            }
         }
 
         void Update()

@@ -83,16 +83,33 @@ public class SnowParticleSystem : MonoBehaviour
         {
             renderer.renderMode = ParticleSystemRenderMode.Billboard;
             
-            Shader unlitShader = Shader.Find("Mobile/Particles/Additive");
+            Shader unlitShader = Shader.Find("Universal Render Pipeline/Particles/Unlit");
+            if (unlitShader == null) unlitShader = Shader.Find("Universal Render Pipeline/Unlit");
+            if (unlitShader == null) unlitShader = Shader.Find("Particles/Standard Unlit");
             if (unlitShader == null) unlitShader = Shader.Find("Mobile/Particles/Additive");
             
             if (unlitShader != null)
             {
                 Material mat = new Material(unlitShader);
-                mat.SetFloat("_Surface", 1); // Transparent
-                mat.SetFloat("_Blend", 2);   // Additive blending makes them glow against the sky!
-                mat.SetFloat("_ZWrite", 0);
+                if (unlitShader.name.Contains("Universal"))
+                {
+                    mat.SetFloat("_Surface", 1); // Transparent
+                    mat.SetFloat("_Blend", 1);   // Additive
+                    mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                    mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.One);
+                    mat.SetInt("_ZWrite", 0);
+                    mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+                    mat.EnableKeyword("_ALPHABLEND_ON");
+                    mat.renderQueue = 3000;
+                }
+                else
+                {
+                    mat.SetFloat("_Surface", 1);
+                    mat.SetFloat("_Blend", 2);   // Additive blending makes them glow against the sky!
+                    mat.SetFloat("_ZWrite", 0);
+                }
                 mat.SetColor("_BaseColor", new Color(2.0f, 2.0f, 2.0f, 0.8f)); // HDR bright white
+                mat.SetColor("_Color", new Color(2.0f, 2.0f, 2.0f, 0.8f));
                 
                 // 程序化生成柔和的圆形贴图
                 Texture2D circleTex = new Texture2D(32, 32, TextureFormat.RGBA32, false);

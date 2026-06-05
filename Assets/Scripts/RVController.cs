@@ -26,20 +26,28 @@ namespace RVSystem
         public float maxSteerAngle = 35f;
 
         private Rigidbody _rb;
+        private bool _hasSetupKinematic = false;
+        private float _startupTime;
+
+        void Awake()
+        {
+            _rb = GetComponent<Rigidbody>();
+            if (_rb != null)
+            {
+                _rb.isKinematic = true;
+            }
+        }
 
         void Start()
         {
-            _rb = GetComponent<Rigidbody>();
+            _startupTime = Time.time;
+            if (_rb == null) _rb = GetComponent<Rigidbody>();
             AutoBindWheels();
 
             // FIX: Force all renderers on the RV to properly receive Ambient Light in URP
             // This prevents the "pitch black" issue caused by invalid GI or Lightmap settings
             foreach (var r in GetComponentsInChildren<Renderer>(true))
             {
-                if (r is MeshRenderer mr)
-                {
-                    mr.receiveGI = ReceiveGI.LightProbes;
-                }
                 r.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
                 r.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Simple;
                 
@@ -134,6 +142,27 @@ namespace RVSystem
 
         void Update()
         {
+            if (!_hasSetupKinematic)
+            {
+                bool shouldEnable = false;
+                if (EnvironmentSystem.WorldStreamer.Instance != null)
+                {
+                    if (EnvironmentSystem.WorldStreamer.Instance.HasLoadedAnyChunks)
+                        shouldEnable = true;
+                }
+                else
+                {
+                    if (Time.time - _startupTime > 1.0f)
+                        shouldEnable = true;
+                }
+
+                if (shouldEnable)
+                {
+                    if (_rb != null) _rb.isKinematic = false;
+                    _hasSetupKinematic = true;
+                }
+            }
+
             // Sync wheel meshes to colliders every frame for smooth visuals
             foreach (var pair in wheels)
             {

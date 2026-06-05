@@ -8,6 +8,7 @@ namespace EnvironmentSystem
     public class WorldStreamer : MonoBehaviour
     {
         public static WorldStreamer Instance { get; private set; }
+        public bool HasLoadedAnyChunks => _loadedChunks.Count > 0;
 
         [Header("General Settings")]
         [Tooltip("Delay in seconds before unloading a chunk to prevent thrashing at boundaries.")]
