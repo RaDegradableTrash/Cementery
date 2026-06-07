@@ -15,8 +15,37 @@ public class FuelTank : MonoBehaviour
 
     [Header("Fuel Config")]
     public float maxCapacity = 100f;
-    public float currentFuel = 20f; // Initial fuel amount
     public string fuelItemNameFilter = "fuel"; // If matching held item name
+
+    // Static variables to ensure the fuel level is globally unique and shared across both tanks
+    private static float _sharedFuel = 20f; // Initial default fuel
+    private static float _sharedMaxCapacity = 100f;
+    private static System.Collections.Generic.List<FuelTank> _activeTanks = new System.Collections.Generic.List<FuelTank>();
+
+    public float currentFuel
+    {
+        get => _sharedFuel;
+        set
+        {
+            _sharedFuel = Mathf.Clamp(value, 0f, maxCapacity);
+            NotifyAllTanksToUpdate();
+        }
+    }
+
+    private static void NotifyAllTanksToUpdate()
+    {
+        for (int i = _activeTanks.Count - 1; i >= 0; i--)
+        {
+            if (_activeTanks[i] != null)
+            {
+                _activeTanks[i].UpdateUI();
+            }
+            else
+            {
+                _activeTanks.RemoveAt(i);
+            }
+        }
+    }
 
     [Header("UI Visuals (Neon Holographic Preset)")]
     public Color lowFuelColor = new Color(0.9f, 0.2f, 0.2f, 0.85f);
@@ -39,13 +68,61 @@ public class FuelTank : MonoBehaviour
     private int[] _baseTriangles;
     private Vector2[] _baseUVs;
     private float _currentRatio = 0f;
+    private float _targetRatio = 0f;
+
+    [Tooltip("How fast the fuel level transitions visually (ratio per second).")]
+    public float fillTransitionSpeed = 0.5f;
 
     private bool _isLookingAt = false;
     private float _currentAlpha = 0f;
+    private float _lookAwayTimer = 0f; // 1-second delay buffer when player looks away
     private MaterialPropertyBlock _propBlock;
+
+    private void SetupMaterialTransparent(Material mat)
+    {
+        if (mat == null) return;
+
+        // Support for URP Lit shader Surface Type
+        if (mat.HasProperty("_Surface"))
+        {
+            mat.SetFloat("_Surface", 1f); // 1 = Transparent
+        }
+
+        // Support for URP Blend Mode
+        if (mat.HasProperty("_Blend"))
+        {
+            mat.SetFloat("_Blend", 0f); // 0 = Alpha Blending
+        }
+
+        // Standard Shader mode
+        if (mat.HasProperty("_Mode"))
+        {
+            mat.SetFloat("_Mode", 3f); // 3 = Transparent
+        }
+
+        // Configure blending factor settings
+        mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+        mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+        mat.SetInt("_ZWrite", 0);
+
+        mat.DisableKeyword("_ALPHATEST_ON");
+        mat.EnableKeyword("_ALPHABLEND_ON");
+        mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+
+        // Force transparent render queue (3000)
+        mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+    }
 
     private void Awake()
     {
+        // Register this instance to the shared active list
+        if (!_activeTanks.Contains(this))
+        {
+            _activeTanks.Add(this);
+        }
+        
+        _sharedMaxCapacity = maxCapacity;
+
         // Enforce clean Neon hologram colors on awake
         lowFuelColor = new Color(0.9f, 0.2f, 0.2f, 0.85f);
         mediumFuelColor = new Color(0.9f, 0.6f, 0.1f, 0.85f);
@@ -63,7 +140,38 @@ public class FuelTank : MonoBehaviour
                 _fillMeshFilter.mesh = _proceduralMesh;
                 BuildBaseWaveMesh();
             }
+
+            // Programmatically configure material for transparency
+            if (fuelBarFillRenderer.material != null)
+            {
+                SetupMaterialTransparent(fuelBarFillRenderer.material);
+            }
+
+            // Disable shadow casting and receiving on the wave fill mesh to strip shadows
+            fuelBarFillRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            fuelBarFillRenderer.receiveShadows = false;
         }
+
+        // Apply shadow disabling on all displayObject outlines/backgrounds
+        if (displayObject != null)
+        {
+            foreach (var r in displayObject.GetComponentsInChildren<Renderer>(true))
+            {
+                // Programmatically configure material for transparency
+                if (r.material != null)
+                {
+                    SetupMaterialTransparent(r.material);
+                }
+
+                r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                r.receiveShadows = false;
+            }
+        }
+    }
+
+    private void OnDestroy()
+    {
+        _activeTanks.Remove(this);
     }
 
     private void Start()
@@ -73,22 +181,24 @@ public class FuelTank : MonoBehaviour
             displayObject.SetActive(false);
         }
         UpdateUI();
+        _currentRatio = _targetRatio; // Initialize instantly to avoid startup lag
     }
 
     private void Update()
     {
+        // Smoothly interpolate the visual ratio towards the target fuel ratio
+        _currentRatio = Mathf.MoveTowards(_currentRatio, _targetRatio, Time.deltaTime * fillTransitionSpeed);
+
         // Debug fuel control via keyboard: '-' decreases by 5%, '=' increases by 5%
         if (Input.GetKeyDown(KeyCode.Minus) || Input.GetKeyDown(KeyCode.KeypadMinus))
         {
             float amountToReduce = maxCapacity * 0.05f;
-            currentFuel = Mathf.Clamp(currentFuel - amountToReduce, 0f, maxCapacity);
-            UpdateUI();
+            currentFuel -= amountToReduce;
         }
         if (Input.GetKeyDown(KeyCode.Equals) || Input.GetKeyDown(KeyCode.KeypadEquals))
         {
             float amountToAdd = maxCapacity * 0.05f;
-            currentFuel = Mathf.Clamp(currentFuel + amountToAdd, 0f, maxCapacity);
-            UpdateUI();
+            currentFuel += amountToAdd;
         }
 
         // Animate wave vertices over time
@@ -97,12 +207,20 @@ public class FuelTank : MonoBehaviour
             AnimateWaveMesh();
         }
 
-        float targetAlpha = _isLookingAt ? 1f : 0f;
+        // 1-second delay buffer when looking away
+        bool shouldShow = _isLookingAt;
+        if (!_isLookingAt && _lookAwayTimer > 0f)
+        {
+            _lookAwayTimer -= Time.deltaTime;
+            shouldShow = true; // Stay visible during the 1-second grace period
+        }
+
+        float targetAlpha = shouldShow ? 1f : 0f;
         
         // Handle visual activation and fading
         if (displayObject != null)
         {
-            if (_isLookingAt && !displayObject.activeSelf)
+            if (shouldShow && !displayObject.activeSelf)
             {
                 displayObject.SetActive(true);
                 _currentAlpha = 0f;
@@ -233,40 +351,81 @@ public class FuelTank : MonoBehaviour
 
             r.GetPropertyBlock(_propBlock);
             
-            // Neon Hologram background/outline glows with fading 25% alpha
+            // Neon Hologram background/outline glows with fading 30% alpha (alpha * 0.3f)
             Color baseCol = Color.white;
-            if (r.sharedMaterial != null)
+            if (r.material != null)
             {
-                if (r.sharedMaterial.HasProperty("_BaseColor"))
-                    baseCol = r.sharedMaterial.GetColor("_BaseColor");
-                else if (r.sharedMaterial.HasProperty("_Color"))
-                    baseCol = r.sharedMaterial.GetColor("_Color");
+                if (r.material.HasProperty("_BaseColor"))
+                    baseCol = r.material.GetColor("_BaseColor");
+                else if (r.material.HasProperty("_Color"))
+                    baseCol = r.material.GetColor("_Color");
                 else
                     baseCol = Color.cyan;
             }
-            baseCol.a = alpha * 0.25f;
+            baseCol.a = alpha * 0.3f;
             
             // Set both URP and Standard color variables
             _propBlock.SetColor("_Color", baseCol);
             _propBlock.SetColor("_BaseColor", baseCol);
             _propBlock.SetFloat("_Alpha", alpha);
             r.SetPropertyBlock(_propBlock);
+
+            if (r.material != null)
+            {
+                if (r.material.HasProperty("_Color"))
+                    r.material.SetColor("_Color", baseCol);
+                if (r.material.HasProperty("_BaseColor"))
+                    r.material.SetColor("_BaseColor", baseCol);
+            }
         }
 
-        // Handle percentage text transparency
+        // Float fluid glows with 60% neon transparency (alpha * 0.6f)
+        if (fuelBarFillRenderer != null)
+        {
+            Color targetColor = fullFuelColor;
+            if (_currentRatio < 0.3f) targetColor = Color.Lerp(lowFuelColor, mediumFuelColor, _currentRatio / 0.3f);
+            else targetColor = Color.Lerp(mediumFuelColor, fullFuelColor, (_currentRatio - 0.3f) / 0.7f);
+
+            Color holoFillColor = targetColor;
+            holoFillColor.a = 0.6f * alpha;
+
+            fuelBarFillRenderer.GetPropertyBlock(_propBlock);
+            _propBlock.SetColor("_Color", holoFillColor);
+            _propBlock.SetColor("_BaseColor", holoFillColor);
+            _propBlock.SetFloat("_Alpha", alpha);
+            fuelBarFillRenderer.SetPropertyBlock(_propBlock);
+
+            if (fuelBarFillRenderer.material != null)
+            {
+                if (fuelBarFillRenderer.material.HasProperty("_Color"))
+                    fuelBarFillRenderer.material.SetColor("_Color", holoFillColor);
+                if (fuelBarFillRenderer.material.HasProperty("_BaseColor"))
+                    fuelBarFillRenderer.material.SetColor("_BaseColor", holoFillColor);
+            }
+        }
+
+        // Handle percentage text transparency - 50% opacity (alpha * 0.5f)
         if (fuelText != null)
         {
-            float ratio = maxCapacity > 0f ? Mathf.Clamp01(currentFuel / maxCapacity) : 0f;
             Color targetColor = fullFuelColor;
-            if (ratio < 0.3f) targetColor = Color.Lerp(lowFuelColor, mediumFuelColor, ratio / 0.3f);
-            else targetColor = Color.Lerp(mediumFuelColor, fullFuelColor, (ratio - 0.3f) / 0.7f);
+            if (_currentRatio < 0.3f) targetColor = Color.Lerp(lowFuelColor, mediumFuelColor, _currentRatio / 0.3f);
+            else targetColor = Color.Lerp(mediumFuelColor, fullFuelColor, (_currentRatio - 0.3f) / 0.7f);
             
-            fuelText.color = new Color(targetColor.r, targetColor.g, targetColor.b, alpha);
+            fuelText.text = $"{(_currentRatio * 100f):F0}%";
+            fuelText.color = new Color(targetColor.r, targetColor.g, targetColor.b, alpha * 0.5f);
         }
     }
 
     public void ShowUI(bool isLooking)
     {
+        if (isLooking)
+        {
+            _lookAwayTimer = 0f; // Reset buffer timer if focused again
+        }
+        else if (_isLookingAt) // Transition from focused to unfocused
+        {
+            _lookAwayTimer = 1.0f; // Initialize 1-second delay buffer
+        }
         _isLookingAt = isLooking;
     }
 
@@ -275,54 +434,13 @@ public class FuelTank : MonoBehaviour
         if (currentFuel >= maxCapacity)
             return false;
 
-        currentFuel = Mathf.Clamp(currentFuel + amount, 0f, maxCapacity);
-        UpdateUI();
+        currentFuel += amount;
         return true;
     }
 
     public void UpdateUI()
     {
         float ratio = maxCapacity > 0f ? Mathf.Clamp01(currentFuel / maxCapacity) : 0f;
-        _currentRatio = ratio;
-
-        Color targetColor = fullFuelColor;
-        if (ratio < 0.3f)
-        {
-            targetColor = Color.Lerp(lowFuelColor, mediumFuelColor, ratio / 0.3f);
-        }
-        else
-        {
-            targetColor = Color.Lerp(mediumFuelColor, fullFuelColor, (ratio - 0.3f) / 0.7f);
-        }
-
-        // Float fluid glows with 40% neon transparency
-        Color holoFillColor = targetColor;
-        holoFillColor.a = 0.4f * _currentAlpha;
-
-        if (fuelBarFillRenderer != null)
-        {
-            fuelBarFillRenderer.GetPropertyBlock(_propBlock);
-            
-            // Set both URP and Standard variables in property block
-            _propBlock.SetColor("_Color", holoFillColor);
-            _propBlock.SetColor("_BaseColor", holoFillColor);
-            _propBlock.SetFloat("_Alpha", _currentAlpha);
-            fuelBarFillRenderer.SetPropertyBlock(_propBlock);
-
-            if (fuelBarFillRenderer.sharedMaterial != null)
-            {
-                if (fuelBarFillRenderer.material.HasProperty("_Color"))
-                    fuelBarFillRenderer.material.SetColor("_Color", holoFillColor);
-                if (fuelBarFillRenderer.material.HasProperty("_BaseColor"))
-                    fuelBarFillRenderer.material.SetColor("_BaseColor", holoFillColor);
-            }
-            AnimateWaveMesh();
-        }
-
-        if (fuelText != null)
-        {
-            fuelText.text = $"{(ratio * 100f):F0}%";
-            fuelText.color = new Color(targetColor.r, targetColor.g, targetColor.b, _currentAlpha);
-        }
+        _targetRatio = ratio;
     }
 }

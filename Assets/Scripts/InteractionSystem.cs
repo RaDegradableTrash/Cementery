@@ -745,6 +745,39 @@ public class InteractionSystem : MonoBehaviour
     bool TryRaycastIgnoringPlayer(Ray ray, float range, out RaycastHit bestHit)
     {
         bestHit = default;
+
+        // 0. Perform a precise line raycast first. If the camera is pointing directly at an object,
+        // we should prioritize the exact collider hit by the line-of-sight ray.
+        // This avoids issues where a thick SphereCast overlaps surrounding colliders
+        // at close range and fails to target the correct object.
+        RaycastHit[] preciseHits = Physics.RaycastAll(ray, range, interactMask, QueryTriggerInteraction.Ignore);
+        if (preciseHits != null && preciseHits.Length > 0)
+        {
+            float closestPreciseDist = float.MaxValue;
+            RaycastHit bestPreciseHit = default;
+            bool foundPrecise = false;
+
+            for (int i = 0; i < preciseHits.Length; i++)
+            {
+                RaycastHit phit = preciseHits[i];
+                if (phit.collider != null && !IsIgnoredCarryHitCollider(phit.collider))
+                {
+                    if (phit.distance < closestPreciseDist)
+                    {
+                        closestPreciseDist = phit.distance;
+                        bestPreciseHit = phit;
+                        foundPrecise = true;
+                    }
+                }
+            }
+
+            if (foundPrecise)
+            {
+                bestHit = bestPreciseHit;
+                return true;
+            }
+        }
+
         float sphereRadius = interactionRayRadius > 0.0001f ? interactionRayRadius * 5f : 0f; // 500% thicker cast
 
         RaycastHit[] hits = sphereRadius > 0.0001f

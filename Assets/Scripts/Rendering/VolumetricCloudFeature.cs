@@ -117,6 +117,12 @@ public class VolumetricCloudFeature : ScriptableRendererFeature
 
     public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
     {
+        // Skip rendering in Scene View to keep the workspace visible for editing
+        if (renderingData.cameraData.cameraType == CameraType.SceneView)
+        {
+            return;
+        }
+
         // Always force recover shader reference
         if (settings.cloudShader == null)
         {
