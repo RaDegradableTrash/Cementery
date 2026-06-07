@@ -489,7 +489,10 @@ public class CarControl : MonoBehaviour
         if (engineSimulator != null)
         {
             engineSimulator.currentRPM = smoothEngineRpm;
-            engineSimulator.engineLoad = Mathf.Lerp(engineSimulator.engineLoad, Mathf.Abs(appliedThrottleInput), Time.deltaTime * 5f);
+            float targetLoad = Mathf.Abs(appliedThrottleInput);
+            float currentLoad = engineSimulator.engineLoad;
+            float newLoad = Mathf.Lerp(currentLoad, targetLoad, Time.deltaTime * 5f);
+            engineSimulator.engineLoad = newLoad;
         }
 
         if (rpmDisplay != null)
