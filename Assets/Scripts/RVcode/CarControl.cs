@@ -297,7 +297,7 @@ public class CarControl : MonoBehaviour
         currentSpeedKmh = displaySpeed;
         if (speedDisplay != null)
         {
-            speedDisplay.text = Mathf.Round(displaySpeed).ToString() + " km/h";
+            speedDisplay.text = Mathf.Round(displaySpeed).ToString() + "";
         }
 
         // Calculate motor torque factor using Unity's forwardSpeed (m/s)
@@ -497,7 +497,7 @@ public class CarControl : MonoBehaviour
 
         if (rpmDisplay != null)
         {
-            rpmDisplay.text = Mathf.Round(smoothEngineRpm).ToString() + " RPM";
+            rpmDisplay.text = Mathf.Round(smoothEngineRpm).ToString() + "";
         }
         // --------------------------------------------------
 
