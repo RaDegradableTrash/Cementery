@@ -142,28 +142,48 @@ public class InputManager : MonoBehaviour {
     }
 
     public void SaveConfig() {
-        string path = GetConfigFilePath();
-        KeybindProfile activeProfile = new KeybindProfile {
-            ProfileName = CurrentProfileName,
-            Bindings = ActiveBindings
-        };
-        string json = JsonUtility.ToJson(activeProfile, true);
-        File.WriteAllText(path, json);
+        try {
+            KeybindProfile activeProfile = new KeybindProfile {
+                ProfileName = CurrentProfileName,
+                Bindings = ActiveBindings
+            };
+            string json = JsonUtility.ToJson(activeProfile, true);
+#if UNITY_WEBGL && !UNITY_EDITOR
+            PlayerPrefs.SetString("keybinds_config", json);
+            PlayerPrefs.Save();
+#else
+            string path = GetConfigFilePath();
+            File.WriteAllText(path, json);
+#endif
+        } catch (System.Exception e) {
+            Debug.LogError("[InputManager] Failed to save keybinds: " + e.Message);
+        }
     }
 
     public void LoadConfig() {
-        string path = GetConfigFilePath();
-        if (File.Exists(path)) {
-            try {
+        try {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            if (PlayerPrefs.HasKey("keybinds_config")) {
+                string json = PlayerPrefs.GetString("keybinds_config");
+                KeybindProfile profile = JsonUtility.FromJson<KeybindProfile>(json);
+                CurrentProfileName = profile.ProfileName;
+                ActiveBindings = profile.Bindings;
+            } else {
+                ResetToDefault();
+            }
+#else
+            string path = GetConfigFilePath();
+            if (File.Exists(path)) {
                 string json = File.ReadAllText(path);
                 KeybindProfile profile = JsonUtility.FromJson<KeybindProfile>(json);
                 CurrentProfileName = profile.ProfileName;
                 ActiveBindings = profile.Bindings;
-            } catch (System.Exception e) {
-                Debug.LogError("Failed to load keybinds: " + e.Message);
+            } else {
                 ResetToDefault();
             }
-        } else {
+#endif
+        } catch (System.Exception e) {
+            Debug.LogError("[InputManager] Failed to load keybinds: " + e.Message);
             ResetToDefault();
         }
     }
@@ -176,6 +196,9 @@ public class InputManager : MonoBehaviour {
 
     // Export keybind profile as txt file
     public void ExportProfileToTxt(string customName = "") {
+#if UNITY_WEBGL && !UNITY_EDITOR
+        throw new System.NotSupportedException("WebGL platform does not support local file system export.");
+#else
         string profileName = string.IsNullOrEmpty(customName) ? CurrentProfileName : customName;
         string downloadsPath = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile), "Downloads");
         if (!System.IO.Directory.Exists(downloadsPath)) {
@@ -191,10 +214,14 @@ public class InputManager : MonoBehaviour {
         string json = JsonUtility.ToJson(profile, true);
         File.WriteAllText(fullPath, json);
         Debug.Log($"Key bindings exported successfully to {fullPath}");
+#endif
     }
 
     // Import keybind profile from custom txt file
     public bool ImportProfileFromTxt(string fileName) {
+#if UNITY_WEBGL && !UNITY_EDITOR
+        throw new System.NotSupportedException("WebGL platform does not support local file system import.");
+#else
         string downloadsPath = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile), "Downloads");
         string fullPath = Path.Combine(downloadsPath, fileName);
 
@@ -212,6 +239,7 @@ public class InputManager : MonoBehaviour {
             }
         }
         return false;
+#endif
     }
 
     // Conflict detection helper

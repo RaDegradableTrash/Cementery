@@ -1085,12 +1085,12 @@ public class InteractionSystem : MonoBehaviour
         // 4. 左键松开执行放下或 Tab 放置
         if (Input.GetMouseButtonUp(0) && _carriedRb != null)
         {
-            if (_carriedWo != null && _carriedWo.GetComponent<Kelp>() != null)
+            if (_carriedWo != null && _carriedWo.GetComponent<KelpLeaf>() != null)
             {
                 PlantPot pot = GetLookedAtPot();
                 if (pot != null && pot.CanPlant())
                 {
-                    pot.PlantKelp(_carriedWo);
+                    pot.PlantLeaf(_carriedWo);
                     ExitPlacementMode();
                     ConsumeCarriedObjectSilently();
                     ClearPrompts();

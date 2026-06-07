@@ -1222,27 +1222,34 @@ public class PlayerDeathFlowController : MonoBehaviour
         if (label == null)
             return;
 
-        Material instance = label.fontMaterial;
-        if (instance == null)
-            return;
+        try
+        {
+            Material instance = label.fontMaterial;
+            if (instance == null)
+                return;
 
-        label.fontMaterial = instance;
-        mat = label.fontMaterial;
-        if (mat == null)
-            return;
+            label.fontMaterial = instance;
+            mat = label.fontMaterial;
+            if (mat == null)
+                return;
 
-        if (mat.HasProperty(ShaderUtilities.ID_FaceDilate))
-            baseFace = mat.GetFloat(ShaderUtilities.ID_FaceDilate);
-        if (mat.HasProperty(ShaderUtilities.ID_OutlineSoftness))
-            baseSoft = mat.GetFloat(ShaderUtilities.ID_OutlineSoftness);
-        if (mat.HasProperty(ShaderUtilities.ID_OutlineWidth))
-            baseWidth = mat.GetFloat(ShaderUtilities.ID_OutlineWidth);
-        if (mat.HasProperty(ShaderUtilities.ID_UnderlayDilate))
-            baseUnderlayDilate = mat.GetFloat(ShaderUtilities.ID_UnderlayDilate);
-        if (mat.HasProperty(ShaderUtilities.ID_UnderlaySoftness))
-            baseUnderlaySoftness = mat.GetFloat(ShaderUtilities.ID_UnderlaySoftness);
-        if (mat.HasProperty(ShaderUtilities.ID_UnderlayColor))
-            baseUnderlayColor = mat.GetColor(ShaderUtilities.ID_UnderlayColor);
+            if (mat.HasProperty(ShaderUtilities.ID_FaceDilate))
+                baseFace = mat.GetFloat(ShaderUtilities.ID_FaceDilate);
+            if (mat.HasProperty(ShaderUtilities.ID_OutlineSoftness))
+                baseSoft = mat.GetFloat(ShaderUtilities.ID_OutlineSoftness);
+            if (mat.HasProperty(ShaderUtilities.ID_OutlineWidth))
+                baseWidth = mat.GetFloat(ShaderUtilities.ID_OutlineWidth);
+            if (mat.HasProperty(ShaderUtilities.ID_UnderlayDilate))
+                baseUnderlayDilate = mat.GetFloat(ShaderUtilities.ID_UnderlayDilate);
+            if (mat.HasProperty(ShaderUtilities.ID_UnderlaySoftness))
+                baseUnderlaySoftness = mat.GetFloat(ShaderUtilities.ID_UnderlaySoftness);
+            if (mat.HasProperty(ShaderUtilities.ID_UnderlayColor))
+                baseUnderlayColor = mat.GetColor(ShaderUtilities.ID_UnderlayColor);
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogWarning($"[PlayerDeathFlowController] Failed to cache TMPro material properties: {ex.Message}");
+        }
     }
 
     private void ApplyBlurTransition(

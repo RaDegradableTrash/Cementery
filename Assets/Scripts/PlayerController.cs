@@ -111,26 +111,41 @@ public class PlayerController : NetworkBehaviour
         _stamina = GetComponent<PlayerStamina>();
         _selfColliders = GetComponentsInChildren<Collider>(true);
 
-        _rb.freezeRotation = true;
-        _rb.useGravity = true;
-        _rb.drag = 0f; // 🚀 Cancel any falling speed limit / air drag, matching vehicle gravity physics
-        _rb.isKinematic = true; // Start kinematic to prevent falling through terrain before it loads!
-        _rb.interpolation = RigidbodyInterpolation.Interpolate;
-        _rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+        if (_rb != null)
+        {
+            _rb.freezeRotation = true;
+            _rb.useGravity = true;
+            _rb.drag = 0f; // 🚀 Cancel any falling speed limit / air drag, matching vehicle gravity physics
+            _rb.isKinematic = true; // Start kinematic to prevent falling through terrain before it loads!
+            _rb.interpolation = RigidbodyInterpolation.Interpolate;
+            _rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+        }
+        else
+        {
+            Debug.LogWarning("[PlayerController] Rigidbody component not found on player!");
+        }
+
         _startupTime = Time.time;
 
         // Apply zero-friction material to prevent sticking to walls
-        PhysicMaterial pm = new PhysicMaterial("PlayerMaterial") { dynamicFriction = 0f, staticFriction = 0f, frictionCombine = PhysicMaterialCombine.Minimum };
-        _col.material = pm;
-
-        // Player should not collide with colliders in its own hierarchy.
-        for (int i = 0; i < _selfColliders.Length; i++)
+        if (_col != null)
         {
-            Collider c = _selfColliders[i];
-            if (c == null || c == _col)
-                continue;
+            PhysicMaterial pm = new PhysicMaterial("PlayerMaterial") { dynamicFriction = 0f, staticFriction = 0f, frictionCombine = PhysicMaterialCombine.Minimum };
+            _col.material = pm;
 
-            Physics.IgnoreCollision(_col, c, true);
+            // Player should not collide with colliders in its own hierarchy.
+            for (int i = 0; i < _selfColliders.Length; i++)
+            {
+                Collider c = _selfColliders[i];
+                if (c == null || c == _col)
+                    continue;
+
+                Physics.IgnoreCollision(_col, c, true);
+            }
+        }
+        else
+        {
+            Debug.LogWarning("[PlayerController] CapsuleCollider component not found on player!");
         }
 
         if (inventoryCameraController == null)

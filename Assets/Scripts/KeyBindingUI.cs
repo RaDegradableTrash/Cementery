@@ -242,18 +242,23 @@ public class KeyBindingUI : MonoBehaviour {
     }
 
     public void ExportActiveProfile() {
-        string customName = "";
-        if (importExportFileNameInput != null && !string.IsNullOrEmpty(importExportFileNameInput.text)) {
-            customName = importExportFileNameInput.text.Trim();
-            if (customName.EndsWith(".txt")) {
-                customName = customName.Substring(0, customName.Length - 4);
+        try {
+            string customName = "";
+            if (importExportFileNameInput != null && !string.IsNullOrEmpty(importExportFileNameInput.text)) {
+                customName = importExportFileNameInput.text.Trim();
+                if (customName.EndsWith(".txt")) {
+                    customName = customName.Substring(0, customName.Length - 4);
+                }
             }
+            
+            InputManager.Instance.ExportProfileToTxt(customName);
+            string profileName = string.IsNullOrEmpty(customName) ? InputManager.Instance.CurrentProfileName : customName;
+            string fileName = $"keybinds_{profileName.ToLower().Replace(" ", "_")}.txt";
+            ShowStatus($"Exported layout to Downloads/{fileName}", Color.green);
+        } catch (System.Exception ex) {
+            Debug.LogWarning($"Export profile not supported on this platform: {ex.Message}");
+            ShowStatus("Export is unsupported on WebGL sandbox.", new Color(1f, 0.6f, 0f, 1f));
         }
-        
-        InputManager.Instance.ExportProfileToTxt(customName);
-        string profileName = string.IsNullOrEmpty(customName) ? InputManager.Instance.CurrentProfileName : customName;
-        string fileName = $"keybinds_{profileName.ToLower().Replace(" ", "_")}.txt";
-        ShowStatus($"Exported layout to Downloads/{fileName}", Color.green);
     }
 
     public void ImportProfile() {
@@ -267,12 +272,17 @@ public class KeyBindingUI : MonoBehaviour {
             fileName += ".txt";
         }
 
-        if (InputManager.Instance.ImportProfileFromTxt(fileName)) {
-            ShowStatus($"Imported profile layout from Downloads/{fileName}", Color.green);
-            InitializeProfileDropdown();
-            RefreshUI();
-        } else {
-            ShowStatus($"File '{fileName}' not found in Downloads directory.", Color.red);
+        try {
+            if (InputManager.Instance.ImportProfileFromTxt(fileName)) {
+                ShowStatus($"Imported profile layout from Downloads/{fileName}", Color.green);
+                InitializeProfileDropdown();
+                RefreshUI();
+            } else {
+                ShowStatus($"File '{fileName}' not found in Downloads directory.", Color.red);
+            }
+        } catch (System.Exception ex) {
+            Debug.LogWarning($"Import profile not supported on this platform: {ex.Message}");
+            ShowStatus("Import is unsupported on WebGL sandbox.", new Color(1f, 0.6f, 0f, 1f));
         }
     }
 

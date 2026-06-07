@@ -124,6 +124,9 @@ namespace EnvironmentSystem
                     }
                 }
 
+                if (chunkSizeX <= 0.1f) chunkSizeX = 256f;
+                if (chunkSizeZ <= 0.1f) chunkSizeZ = 256f;
+
                 Vector3 pos = trackingTarget.position;
                 int gridX = Mathf.RoundToInt(pos.x / chunkSizeX);
                 int gridZ = Mathf.RoundToInt(pos.z / chunkSizeZ);

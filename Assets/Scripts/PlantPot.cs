@@ -7,7 +7,7 @@ public class PlantPot : MonoBehaviour
     [Header("References")]
     [Tooltip("The spot where the kelp will be positioned and grow.")]
     public Transform plantSpotEmpty;
-    [Tooltip("The Kelp prefab instantiated during harvest.")]
+    [Tooltip("The full Kelp plant prefab instantiated when planting.")]
     public GameObject kelpPrefab;
 
     [Header("Growth Settings")]
@@ -26,26 +26,38 @@ public class PlantPot : MonoBehaviour
         _worldObject.onInteract.AddListener(OnInteract);
         
         // Initial setup
-        _worldObject.interactMessage = "Plant Kelp";
-        _worldObject.interactable = false; // Only interactable when holding kelp initially
+        _worldObject.interactMessage = "Plant Leaf";
+        _worldObject.interactable = false; // Only interactable when holding leaf initially
+    }
+
+    void Start()
+    {
+#if UNITY_EDITOR
+        // If kelpPrefab is null or doesn't have the Kelp component (e.g. mistakenly assigned the leaf prefab),
+        // dynamically load the full Seaweed2 plant prefab from Assets.
+        if (kelpPrefab == null || kelpPrefab.GetComponent<Kelp>() == null)
+        {
+            kelpPrefab = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Seaweed2.prefab");
+        }
+#endif
     }
 
     void Update()
     {
-        // Enforce the requirement: empty pot interactable ONLY when holding Kelp
+        // Enforce the requirement: empty pot interactable ONLY when holding KelpLeaf
         if (!HasPlant())
         {
-            bool holdingKelp = false;
+            bool holdingLeaf = false;
             if (InteractionSystem.Instance != null)
             {
                 WorldObject carried = InteractionSystem.Instance.CarriedWorldObject;
-                if (carried != null && carried.GetComponent<Kelp>() != null)
+                if (carried != null && carried.GetComponent<KelpLeaf>() != null)
                 {
-                    holdingKelp = true;
+                    holdingLeaf = true;
                 }
             }
-            _worldObject.interactable = holdingKelp;
-            _worldObject.interactMessage = holdingKelp ? "Plant Kelp" : "";
+            _worldObject.interactable = holdingLeaf;
+            _worldObject.interactMessage = holdingLeaf ? "Plant Leaf" : "";
         }
         else
         {
@@ -53,7 +65,7 @@ public class PlantPot : MonoBehaviour
             _worldObject.interactable = true;
             if (_isMature)
             {
-                _worldObject.interactMessage = "Harvest Kelp";
+                _worldObject.interactMessage = "Harvest Leaves";
             }
             else
             {
@@ -61,7 +73,7 @@ public class PlantPot : MonoBehaviour
             }
         }
 
-        // Handle growth progress accumulation
+        // Handle growth progress accumulation (growth starts after transition is complete in Kelp)
         if (_isGrowing && _currentPlant != null)
         {
             _progress += Time.deltaTime / growthDuration;
@@ -71,7 +83,7 @@ public class PlantPot : MonoBehaviour
                 _isGrowing = false;
                 _isMature = true;
             }
-            _currentPlant.SetGrowthScale(_progress);
+            _currentPlant.SetGrowthProgress(_progress);
         }
     }
 
@@ -85,23 +97,28 @@ public class PlantPot : MonoBehaviour
         return !HasPlant() && !_isGrowing && !_isMature;
     }
 
-    // Handles planting a carried Kelp into this pot
-    public void PlantKelp(WorldObject kelpWo)
+    // Handles planting a carried KelpLeaf into this pot
+    public void PlantLeaf(WorldObject leafWo)
     {
-        if (!CanPlant()) return;
+        if (!CanPlant() || kelpPrefab == null) return;
 
-        Kelp kelp = kelpWo.GetComponent<Kelp>();
-        if (kelp == null) return;
+        // Position Kelp plant at the plant spot empty anchor
+        Transform spot = plantSpotEmpty != null ? plantSpotEmpty : transform;
+        GameObject kelpObj = Instantiate(kelpPrefab, spot.position, spot.rotation);
+        
+        Kelp kelp = kelpObj.GetComponent<Kelp>();
+        if (kelp == null)
+        {
+            Destroy(kelpObj);
+            return;
+        }
 
         _currentPlant = kelp;
         _progress = 0f;
         _isGrowing = true;
         _isMature = false;
 
-        // Position Kelp at the plant spot empty anchor
-        Transform spot = plantSpotEmpty != null ? plantSpotEmpty : transform;
         kelp.OnPlanted(spot);
-        kelp.SetGrowthScale(_progress);
 
         // Ignore collisions between Pot and Kelp
         Collider[] potColliders = GetComponentsInChildren<Collider>();
@@ -117,24 +134,27 @@ public class PlantPot : MonoBehaviour
             }
         }
 
+        // Destroy the carried leaf object which was planted
+        Destroy(leafWo.gameObject);
+
         if (InteractionSystem.Instance != null)
         {
-            InteractionSystem.Instance.ShowInfoMessage("Kelp Planted!");
+            InteractionSystem.Instance.ShowInfoMessage("Leaf Planted!");
         }
     }
 
     // Called on RMB interaction
     private void OnInteract(GameObject actor)
     {
-        // Case 1: Empty pot & holding kelp -> Plant it
+        // Case 1: Empty pot & holding leaf -> Plant it
         if (CanPlant())
         {
             if (InteractionSystem.Instance != null)
             {
                 WorldObject carried = InteractionSystem.Instance.CarriedWorldObject;
-                if (carried != null && carried.GetComponent<Kelp>() != null)
+                if (carried != null && carried.GetComponent<KelpLeaf>() != null)
                 {
-                    PlantKelp(carried);
+                    PlantLeaf(carried);
                     InteractionSystem.Instance.ConsumeCarriedObjectSilently();
                     InteractionSystem.Instance.ClearPrompts();
                 }
@@ -165,82 +185,19 @@ public class PlantPot : MonoBehaviour
     {
         if (!_isMature || _currentPlant == null) return;
 
-        // Capture original scale of the kelp before destroying it
-        Vector3 originalScale = _currentPlant.InitialWorldScale;
+        // Harvest all leaves from the growing plant, popping them out
+        _currentPlant.HarvestLeaves();
 
-        // Destroy the growing plant object
-        Destroy(_currentPlant.gameObject);
-        _currentPlant = null;
-        _isMature = false;
-        _isGrowing = false;
+        // The stem remains cut (scaled down) and stays in the pot. It grows again.
         _progress = 0f;
+        _isGrowing = true;
+        _isMature = false;
 
-        // Spawn 5 kelps popping out
-        if (kelpPrefab != null)
+        _currentPlant.SetGrowthProgress(0f);
+
+        if (InteractionSystem.Instance != null)
         {
-            Transform spawnRoot = plantSpotEmpty != null ? plantSpotEmpty : transform;
-            for (int i = 0; i < 5; i++)
-            {
-                // Instantiate slightly above the pot
-                Vector3 spawnPos = spawnRoot.position + Vector3.up * 0.3f;
-                GameObject spawned = Instantiate(kelpPrefab, spawnPos, Quaternion.identity);
-                spawned.transform.localScale = originalScale;
-                
-                // Ensure physics and components are enabled
-                Rigidbody spawnedRb = spawned.GetComponent<Rigidbody>();
-                Kelp spawnedKelp = spawned.GetComponent<Kelp>();
-                WorldObject spawnedWo = spawned.GetComponent<WorldObject>();
-
-                // Ignore collisions between Pot and newly spawned Kelp
-                Collider[] potColliders = GetComponentsInChildren<Collider>();
-                Collider[] spawnedColliders = spawned.GetComponentsInChildren<Collider>();
-                foreach (var potCol in potColliders)
-                {
-                    foreach (var kelpCol in spawnedColliders)
-                    {
-                        if (potCol != null && kelpCol != null)
-                        {
-                            Physics.IgnoreCollision(potCol, kelpCol, true);
-                        }
-                    }
-                }
-
-                if (spawnedWo != null)
-                {
-                    spawnedWo.interactable = false;
-                    spawnedWo.carryable = true;
-                }
-
-                // Force extraction state so they behave as wild-harvested items lying on the ground
-                if (spawnedKelp != null)
-                {
-                    // Mark as no longer wild so we can carry them directly, and setup colliders
-                    System.Reflection.FieldInfo isWildField = typeof(Kelp).GetField("_isWild", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                    if (isWildField != null) isWildField.SetValue(spawnedKelp, false);
-                }
-
-                if (spawnedRb != null)
-                {
-                    spawnedRb.isKinematic = false;
-                    spawnedRb.useGravity = true;
-                    
-                    // Apply outward explosion-like forces
-                    Vector3 forceDir = new Vector3(
-                        Random.Range(-0.8f, 0.8f),
-                        Random.Range(1.2f, 1.8f),
-                        Random.Range(-0.8f, 0.8f)
-                    ).normalized;
-                    
-                    float forceMagnitude = Random.Range(4f, 6f);
-                    spawnedRb.AddForce(forceDir * forceMagnitude, ForceMode.Impulse);
-                    spawnedRb.AddTorque(new Vector3(Random.Range(-3f, 3f), Random.Range(-3f, 3f), Random.Range(-3f, 3f)), ForceMode.Impulse);
-                }
-            }
-
-            if (InteractionSystem.Instance != null)
-            {
-                InteractionSystem.Instance.ShowInfoMessage("Harvested 5 Kelp!");
-            }
+            InteractionSystem.Instance.ShowInfoMessage("Harvested Leaves!");
         }
     }
 }

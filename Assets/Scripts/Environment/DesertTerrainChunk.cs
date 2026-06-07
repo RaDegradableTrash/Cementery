@@ -1435,7 +1435,14 @@ namespace EnvironmentSystem
             snowSelfP.depth *= snowResolutionMultiplier;
             snowSelfP.cellSize /= snowResolutionMultiplier;
 
-            // ── 2. Launch background computation (no Unity API inside Task) ──────
+            // ── 2. Launch background computation or run synchronously on WebGL ──────
+#if UNITY_WEBGL && !UNITY_EDITOR
+            var result = new ChunkBuildResult();
+            result.terrainMesh = ComputeMeshData(selfP, lP, rP, dP, uP, ldP, luP, rdP, ruP);
+            result.snowMesh = ComputeMeshData(snowSelfP, lP, rP, dP, uP, ldP, luP, rdP, ruP);
+            ApplyMeshFromResult(result);
+            _asyncBuildRunning = false;
+#else
             var task = Task.Run(() => {
                 var res = new ChunkBuildResult();
                 res.terrainMesh = ComputeMeshData(selfP, lP, rP, dP, uP, ldP, luP, rdP, ruP);
@@ -1464,6 +1471,7 @@ namespace EnvironmentSystem
             ChunkBuildResult result = task.Result;
             ApplyMeshFromResult(result);
             _asyncBuildRunning = false;
+#endif
 
             // If a rebuild was queued while we were running (new neighbor loaded), do it now.
             if (_asyncBuildQueued)
