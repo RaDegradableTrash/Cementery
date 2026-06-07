@@ -178,6 +178,7 @@ namespace EnvironmentSystem
                     col.sharedMesh = filter.sharedMesh;
                 }
                 SyncSnowLayer();
+                SyncRoadOverlay();
             }
         }
 
@@ -459,6 +460,7 @@ namespace EnvironmentSystem
             }
 
             UpdateSnowLayer(mesh);
+            SyncRoadOverlay();
 
             Debug.Log("[DesertTerrainChunk] Refined existing terrain with fine micro-details.");
         }
@@ -918,6 +920,7 @@ namespace EnvironmentSystem
             }
 
             UpdateSnowLayer(mesh);
+            SyncRoadOverlay();
 
             if (TryGetComponent<MeshRenderer>(out var mr))
             {
@@ -1650,8 +1653,21 @@ namespace EnvironmentSystem
             }
         }
 
-
-
-
+        public void SyncRoadOverlay()
+        {
+            MeshFilter filter = GetComponent<MeshFilter>();
+            if (filter != null && filter.sharedMesh != null)
+            {
+                Transform roadOverlayTransform = transform.Find("RoadOverlay");
+                if (roadOverlayTransform != null)
+                {
+                    var roadOverlay = roadOverlayTransform.GetComponent<DesertTerrainRoadOverlay>();
+                    if (roadOverlay != null)
+                    {
+                        roadOverlay.SyncWithTerrain(filter.sharedMesh);
+                    }
+                }
+            }
+        }
     }
 }
