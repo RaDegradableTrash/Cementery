@@ -879,6 +879,9 @@ public class InteractionSystem : MonoBehaviour
         }
     }
 
+    private FuelTank _lookedAtFuelTank; // Track current fuel tank in view
+    private FuelTank _lastLookedAtFuelTank; // Cache to turn off UI on hover exit
+
     void Scan()
     {
         float rayRange = GetEffectiveCarryRangeFromCamera();
@@ -895,6 +898,8 @@ public class InteractionSystem : MonoBehaviour
             _carryCandidateRb = null;
             _carryCandidateWo = null;
             _lookedAtContainer = null; // 🌟 新增：未射中时清空盒子引用
+            _lookedAtFuelTank = null;
+            ClearLastFuelTankFocus();
             return;
         }
 
@@ -906,6 +911,57 @@ public class InteractionSystem : MonoBehaviour
         else
             _lookedAtContainer = null;
 
+        // Scan for FuelTank component
+        if (hit.collider != null)
+        {
+            // First check if the hit collider or its parent/children has a FuelTank component
+            _lookedAtFuelTank = hit.collider.GetComponent<FuelTank>() ?? hit.collider.GetComponentInParent<FuelTank>() ?? hit.collider.transform.GetComponentInParent<FuelTank>();
+
+            if (_lookedAtFuelTank != null)
+            {
+                // Double check: ensure the collider is actually the fuel tank itself or a direct child of its hierarchy
+                // This prevents raycasts hitting the giant truck frame/mudguards (if they are separate objects) from accidentally showing the UI.
+                Transform t = hit.collider.transform;
+                bool isPartOfTank = (t == _lookedAtFuelTank.transform);
+                if (!isPartOfTank)
+                {
+                    // Check if it is a child of the FuelTank
+                    Transform parent = t.parent;
+                    while (parent != null)
+                    {
+                        if (parent == _lookedAtFuelTank.transform)
+                        {
+                            isPartOfTank = true;
+                            break;
+                        }
+                        parent = parent.parent;
+                    }
+                }
+
+                if (isPartOfTank)
+                {
+                    if (_lastLookedAtFuelTank != null && _lastLookedAtFuelTank != _lookedAtFuelTank)
+                    {
+                        _lastLookedAtFuelTank.ShowUI(false);
+                    }
+                    _lookedAtFuelTank.ShowUI(true);
+                    _lastLookedAtFuelTank = _lookedAtFuelTank;
+                }
+                else
+                {
+                    ClearLastFuelTankFocus();
+                }
+            }
+            else
+            {
+                ClearLastFuelTankFocus();
+            }
+        }
+        else
+        {
+            ClearLastFuelTankFocus();
+        }
+
         if (_carriedRb == null)
             _carryCandidateRb = ResolveCarryCandidate(hit, out _carryCandidateWo);
         else
@@ -914,6 +970,17 @@ public class InteractionSystem : MonoBehaviour
             _carryCandidateWo = null;
         }
     }
+
+    private void ClearLastFuelTankFocus()
+    {
+        if (_lastLookedAtFuelTank != null)
+        {
+            _lastLookedAtFuelTank.ShowUI(false);
+            _lastLookedAtFuelTank = null;
+        }
+        _lookedAtFuelTank = null;
+    }
+
 
     Rigidbody ResolveCarryCandidate(RaycastHit hit, out WorldObject worldObject)
     {
@@ -1119,10 +1186,55 @@ public class InteractionSystem : MonoBehaviour
             }
         }
 
-        // 6. 常规物体的右键互动行为（只有在【没看着盒子】时才会触发）
+        // 6. 常规物体的右键互动行为（只有在【没看着盒子】且【没看着油箱】时才会触发，或者当看着油箱但手里不是燃料时触发）
         if (Input.GetMouseButtonDown(1) && _lookedAtContainer == null)
         {
-            if (_lookedAt != null && _lookedAt.interactable)
+            if (_lookedAtFuelTank != null)
+            {
+                // Try to refuel with held item
+                if (_carriedWo != null)
+                {
+                    string itemName = _carriedWo.gameObject.name.ToLower();
+                    // Check if it's fuel (simple name filter or configurable filter)
+                    if (itemName.Contains(_lookedAtFuelTank.fuelItemNameFilter.ToLower()) || (_carriedWo.collectItemData != null && _carriedWo.collectItemData.itemName.ToLower().Contains(_lookedAtFuelTank.fuelItemNameFilter.ToLower())))
+                    {
+                        // Assume a default fuel value, say 25f, or customizable on WorldObject or ItemData if we had it.
+                        // We can also check if the WorldObject has a weight value or default to 25f.
+                        float fuelVal = 25f;
+                        if (_carriedWo.collectItemData != null && _carriedWo.collectItemData.weight > 0f)
+                        {
+                            fuelVal = _carriedWo.collectItemData.weight * 10f; // Scale weight to fuel value
+                        }
+                        
+                        if (_lookedAtFuelTank.AddFuel(fuelVal))
+                        {
+                            // Play a fuel effect sound or message
+                            ShowInfo("Refueled " + fuelVal + " units!");
+                            
+                            GameObject objToDestroy = _carriedRb.gameObject;
+                            Drop(); // Release carried object
+                            if (Application.isPlaying) Destroy(objToDestroy);
+                            else UnityEngine.Object.DestroyImmediate(objToDestroy);
+                            
+                            ClearPrompts();
+                            return;
+                        }
+                        else
+                        {
+                            ShowInfo("Fuel Tank is already full!");
+                        }
+                    }
+                    else
+                    {
+                        ShowInfo("This item cannot be used as fuel.");
+                    }
+                }
+                else
+                {
+                    ShowInfo("Need to hold fuel to refuel!");
+                }
+            }
+            else if (_lookedAt != null && _lookedAt.interactable)
             {
                 _lookedAt.TriggerInteract(gameObject);
                 _lookedAt.PlayInteractAnim();
