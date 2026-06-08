@@ -9,9 +9,9 @@ public class VolumetricCloudFeature : ScriptableRendererFeature
     {
         [Header("Heights")]
         [Tooltip("Minimum altitude of the clouds in world space.")]
-        public float minHeight = 1000f;
+        public float minHeight = 3500f;
         [Tooltip("Maximum altitude of the clouds in world space.")]
-        public float maxHeight = 2000f;
+        public float maxHeight = 5500f;
 
         [Header("Densities & Shapes")]
         [Range(0.1f, 10.0f)] public float densityScale = 1.5f;
@@ -81,6 +81,21 @@ public class VolumetricCloudFeature : ScriptableRendererFeature
     
     public static VolumetricCloudFeature Instance { get; private set; }
 
+    /// <summary>
+    /// Runtime API: override cloud altitude band without touching the asset.
+    /// Call this from a game manager if terrain height requires different cloud layers.
+    /// Pass 0,0 to reset to the values configured on this asset.
+    /// </summary>
+    public static void SetHeights(float minH, float maxH)
+    {
+        if (Instance == null) return;
+        if (minH > 0f) Instance.settings.minHeight = minH;
+        if (maxH > 0f) Instance.settings.maxHeight = maxH;
+        // Push immediately so the next render frame picks them up
+        Shader.SetGlobalFloat("_CloudMinHeight", Instance.settings.minHeight);
+        Shader.SetGlobalFloat("_CloudMaxHeight", Instance.settings.maxHeight);
+    }
+
     private VolumetricCloudPass _cloudPass;
     private Texture3D _baseNoiseTex;
     private Texture3D _detailNoiseTex;
@@ -117,8 +132,10 @@ public class VolumetricCloudFeature : ScriptableRendererFeature
 
     public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
     {
-        // Skip rendering in Scene View to keep the workspace visible for editing
-        if (renderingData.cameraData.cameraType == CameraType.SceneView)
+        // Skip rendering in Scene View, Preview, and Reflection cameras to prevent rendering crashes!
+        if (renderingData.cameraData.cameraType == CameraType.SceneView ||
+            renderingData.cameraData.cameraType == CameraType.Preview ||
+            renderingData.cameraData.cameraType == CameraType.Reflection)
         {
             return;
         }
@@ -494,6 +511,7 @@ public class VolumetricCloudPass : ScriptableRenderPass
     private Texture3D _detailNoise;
     private RTHandle _lowResCloudTexture;
 
+
     private static readonly int BaseNoiseTexId = Shader.PropertyToID("_BaseNoiseTex");
     private static readonly int DetailNoiseTexId = Shader.PropertyToID("_DetailNoiseTex");
     private static readonly int CloudMinHeightId = Shader.PropertyToID("_CloudMinHeight");
@@ -521,6 +539,8 @@ public class VolumetricCloudPass : ScriptableRenderPass
     private static readonly int MaxRenderDistanceId = Shader.PropertyToID("_MaxRenderDist");
     private static readonly int FarDistanceOptimizationId = Shader.PropertyToID("_FarDist");
     private static readonly int FarStepCountId = Shader.PropertyToID("_FarSteps");
+    private static readonly int InvViewProjId = Shader.PropertyToID("_InvViewProj");
+    private static readonly int ShaderReversedZId = Shader.PropertyToID("_ShaderReversedZ");
 
     public VolumetricCloudPass(VolumetricCloudFeature.CloudSettings settings)
     {
@@ -543,9 +563,10 @@ public class VolumetricCloudPass : ScriptableRenderPass
             if (_material != null)
             {
                 CoreUtils.Destroy(_material);
+                _material = null;
             }
 
-            if (_settings.cloudShader != null)
+            if (_settings.cloudShader != null && !_settings.cloudShader.name.Contains("Internal-Loading"))
             {
                 _material = CoreUtils.CreateEngineMaterial(_settings.cloudShader);
             }
@@ -554,9 +575,16 @@ public class VolumetricCloudPass : ScriptableRenderPass
 
     public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
     {
+        // Force the camera to generate a depth texture
+        if (renderingData.cameraData.camera != null)
+        {
+            renderingData.cameraData.camera.depthTextureMode |= DepthTextureMode.Depth;
+        }
+
         // Explicitly configure the camera color target as the render target for this pass.
         // This prevents URP from optimizing the pass away and ensures depth textures are bound correctly.
         ConfigureTarget(renderingData.cameraData.renderer.cameraColorTargetHandle);
+        ConfigureInput(ScriptableRenderPassInput.Depth);
 
         if (_settings.resolutionScale != VolumetricCloudFeature.CloudSettings.ResolutionScale.Full)
         {
@@ -564,7 +592,7 @@ public class VolumetricCloudPass : ScriptableRenderPass
             desc.depthBufferBits = 0;
             desc.colorFormat = RenderTextureFormat.ARGB32;
             desc.sRGB = renderingData.cameraData.cameraTargetDescriptor.sRGB;
-            
+
             int scale = (int)_settings.resolutionScale;
             desc.width = Mathf.Max(1, desc.width / scale);
             desc.height = Mathf.Max(1, desc.height / scale);
@@ -577,13 +605,28 @@ public class VolumetricCloudPass : ScriptableRenderPass
     {
         // Ultimate Defensive Guard: If the shader is currently compiling, bound to 
         // Unity's placeholder shader, or missing our properties, abort execution early.
-        if (_material == null || _material.shader == null || 
+        if (_settings.cloudShader == null || _settings.cloudShader.name.Contains("Internal-Loading") ||
+            _material == null || _material.shader == null || 
             _material.shader.name.Contains("Internal-Loading") || 
             !_material.HasProperty("_BaseNoiseTex") ||
             _baseNoise == null || _detailNoise == null) 
             return;
 
+        var colorHandle = renderingData.cameraData.renderer.cameraColorTargetHandle;
+        if (colorHandle == null)
+            return;
+
+        if (_settings.resolutionScale != VolumetricCloudFeature.CloudSettings.ResolutionScale.Full && _lowResCloudTexture == null)
+            return;
+
         CommandBuffer cmd = CommandBufferPool.Get("Volumetric Clouds");
+
+        // Compute Inverse View-Projection Matrix
+        Matrix4x4 proj = renderingData.cameraData.GetGPUProjectionMatrix();
+        Matrix4x4 view = renderingData.cameraData.GetViewMatrix();
+        Matrix4x4 gpuVP = proj * view;
+        _material.SetMatrix(InvViewProjId, gpuVP.inverse);
+        _material.SetFloat(ShaderReversedZId, SystemInfo.usesReversedZBuffer ? 1.0f : 0.0f);
 
         // Pass Settings to the material
         _material.SetTexture(BaseNoiseTexId, _baseNoise);
@@ -633,7 +676,7 @@ public class VolumetricCloudPass : ScriptableRenderPass
         if (_settings.resolutionScale == VolumetricCloudFeature.CloudSettings.ResolutionScale.Full || _lowResCloudTexture == null)
         {
             // Full resolution: direct composite using Pass 0 (Blend SrcAlpha OneMinusSrcAlpha)
-            cmd.Blit(Texture2D.blackTexture, renderingData.cameraData.renderer.cameraColorTargetHandle, _material, 0);
+            cmd.Blit(Texture2D.blackTexture, colorHandle, _material, 0);
         }
         else
         {
@@ -645,7 +688,7 @@ public class VolumetricCloudPass : ScriptableRenderPass
             cmd.Blit(Texture2D.blackTexture, _lowResCloudTexture, _material, 1);
 
             // Pass 2 (Blend SrcAlpha OneMinusSrcAlpha): correct upscale-composite to camera
-            cmd.Blit(_lowResCloudTexture, renderingData.cameraData.renderer.cameraColorTargetHandle, _material, 2);
+            cmd.Blit(_lowResCloudTexture, colorHandle, _material, 2);
         }
 
         context.ExecuteCommandBuffer(cmd);

@@ -6,8 +6,12 @@ public class SnowAccumulationManager : MonoBehaviour
 
     [Header("Snow Map Settings")]
     public int mapResolution = 1024;
-    public float mapWorldSize = 100f;
+    [Tooltip("World-space diameter of the snow coverage area. This follows the player so snow is always global.")]
+    public float mapWorldSize = 512f;
+    [Tooltip("Auto-updated at runtime to follow the player. Do not set manually.")]
     public Vector3 mapCenter = Vector3.zero;
+    [Tooltip("How many world-units the player must move before the snow map re-centers. Prevents constant flickering.")]
+    public float trackingSnapInterval = 64f;
 
     [Header("Resources")]
     public Shader modificationShader;
@@ -177,15 +181,48 @@ public class SnowAccumulationManager : MonoBehaviour
         }
     }
 
-    // --- 调试代码：用于输出 RenderTexture 中心的最大高度 ---
+    private void AccumulateGlobalSnow()
+    {
+        if (modificationMaterial == null || snowHeightMap == null || globalSnowRate <= 0f) return;
+
+        modificationMaterial.SetVector("_BrushStrength", new Vector4(globalSnowRate * Time.deltaTime, 0, 0, 0));
+        
+        Vector4 snowParams = new Vector4(mapCenter.x, mapCenter.z, mapWorldSize, 1f / mapWorldSize);
+        modificationMaterial.SetVector("_SnowMapParams", snowParams);
+
+        RenderTexture tempRT = RenderTexture.GetTemporary(snowHeightMap.descriptor);
+        
+        // Pass 3: Global Accumulation
+        Graphics.Blit(snowHeightMap, tempRT, modificationMaterial, 3);
+        Graphics.Blit(tempRT, snowHeightMap);
+
+        RenderTexture.ReleaseTemporary(tempRT);
+    }
+
     private void Update()
     {
+        // ── Track player so snow coverage is always global ──────────────────
+        Transform tracker = ResolveTrackingTarget();
+        if (tracker != null)
+        {
+            // Snap to a grid to avoid the snow map sliding pixel-by-pixel every frame
+            float snap = trackingSnapInterval;
+            float snappedX = Mathf.Round(tracker.position.x / snap) * snap;
+            float snappedZ = Mathf.Round(tracker.position.z / snap) * snap;
+            Vector3 newCenter = new Vector3(snappedX, 0f, snappedZ);
+
+            if (newCenter != mapCenter)
+            {
+                mapCenter = newCenter;
+                // Re-push shader params immediately after center shift
+                UpdateGlobalShaderParams();
+            }
+        }
+
         UpdateOcclusionMap();
+        AccumulateGlobalSnow();
+        UpdateGlobalShaderParams();
 
-
-
-        UpdateGlobalShaderParams(); // Ensure params are always synced, even if mapCenter is modified externally
-        
         if (Input.GetKeyDown(KeyCode.P))
         {
             DebugSnowHeight();
@@ -200,8 +237,33 @@ public class SnowAccumulationManager : MonoBehaviour
         {
             Shader.SetGlobalFloat("_SnowDebugGreen", 0f);
         }
+    }
 
-        UpdateOcclusionMap();
+    private Transform ResolveTrackingTarget()
+    {
+        // Re-use the already-assigned playerCar reference if it is still valid
+        if (playerCar != null && playerCar.gameObject.activeInHierarchy)
+            return playerCar;
+
+        // Otherwise search in the same priority order as WorldStreamer
+        GameObject player = GameObject.FindGameObjectWithTag("Player");
+        if (player != null && player.activeInHierarchy)
+        {
+            playerCar = player.transform;
+            return playerCar;
+        }
+
+        var rv = FindObjectOfType<RVSystem.RVController>();
+        if (rv != null && rv.gameObject.activeInHierarchy)
+        {
+            playerCar = rv.transform;
+            return playerCar;
+        }
+
+        if (Camera.main != null)
+            return Camera.main.transform;
+
+        return null;
     }
 
     private void DebugSnowHeight()

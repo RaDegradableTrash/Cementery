@@ -101,7 +101,7 @@ Shader "Hidden/SnowModification"
             fixed4 frag (v2f i) : SV_Target {
                 float current = tex2D(_MainTex, i.uv).r;
                 float occlusion = tex2D(_OcclusionMap, i.uv).r;
-                return saturate(current + _BrushStrength.x * occlusion * unity_DeltaTime.x);
+                return saturate(current + _BrushStrength.x * occlusion);
             }
             ENDCG
         }
