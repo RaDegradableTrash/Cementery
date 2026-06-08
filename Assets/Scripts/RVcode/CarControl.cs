@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using TMPro;
 
+[RequireComponent(typeof(AudioSource))]
 public class CarControl : MonoBehaviour
 {
     public enum GearMode
@@ -61,6 +62,9 @@ public class CarControl : MonoBehaviour
     private float shiftTimer = 0f;
     private float smoothEngineRpm = 500f;
 
+    // 暴露给外部脚本（如相机晃动脚本）访问的平滑发动机转速接口
+public float SmoothEngineRpm => smoothEngineRpm;
+
     [Header("Control Override")]
     [SerializeField] private bool activeControl = false;
     public bool ActiveControl { get => activeControl; set => activeControl = value; }
@@ -71,15 +75,15 @@ public class CarControl : MonoBehaviour
     [SerializeField] private float speedMultiplier = 1f;
     [SerializeField] private Transform steeringWheel;
     [SerializeField] private Vector3 steeringWheelLocalAxis = new Vector3(0, 0, 1);
-    [SerializeField] private float steeringWheelMaxTurn = 540f; // degrees (1.5 turns)
+    [SerializeField] private float steeringWheelMaxTurn = 540f;
     [SerializeField] private bool invertSteeringWheel = false;
-    [SerializeField] private float steeringResponseSpeed = 45f; // degrees per second
-    [SerializeField] private float steeringReturnSpeed = 120f; // degrees per second
+    [SerializeField] private float steeringResponseSpeed = 45f;
+    [SerializeField] private float steeringReturnSpeed = 120f;
     [SerializeField] private float steeringReturnMinSpeedKmh = 1f;
-    [SerializeField] private float innerSteerAngle = 37f; // degrees
-    [SerializeField] private float outerSteerAngle = 25f; // degrees
-    [SerializeField] private float l6ThrottleRise = 0.4f; // per second
-    [SerializeField] private float l6ThrottleFall = 0.8f; // per second
+    [SerializeField] private float innerSteerAngle = 37f;
+    [SerializeField] private float outerSteerAngle = 25f;
+    [SerializeField] private float l6ThrottleRise = 0.4f;
+    [SerializeField] private float l6ThrottleFall = 0.8f;
     [SerializeField] private AnimationCurve l6TorqueBySpeed = new AnimationCurve(
         new Keyframe(0f, 1f),
         new Keyframe(10f, 1f),
@@ -104,13 +108,33 @@ public class CarControl : MonoBehaviour
         new Keyframe(160f, 0.0205f)
     );
 
+    // ========== 引擎声音参数 ==========
+    [Header("Engine Audio")]
+    [Range(0f, 0.8f)] public float engineMasterVolume = 0.5f;
+    [Range(0.05f, 0.25f)] public float pulseWidth = 0.12f;
+    [Range(0f, 1f)] public float pulseSharpness = 0.6f;
+    [Range(0f, 1f)] public float exhaustResonance = 0.7f;
+    [Range(0f, 1f)] public float exhaustDrone = 0.4f;
+    [Range(0f, 1f)] public float intakeSound = 0.5f;
+    [Range(0f, 1f)] public float turboWhine = 0.6f;
+    [Range(0f, 0.15f)] public float mechanicalNoise = 0.07f;
+    [Range(0f, 0.3f)] public float cylinderImbalance = 0.15f;
+
     WheelControl[] wheels;
     Rigidbody rigidBody;
     private float currentSteerAngle;
     private float currentSpeedKmh;
     private float l6ThrottleCurrent;
     private readonly HashSet<WheelControl> sixLockWheelSet = new HashSet<WheelControl>();
-    private ScaniaV8EngineSimulator engineSimulator;
+    
+    // 引擎声音相关变量
+    private float engineLoad = 0f;
+    private double phase;
+    private double exhaustPhase;
+    private double intakePhase;
+    private double turboPhase;
+    private double samplingRate;
+    private uint noiseSeed = 123456789u;
 
     public void SetGear(GearMode gear)
     {
@@ -230,16 +254,14 @@ public class CarControl : MonoBehaviour
 
     private float GetStableWheelRpm(float forwardSpeed)
     {
-        float radius = 0.35f; // Fallback radius
+        float radius = 0.35f;
         if (wheels != null && wheels.Length > 0 && wheels[0] != null && wheels[0].WheelCollider != null)
         {
             radius = wheels[0].WheelCollider.radius;
         }
-        // Wheel RPM = Velocity (m/s) * 60 / (2 * PI * Radius)
         return (Mathf.Abs(forwardSpeed) * 60f) / (2f * Mathf.PI * radius);
     }
 
-    // Start is called before the first frame update
     void Start()
     {
         rigidBody = GetComponent<Rigidbody>();
@@ -249,14 +271,23 @@ public class CarControl : MonoBehaviour
             startProcedure = FindObjectOfType<StartProcedure>();
         }
 
-        // Adjust center of mass vertically, to help prevent the car from rolling
         rigidBody.centerOfMass += Vector3.up * centreOfGravityOffset;
 
-        // Find all child GameObjects that have the WheelControl script attached
         wheels = GetComponentsInChildren<WheelControl>();
         BuildSixLockWheelSet();
-        engineSimulator = GetComponent<ScaniaV8EngineSimulator>();
-        // Record initial local rotation of steering wheel (if assigned)
+        
+        // 初始化 AudioSource
+        AudioSource audioSource = GetComponent<AudioSource>();
+        if (audioSource != null)
+        {
+            audioSource.playOnAwake = false;
+            audioSource.loop = true;
+            audioSource.spatialBlend = 0f;
+            audioSource.Play();
+        }
+        
+        samplingRate = AudioSettings.outputSampleRate;
+        
         if (steeringWheel != null)
         {
             steeringWheelInitialLocalRotation = steeringWheel.localRotation;
@@ -274,7 +305,6 @@ public class CarControl : MonoBehaviour
         }
     }
 
-    // Update is called once per frame
     void Update()
     {
         if (startProcedure != null)
@@ -288,19 +318,15 @@ public class CarControl : MonoBehaviour
         float rawVertical = activeControl ? Input.GetAxis("Vertical") : 0f;
         float hInputRaw = activeControl ? Input.GetAxisRaw("Horizontal") : 0f;
 
-        // Calculate current speed in relation to the forward direction of the car
-        // (this returns a negative number when traveling backwards)
         float forwardSpeed = Vector3.Dot(transform.forward, rigidBody.velocity);
 
-        // Update speed display in km/h
         float displaySpeed = Mathf.Abs(forwardSpeed) * 3.6f * speedMultiplier;
         currentSpeedKmh = displaySpeed;
         if (speedDisplay != null)
         {
-            speedDisplay.text = Mathf.Round(displaySpeed).ToString() + "";
+            speedDisplay.text = Mathf.Round(displaySpeed).ToString() + " km/h";
         }
 
-        // Calculate motor torque factor using Unity's forwardSpeed (m/s)
         float speedFactorMotor = Mathf.InverseLerp(0, maxSpeed, forwardSpeed);
 
         float requestedMotorTorque = motorTorque;
@@ -318,18 +344,14 @@ public class CarControl : MonoBehaviour
             requestedMotorTorque *= Mathf.Clamp01(l6TorqueBySpeed.Evaluate(displaySpeed));
         }
 
-        // Use that to calculate how much torque is available (zero torque at top speed)
         float currentMotorTorque = Mathf.Lerp(requestedMotorTorque, 0, speedFactorMotor);
 
-        // Calculate steering limit multiplier from speed (km/h)
-        // Higher speed means a smaller allowed steering angle.
         float steeringLimitMultiplier = Mathf.Clamp01(steeringLimitBySpeed.Evaluate(displaySpeed));
         bool steeringLocked = currentGear == GearMode.Park;
         float outerMaxAngle = outerSteerAngle * steeringLimitMultiplier;
         float innerMaxAngle = innerSteerAngle * steeringLimitMultiplier;
         float currentMaxWheelSteerAngle = outerMaxAngle;
 
-        // Prepare accumulators to compute actual wheel steer angle average
         float sumSteerAngles = 0f;
         int steerCount = 0;
 
@@ -375,14 +397,14 @@ public class CarControl : MonoBehaviour
                 break;
         }
 
-            if (!engineOn)
-            {
-                throttleInput = 0f;
-            }
-            else if (startProcedure != null && !startProcedure.HasAnyPumpOn())
-            {
-                throttleInput = 0f;
-            }
+        if (!engineOn)
+        {
+            throttleInput = 0f;
+        }
+        else if (startProcedure != null && !startProcedure.HasAnyPumpOn())
+        {
+            throttleInput = 0f;
+        }
 
         float appliedThrottleInput = throttleInput;
         if (currentGear == GearMode.L6)
@@ -423,7 +445,7 @@ public class CarControl : MonoBehaviour
             }
         }
 
-        // --- 6-Speed Transmission & Engine RPM Calculation ---
+        // --- Transmission & Engine RPM Calculation ---
         float currentGearRatio = 0f;
         string gearString = currentGear.ToString();
 
@@ -445,10 +467,42 @@ public class CarControl : MonoBehaviour
             gearDisplay.text = gearString;
         }
 
-        // 使用物理底盘速度(forwardSpeed)算出来的稳定期望轮速，防止因为轮子打滑导致 RPM 来回乱跳
+        // ========== 用转速限制车速 ==========
+        float maxEngineRpm = 2800f;
+
+        // 获取当前车轮半径
+        float wheelRadius = 0.35f;
+        if (wheels != null && wheels.Length > 0 && wheels[0] != null && wheels[0].WheelCollider != null)
+        {
+            wheelRadius = wheels[0].WheelCollider.radius;
+        }
+
+        // 根据当前档位计算理论最高车速
+        if (currentGear == GearMode.Drive || currentGear == GearMode.Sport || IsSixLockGear(currentGear))
+        {
+            float maxWheelRpmForCurrentGear = maxEngineRpm / (currentGearRatio * finalDriveRatio);
+            float maxForwardSpeedForCurrentGear = maxWheelRpmForCurrentGear * (2f * Mathf.PI * wheelRadius) / 60f;
+            
+            // 限制 forwardSpeed 不超过理论最高速度
+            float absForwardSpeed = Mathf.Abs(forwardSpeed);
+            if (absForwardSpeed > maxForwardSpeedForCurrentGear)
+            {
+                float limitedSpeed = Mathf.Sign(forwardSpeed) * maxForwardSpeedForCurrentGear;
+                
+                // 修正刚体速度
+                Vector3 currentVel = rigidBody.velocity;
+                float currentSideways = Vector3.Dot(transform.right, currentVel);
+                float currentUp = Vector3.Dot(transform.up, currentVel);
+                rigidBody.velocity = transform.forward * limitedSpeed + transform.right * currentSideways + transform.up * currentUp;
+                
+                forwardSpeed = limitedSpeed;
+            }
+        }
+        // ============================================
+
         float absWheelRpm = GetStableWheelRpm(forwardSpeed);
         float calculatedEngineRpm = absWheelRpm * currentGearRatio * finalDriveRatio;
-        float targetEngineRpm = Mathf.Max(engineMinRpm, calculatedEngineRpm);
+        float targetEngineRpm = Mathf.Max(engineMinRpm, Mathf.Min(calculatedEngineRpm, maxEngineRpm));
 
         // Auto-Shift Logic
         if (shiftTimer <= 0f && (currentGear == GearMode.Drive || currentGear == GearMode.Sport || IsSixLockGear(currentGear)))
@@ -468,8 +522,8 @@ public class CarControl : MonoBehaviour
         if (shiftTimer > 0f)
         {
             shiftTimer -= Time.deltaTime;
-            appliedThrottleInput = 0f;      // 换挡期间切断动力
-            targetEngineRpm = engineMinRpm; // 换挡期间转速下降
+            appliedThrottleInput = 0f;
+            targetEngineRpm = engineMinRpm;
         }
         else if (currentGear == GearMode.Park || currentGear == GearMode.Neutral)
         {
@@ -482,24 +536,25 @@ public class CarControl : MonoBehaviour
             appliedThrottleInput = 0f;
         }
 
-        // Smooth RPM interpolation
         float rpmLerpSpeed = (targetEngineRpm > smoothEngineRpm) ? 5f : 3f;
-        smoothEngineRpm = Mathf.Lerp(smoothEngineRpm, targetEngineRpm, Time.deltaTime * rpmLerpSpeed);
-
-        if (engineSimulator != null)
+        
+        if (engineOn)
         {
-            engineSimulator.currentRPM = smoothEngineRpm;
-            float targetLoad = Mathf.Abs(appliedThrottleInput);
-            float currentLoad = engineSimulator.engineLoad;
-            float newLoad = Mathf.Lerp(currentLoad, targetLoad, Time.deltaTime * 5f);
-            engineSimulator.engineLoad = newLoad;
+            smoothEngineRpm = Mathf.Lerp(smoothEngineRpm, targetEngineRpm, Time.deltaTime * rpmLerpSpeed);
         }
+        else
+        {
+            smoothEngineRpm = Mathf.Lerp(smoothEngineRpm, 0f, Time.deltaTime * 3f);
+        }
+
+        // 更新引擎负载（用于声音）
+        float targetLoad = engineOn ? Mathf.Abs(appliedThrottleInput) : 0f;
+        engineLoad = Mathf.Lerp(engineLoad, targetLoad, Time.deltaTime * 8f);
 
         if (rpmDisplay != null)
         {
-            rpmDisplay.text = Mathf.Round(smoothEngineRpm).ToString() + "";
+            rpmDisplay.text = Mathf.Round(smoothEngineRpm).ToString() + " RPM";
         }
-        // --------------------------------------------------
 
         bool steerInputActive = Mathf.Abs(hInputRaw) > 0.01f;
         float targetSteerAngle = hInputRaw * currentMaxWheelSteerAngle;
@@ -517,10 +572,8 @@ public class CarControl : MonoBehaviour
 
         foreach (var wheel in wheels)
         {
-            // Apply steering to Wheel colliders that have "Steerable" enabled
             if (wheel.steerable)
             {
-                // Set steer angle based on inner/outer wheel settings
                 float steerAngleForWheel = currentSteerAngle;
                 if (wheel.isFrontLeft || wheel.isFrontRight)
                 {
@@ -547,7 +600,6 @@ public class CarControl : MonoBehaviour
                 continue;
             }
 
-            // Apply handbrake if spacebar is pressed
             if (isHandBraking)
             {
                 wheel.WheelCollider.brakeTorque = eBrakeTorque;
@@ -569,7 +621,7 @@ public class CarControl : MonoBehaviour
                 }
             }
         }
-        // After applying wheel steer angles, map actual average wheel steer to steering wheel rotation
+        
         if (steeringWheel != null)
         {
             float avgWheelSteerAngle = steerCount > 0 ? (sumSteerAngles / steerCount) : 0f;
@@ -579,5 +631,142 @@ public class CarControl : MonoBehaviour
             float targetAngle = steeringNormalized * steeringWheelMaxTurn * dir;
             steeringWheel.localRotation = steeringWheelInitialLocalRotation * Quaternion.AngleAxis(targetAngle, steeringWheelLocalAxis);
         }
+    }
+
+    // ========== 引擎声音生成 ==========
+    private float GetDeterministicNoise()
+    {
+        noiseSeed ^= noiseSeed << 13;
+        noiseSeed ^= noiseSeed >> 17;
+        noiseSeed ^= noiseSeed << 5;
+        return (noiseSeed / (float)uint.MaxValue) * 2f - 1f;
+    }
+
+    void OnAudioFilterRead(float[] data, int channels)
+    {
+        float rpm = Mathf.Max(0, smoothEngineRpm);
+        float rpmRatio = Mathf.Clamp01(rpm / 2800f);
+        
+        double freqIncrement = (rpm / 60.0) * 4.0 / samplingRate;
+        double exhaustIncrement = (rpm / 60.0) * 2.0 / samplingRate;
+        double intakeIncrement = (rpm / 60.0) * 8.0 / samplingRate;
+        double turboIncrement = (rpm / 60.0) * 24.0 / samplingRate;
+        
+        float vol = engineMasterVolume;
+        float pWidth = pulseWidth;
+        float sharpness = pulseSharpness;
+        float exhaustRes = exhaustResonance;
+        float exhaustDroneVal = exhaustDrone;
+        float intake = intakeSound;
+        float turbo = turboWhine;
+        float mechanical = mechanicalNoise;
+        float imbalance = cylinderImbalance;
+        
+        float idleBias = Mathf.Clamp01(1f - rpmRatio * 2f);
+        float highRpmBias = rpmRatio * rpmRatio;
+        
+        double localPhase = phase;
+        double localExhaustPhase = exhaustPhase;
+        double localIntakePhase = intakePhase;
+        double localTurboPhase = turboPhase;
+        
+        for (int i = 0; i < data.Length; i += channels)
+        {
+            localPhase += freqIncrement;
+            if (localPhase > 1.0) localPhase -= 1.0;
+            localExhaustPhase += exhaustIncrement;
+            if (localExhaustPhase > 1.0) localExhaustPhase -= 1.0;
+            localIntakePhase += intakeIncrement;
+            if (localIntakePhase > 1.0) localIntakePhase -= 1.0;
+            localTurboPhase += turboIncrement;
+            if (localTurboPhase > 1.0) localTurboPhase -= 1.0;
+            
+            float signal = 0f;
+            float phaseAngle = (float)(localPhase * Mathf.PI * 2f);
+            
+            // 点火脉冲
+            float pulse = 0f;
+            if (localPhase < pWidth)
+            {
+                float t = (float)(localPhase / pWidth);
+                float curve = Mathf.Lerp(1f - t, Mathf.Exp(-sharpness * 5f * t), sharpness);
+                pulse = curve * (1f + Mathf.Sin(phaseAngle * 0.5f) * 0.3f);
+            }
+            
+            float cylinderVar = 1f + Mathf.Sin((float)(localPhase * Mathf.PI * 32f)) * imbalance * 0.5f;
+            pulse *= cylinderVar;
+            signal += pulse * 0.7f;
+            
+            // 十字曲轴律动
+            float rumble = Mathf.Sin(phaseAngle) * 0.25f;
+            rumble += Mathf.Sin(phaseAngle * 2f) * 0.12f * rpmRatio;
+            rumble += Mathf.Sin(phaseAngle * 3f) * 0.06f * highRpmBias;
+            signal += rumble;
+            
+            // 排气系统
+            float exhaustAngle = (float)(localExhaustPhase * Mathf.PI * 2f);
+            float exhaust = 0f;
+            exhaust += Mathf.Sin(exhaustAngle * 2f) * 0.4f * exhaustRes;
+            exhaust += Mathf.Sin((float)(localPhase * Mathf.PI * 0.8f)) * 0.3f * exhaustDroneVal * idleBias;
+            exhaust += Mathf.Exp(-Mathf.Abs(Mathf.Sin(exhaustAngle))) * 0.2f;
+            signal += exhaust * 0.3f;
+            
+            // 进气系统
+            float intakeAngle = (float)(localIntakePhase * Mathf.PI * 2f);
+            float intakeSig = 0f;
+            float intakeBias = Mathf.Sin(rpmRatio * Mathf.PI) * 0.8f;
+            intakeSig += Mathf.Sin(intakeAngle) * 0.4f * intakeBias;
+            intakeSig += Mathf.Sin(intakeAngle * 3f) * 0.15f * highRpmBias;
+            signal += intakeSig * intake;
+            
+            // 涡轮
+            float turboAngle = (float)(localTurboPhase * Mathf.PI * 2f);
+            float turbosound = 0f;
+            if (rpmRatio > 0.4f)
+            {
+                float turboStrength = Mathf.Clamp01((rpmRatio - 0.4f) / 0.6f);
+                turbosound += Mathf.Sin(turboAngle) * 0.25f * turboStrength;
+                turbosound += Mathf.Sin(turboAngle * 2.3f) * 0.12f * turboStrength;
+                if (highRpmBias > 0.6f)
+                {
+                    turbosound += Mathf.Sin(turboAngle * 4.7f) * 0.08f;
+                }
+            }
+            signal += turbosound * turbo;
+            
+            // 机械噪音
+            float mechNoise = GetDeterministicNoise() * mechanical;
+            mechNoise *= (0.5f + rpmRatio * 0.5f);
+            signal += mechNoise;
+            
+            // 发动机负载感
+            float loadPulse = Mathf.Sin(phaseAngle * 4f) * engineLoad * 0.2f;
+            signal += loadPulse;
+            
+            // 音量包络
+            float volumeEnvelope = Mathf.Lerp(0.65f, 1.0f, rpmRatio);
+            volumeEnvelope += engineLoad * 0.2f;
+            volumeEnvelope = Mathf.Clamp01(volumeEnvelope);
+            
+            // 低通滤波
+            float filteredSignal = signal;
+            if (rpmRatio < 0.3f)
+            {
+                filteredSignal = signal * 0.7f + mechNoise * 0.3f;
+            }
+            
+            float finalSample = filteredSignal * vol * volumeEnvelope;
+            finalSample = Mathf.Clamp(finalSample, -0.95f, 0.95f);
+            
+            for (int ch = 0; ch < channels; ch++)
+            {
+                data[i + ch] = finalSample;
+            }
+        }
+        
+        phase = localPhase;
+        exhaustPhase = localExhaustPhase;
+        intakePhase = localIntakePhase;
+        turboPhase = localTurboPhase;
     }
 }
