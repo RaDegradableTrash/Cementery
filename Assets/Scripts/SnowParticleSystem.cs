@@ -22,9 +22,47 @@ public class SnowParticleSystem : MonoBehaviour
         collisionEvents = new List<ParticleCollisionEvent>();
     }
 
+    private Transform _playerTransform;
+
     private void Start()
     {
         ConfigureParticleSystemProgrammatically();
+        if (partSystem != null)
+        {
+            partSystem.Play();
+        }
+    }
+
+    private void Update()
+    {
+        if (_playerTransform == null || !_playerTransform.gameObject.activeInHierarchy)
+        {
+            _playerTransform = FindPlayer();
+        }
+
+        if (_playerTransform != null)
+        {
+            // Position the particle system above the player so that it always falls around the player
+            transform.position = new Vector3(_playerTransform.position.x, _playerTransform.position.y + 40f, _playerTransform.position.z);
+        }
+
+        if (partSystem != null && !partSystem.isPlaying)
+        {
+            partSystem.Play();
+        }
+    }
+
+    private Transform FindPlayer()
+    {
+        GameObject player = GameObject.FindGameObjectWithTag("Player");
+        if (player != null && player.activeInHierarchy)
+            return player.transform;
+
+        var rv = FindObjectOfType<RVSystem.RVController>();
+        if (rv != null && rv.gameObject.activeInHierarchy)
+            return rv.transform;
+
+        return Camera.main != null ? Camera.main.transform : null;
     }
 
     private void ConfigureParticleSystemProgrammatically()
@@ -63,7 +101,7 @@ public class SnowParticleSystem : MonoBehaviour
         var shape = partSystem.shape;
         shape.enabled = true;
         shape.shapeType = ParticleSystemShapeType.Circle;
-        shape.radius = mapSize / 1.5f; // 覆盖更广的圆形区域
+        shape.radius = 60f; // 覆盖玩家周围 60 米的圆形区域，跟随玩家移动
 
         // 5. Collision Module setup (Performance Optimized)
         var collision = partSystem.collision;
