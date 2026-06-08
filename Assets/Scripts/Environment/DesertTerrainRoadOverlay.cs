@@ -168,5 +168,54 @@ namespace EnvironmentSystem
             }
 #endif
         }
+
+        private Mesh lastTerrainMesh;
+        private Vector3[] lastTerrainVertices;
+        private Bounds lastTerrainBounds;
+
+        private void Update()
+        {
+            Transform parent = transform.parent;
+            if (parent == null) return;
+
+            MeshFilter terrainFilter = parent.GetComponent<MeshFilter>();
+            if (terrainFilter == null || terrainFilter.sharedMesh == null) return;
+
+            Mesh terrainMesh = terrainFilter.sharedMesh;
+            bool needSync = false;
+            Mesh filterMesh = GetMesh();
+
+            if (filterMesh == null)
+            {
+                needSync = true;
+            }
+            else if (terrainMesh != lastTerrainMesh)
+            {
+                needSync = true;
+            }
+            else if (!Application.isPlaying)
+            {
+                Vector3[] currentVerts = terrainMesh.vertices;
+                if (lastTerrainVertices == null || lastTerrainVertices.Length != currentVerts.Length)
+                {
+                    needSync = true;
+                }
+                else if (terrainMesh.bounds != lastTerrainBounds)
+                {
+                    needSync = true;
+                }
+            }
+
+            if (needSync)
+            {
+                SyncWithTerrain(terrainMesh);
+                lastTerrainMesh = terrainMesh;
+                if (terrainMesh != null)
+                {
+                    lastTerrainVertices = terrainMesh.vertices;
+                    lastTerrainBounds = terrainMesh.bounds;
+                }
+            }
+        }
     }
 }
