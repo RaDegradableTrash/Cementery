@@ -324,7 +324,7 @@ public float SmoothEngineRpm => smoothEngineRpm;
         currentSpeedKmh = displaySpeed;
         if (speedDisplay != null)
         {
-            speedDisplay.text = Mathf.Round(displaySpeed).ToString() + " km/h";
+            speedDisplay.text = Mathf.Round(displaySpeed).ToString() + "";//km/h
         }
 
         float speedFactorMotor = Mathf.InverseLerp(0, maxSpeed, forwardSpeed);
@@ -553,7 +553,7 @@ public float SmoothEngineRpm => smoothEngineRpm;
 
         if (rpmDisplay != null)
         {
-            rpmDisplay.text = Mathf.Round(smoothEngineRpm).ToString() + " RPM";
+            rpmDisplay.text = Mathf.Round(smoothEngineRpm).ToString() + "";//rpm
         }
 
         bool steerInputActive = Mathf.Abs(hInputRaw) > 0.01f;
