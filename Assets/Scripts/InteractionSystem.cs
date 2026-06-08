@@ -1253,6 +1253,30 @@ public class InteractionSystem : MonoBehaviour
                     }
                     // ─────────────────────────────────────────────────────────────────────
 
+                    // ── 燃料罐/瓶：通过组件类型精准识别 Fuel ─────────────────────────────────
+                    Fuel fuelItem = _carriedWo.GetComponent<Fuel>();
+                    if (fuelItem != null)
+                    {
+                        // 燃料罐固定加注 80 单位燃料（80% of maxCapacity=100）
+                        const float fuelValue = 80f;
+                        if (_lookedAtFuelTank.AddFuel(fuelValue))
+                        {
+                            ShowInfo("Refueled +" + fuelValue + " units!");
+                            GameObject fuelObj = _carriedRb.gameObject;
+                            Drop();
+                            if (Application.isPlaying) Destroy(fuelObj);
+                            else UnityEngine.Object.DestroyImmediate(fuelObj);
+                            ClearPrompts();
+                            return;
+                        }
+                        else
+                        {
+                            ShowInfo("Fuel Tank is already full!");
+                        }
+                        return;
+                    }
+                    // ─────────────────────────────────────────────────────────────────────
+
                     string itemName = _carriedWo.gameObject.name.ToLower();
                     // Check if it's fuel (simple name filter or configurable filter)
                     if (itemName.Contains(_lookedAtFuelTank.fuelItemNameFilter.ToLower()) || (_carriedWo.collectItemData != null && _carriedWo.collectItemData.itemName.ToLower().Contains(_lookedAtFuelTank.fuelItemNameFilter.ToLower())))
@@ -1413,8 +1437,30 @@ public class InteractionSystem : MonoBehaviour
         ShowInfo(obj.collectMessage);
         obj.TriggerCollect(gameObject);
 
+#if UNITY_EDITOR
+        if (obj.collectItemData == null)
+        {
+            if (obj.GetComponent<KelpLeaf>() != null)
+            {
+                obj.collectItemData = UnityEditor.AssetDatabase.LoadAssetAtPath<ItemData>("Assets/ItemData/ItemDataKelpLeaf.asset");
+                if (obj.collectItemData == null)
+                {
+                    obj.collectItemData = UnityEditor.AssetDatabase.LoadAssetAtPath<ItemData>("Assets/ItemDataKelpLeaf.asset");
+                }
+            }
+            else if (obj.GetComponent<Fuel>() != null)
+            {
+                obj.collectItemData = UnityEditor.AssetDatabase.LoadAssetAtPath<ItemData>("Assets/ItemData/ItemDataFuel.asset");
+                if (obj.collectItemData == null)
+                {
+                    obj.collectItemData = UnityEditor.AssetDatabase.LoadAssetAtPath<ItemData>("Assets/ItemDataFuel.asset");
+                }
+            }
+        }
+#endif
+
         InventoryCameraController camCtrl = GetInventoryCameraController();
-        if (openInventoryOnCollect && camCtrl != null)
+        if (camCtrl != null)
         {
             camCtrl.EnterInventoryMode(obj.collectItemData);
         }

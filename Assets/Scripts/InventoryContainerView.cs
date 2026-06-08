@@ -164,7 +164,34 @@ public class InventoryContainerView : MonoBehaviour
                 inventorySystem.gridHeight,
                 inventorySystem.gridDepth
             );
+            MakeCubeSpaceTransparent(cubeSpace);
         }
+    }
+
+    private void MakeCubeSpaceTransparent(Transform cubeSpace)
+    {
+        if (cubeSpace == null) return;
+        Renderer r = cubeSpace.GetComponent<Renderer>();
+        if (r == null) return;
+
+        Material mat = r.material;
+        if (mat == null) return;
+
+        if (mat.HasProperty("_Surface")) mat.SetFloat("_Surface", 1f);
+        if (mat.HasProperty("_Blend")) mat.SetFloat("_Blend", 0f);
+        if (mat.HasProperty("_Mode")) mat.SetFloat("_Mode", 3f);
+
+        mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+        mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+        mat.SetInt("_ZWrite", 0);
+        mat.DisableKeyword("_ALPHATEST_ON");
+        mat.EnableKeyword("_ALPHABLEND_ON");
+        mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+        mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+
+        Color semiTransColor = new Color(1f, 1f, 1f, 0.25f);
+        if (mat.HasProperty("_Color")) mat.SetColor("_Color", semiTransColor);
+        if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", semiTransColor);
     }
 
     void EnsureGridLineRoot()
@@ -381,21 +408,56 @@ public class InventoryContainerView : MonoBehaviour
         EnsurePlacedItemsRoot();
         if (instance == null || instance.item == null) return;
         
+        Vector3 size = Vector3.one;
+        Vector3 offset = Vector3.zero;
+
+        Vector3Int min = Vector3Int.zero;
+        Vector3Int max = Vector3Int.zero;
+        if (instance.item.localOffsets != null && instance.item.localOffsets.Count > 0)
+        {
+            min = instance.item.localOffsets[0];
+            max = instance.item.localOffsets[0];
+            for (int i = 1; i < instance.item.localOffsets.Count; i++)
+            {
+                Vector3Int cell = instance.item.localOffsets[i];
+                min = Vector3Int.Min(min, cell);
+                max = Vector3Int.Max(max, cell);
+            }
+            size = new Vector3(
+                Mathf.Max(1f, max.x - min.x + 1f),
+                Mathf.Max(1f, max.y - min.y + 1f),
+                Mathf.Max(1f, max.z - min.z + 1f)
+            );
+            offset = new Vector3(
+                (min.x + max.x) * 0.5f,
+                (min.y + max.y) * 0.5f,
+                (min.z + max.z) * 0.5f
+            );
+        }
+
         GameObject visual;
         if (instance.item.previewPrefab != null)
         {
             visual = Instantiate(instance.item.previewPrefab, _placedItemsRoot);
+            visual.name = $"Placed_{instance.item.itemName ?? instance.item.name}";
+            visual.transform.localScale = size;
+            visual.transform.localPosition = instance.anchor;
+            visual.transform.localRotation = instance.rotation;
         }
         else
         {
-            visual = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            visual.transform.SetParent(_placedItemsRoot, false);
-            visual.transform.localScale = new Vector3(0.9f, 0.9f, 0.9f);
+            GameObject root = new GameObject($"Placed_{instance.item.itemName ?? instance.item.name}");
+            root.transform.SetParent(_placedItemsRoot, false);
+            root.transform.localPosition = instance.anchor;
+            root.transform.localRotation = instance.rotation;
+
+            GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            cube.transform.SetParent(root.transform, false);
+            cube.transform.localScale = size * 0.95f;
+            cube.transform.localPosition = offset;
+            
+            visual = root;
         }
-        
-        visual.name = $"Placed_{instance.item.itemName ?? instance.item.name}";
-        visual.transform.localPosition = instance.anchor;
-        visual.transform.localRotation = instance.rotation;
         
         // Disable physics components as this is purely visual inside the inventory
         var colliders = visual.GetComponentsInChildren<Collider>(true);
@@ -403,8 +465,9 @@ public class InventoryContainerView : MonoBehaviour
         var rbs = visual.GetComponentsInChildren<Rigidbody>(true);
         foreach (var rb in rbs) 
         {
-            if (Application.isPlaying) Destroy(rb);
-            else DestroyImmediate(rb);
+            rb.isKinematic = true;
+            rb.useGravity = false;
+            rb.detectCollisions = false;
         }
         
         var renderers = visual.GetComponentsInChildren<Renderer>(true);

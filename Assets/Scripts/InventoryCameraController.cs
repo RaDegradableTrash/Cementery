@@ -45,6 +45,7 @@ public class InventoryCameraController : MonoBehaviour
 
     private static InventoryCameraController _primaryController;
     private bool inventoryActive = false;
+    private int _openedFrameCount = -1;
     private ItemData lastPreviewItem;
     private Renderer[] _cachedRenderers;
     private float _nextCullingTickTime;
@@ -147,7 +148,11 @@ public class InventoryCameraController : MonoBehaviour
             }
 
             if (inventoryActive)
+            {
+                if (Time.frameCount == _openedFrameCount)
+                    return;
                 CloseInventoryFromKey();
+            }
             else
                 EnterInventoryMode(null);
 
@@ -223,6 +228,10 @@ public class InventoryCameraController : MonoBehaviour
         }
 
         inventoryActive = active;
+        if (active)
+        {
+            _openedFrameCount = Time.frameCount;
+        }
         if (mainCamera != null) mainCamera.enabled = !active;
         if (inventoryCamera != null) inventoryCamera.enabled = active;
         if (inventoryRoot != null) inventoryRoot.SetActive(active);
@@ -243,6 +252,9 @@ public class InventoryCameraController : MonoBehaviour
 
     public static InventoryCameraController GetPrimaryController()
     {
+        if (_primaryController != null && _primaryController.inventoryActive)
+            return _primaryController;
+
         if (_primaryController == null || (_primaryController.mainCamera != null && !_primaryController.mainCamera.enabled))
             _primaryController = SelectPrimaryController();
 
