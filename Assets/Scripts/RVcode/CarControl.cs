@@ -27,8 +27,10 @@ public class CarControl : MonoBehaviour
     [SerializeField] private bool electricalPowerOn = true;
     public bool ElectricalPowerOn => electricalPowerOn;
     public event System.Action<bool> OnElectricalPowerChanged;
+
     [Header("Start Procedure")]
-    [SerializeField] private StartProcedure startProcedure;
+[SerializeField] private StartProcedure startProcedure;
+[SerializeField] private bool startWithEngineRunning = false;  // 新增：是否以启动状态开始
 
     [Header("Modes")]
     [SerializeField] private float sportTorque = 50000f;
@@ -293,16 +295,37 @@ public float SmoothEngineRpm => smoothEngineRpm;
             steeringWheelInitialLocalRotation = steeringWheel.localRotation;
         }
 
-        SetGearInternal(startGear, true);
-        SetEngineOn(engineOn);
-        if (startProcedure != null)
-        {
-            SetElectricalPower(startProcedure.HasAnyBatteryOn());
-        }
-        else
-        {
-            SetElectricalPower(true);
-        }
+SetGearInternal(startGear, true);
+
+// 新增：根据 startWithEngineRunning 决定初始状态
+if (startWithEngineRunning)
+{
+    // 强制启动状态：引擎开，电源开
+    SetEngineOn(true);
+    SetElectricalPower(true);
+    
+    // 如果有 StartProcedure 组件，也同步其状态
+    if (startProcedure != null)
+    {
+        // 使用反射或公共方法强制启动 StartProcedure
+        // 由于 StartProcedure 可能需要启动油泵等，我们直接调用其公共方法（如果有的话）
+        // 如果没有，至少确保电源和引擎状态同步
+        startProcedure.ForceStartVehicle(); // 需要你在 StartProcedure 中添加这个方法
+    }
+}
+else
+{
+    // 原来的逻辑
+    SetEngineOn(engineOn);
+    if (startProcedure != null)
+    {
+        SetElectricalPower(startProcedure.HasAnyBatteryOn());
+    }
+    else
+    {
+        SetElectricalPower(true);
+    }
+}
     }
 
     void Update()

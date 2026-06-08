@@ -134,6 +134,33 @@ public class StartProcedure : MonoBehaviour
         OnStateChanged?.Invoke();
     }
 
+
+    public void ForceStartVehicle()
+{
+    // 强制打开所有电池
+    for (int i = 0; i < batteries.Length; i++)
+    {
+        batteries[i] = true;
+    }
+    
+    // 强制打开左右油泵
+    leftPumpOn = true;
+    rightPumpOn = true;
+    
+    // 强制启动引擎
+    engineOn = true;
+    
+    // 同步到 CarControl
+    if (carControl != null)
+    {
+        carControl.SetEngineOn(true);
+        carControl.SetElectricalPower(true);
+    }
+    
+    // 触发状态变更事件
+    OnStateChanged?.Invoke();
+}
+
     private bool HasAnyBatteryInternal()
     {
         for (int i = 0; i < batteries.Length; i++)
@@ -145,4 +172,6 @@ public class StartProcedure : MonoBehaviour
         }
         return false;
     }
+
+    
 }
