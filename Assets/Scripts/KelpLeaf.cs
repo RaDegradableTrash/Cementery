@@ -24,5 +24,19 @@ public class KelpLeaf : MonoBehaviour
         // Leaf is carryable, not wild-extractable
         _worldObject.interactable = false;
         _worldObject.carryable = true;
+
+        // Ensure collider exists and offset its center downwards so the visual leaf sits above the snow/ground
+        BoxCollider box = GetComponent<BoxCollider>();
+        if (box == null)
+        {
+            box = gameObject.AddComponent<BoxCollider>();
+        }
+        if (box != null)
+        {
+            // Center is zero to keep center of mass aligned, avoiding physics torque/sliding instability.
+            // Increased Y size lets the flat visual float ~17cm above the collision contact plane (above snow).
+            box.size = new Vector3(0.5f, 0.35f, 0.5f);
+            box.center = Vector3.zero;
+        }
     }
 }

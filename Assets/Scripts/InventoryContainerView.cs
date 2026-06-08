@@ -440,7 +440,7 @@ public class InventoryContainerView : MonoBehaviour
         {
             visual = Instantiate(instance.item.previewPrefab, _placedItemsRoot);
             visual.name = $"Placed_{instance.item.itemName ?? instance.item.name}";
-            visual.transform.localScale = size;
+            visual.transform.localScale = Vector3.Scale(instance.item.previewPrefab.transform.localScale, size);
             visual.transform.localPosition = instance.anchor;
             visual.transform.localRotation = instance.rotation;
         }

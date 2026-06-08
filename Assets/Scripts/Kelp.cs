@@ -660,6 +660,7 @@ public class Kelp : MonoBehaviour
 
         if (_isWild)
         {
+            _isWild = false;
             // Deactivate wild interaction since it is harvested
             _worldObject.interactable = false;
         }
