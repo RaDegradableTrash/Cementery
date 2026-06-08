@@ -122,6 +122,11 @@ namespace EnvironmentSystem
         private bool _asyncBuildRunning = false;
         private bool _asyncBuildQueued  = false;
 
+        private Coroutine _lodCoroutine = null;
+        private Material _lodMaterial = null;
+        private Material _highQualityMaterial = null;
+        private bool _isUsingLOD = false;
+
 
 
     public void UpdateResolution()
@@ -180,6 +185,62 @@ namespace EnvironmentSystem
                 SyncSnowLayer();
                 SyncRoadOverlay();
             }
+
+            _highQualityMaterial = terrainMaterial;
+            if (_highQualityMaterial == null)
+            {
+                _highQualityMaterial = Resources.Load<Material>("GravelTerrain");
+                terrainMaterial = _highQualityMaterial;
+            }
+            _lodMaterial = Resources.Load<Material>("GravelTerrain_LOD");
+
+            if (TryGetComponent<MeshRenderer>(out var mr))
+            {
+                if (_highQualityMaterial != null)
+                {
+                    mr.sharedMaterial = _highQualityMaterial;
+                }
+            }
+
+            if (Application.isPlaying)
+            {
+                _lodCoroutine = StartCoroutine(LODCheckLoop());
+            }
+        }
+
+        private IEnumerator LODCheckLoop()
+        {
+            var wait = new WaitForSeconds(1.5f + Random.Range(0f, 0.5f)); // staggered to prevent spikes
+            MeshRenderer mr = GetComponent<MeshRenderer>();
+            if (mr == null) yield break;
+
+            while (true)
+            {
+                yield return wait;
+                
+                Camera mainCam = Camera.main;
+                if (mainCam != null)
+                {
+                    float dist = Vector3.Distance(transform.position + new Vector3(width * cellSize * 0.5f, 0, depth * cellSize * 0.5f), mainCam.transform.position);
+                    // Standard LOD threshold: 220 meters
+                    if (dist > 220f)
+                    {
+                        if (!_isUsingLOD && _lodMaterial != null)
+                        {
+                            mr.sharedMaterial = _lodMaterial;
+                            _isUsingLOD = true;
+                        }
+                    }
+                    else
+                    {
+                        if (_isUsingLOD && _highQualityMaterial != null)
+                        {
+                            mr.sharedMaterial = _highQualityMaterial;
+                            _isUsingLOD = false;
+                        }
+                    }
+                }
+            }
         }
 
         private void OnDisable()
@@ -187,6 +248,12 @@ namespace EnvironmentSystem
             SceneManager.sceneLoaded -= OnSceneLoaded;
             ChunkRegistry.Unregister(this);
             _asyncBuildRunning = false;
+            if (_lodCoroutine != null)
+            {
+                StopCoroutine(_lodCoroutine);
+                _lodCoroutine = null;
+            }
+            _isUsingLOD = false;
         }
 
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)

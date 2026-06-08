@@ -1227,6 +1227,32 @@ public class InteractionSystem : MonoBehaviour
                 // Try to refuel with held item
                 if (_carriedWo != null)
                 {
+                    // ── 叶片燃料：通过组件类型精准识别 KelpLeaf，不依赖物体名称 ──────────
+                    KelpLeaf kelpLeaf = _carriedWo.GetComponent<KelpLeaf>();
+                    if (kelpLeaf != null)
+                    {
+                        // 每片叶片固定加注 5 单位燃料（5% of maxCapacity=100）
+                        const float leafFuelValue = 5f;
+                        if (_lookedAtFuelTank.AddFuel(leafFuelValue))
+                        {
+                            ShowInfo("Refueled +" + leafFuelValue + " units!");
+                            // 叶片使用后销毁（每个叶片 GameObject 代表一片叶）
+                            GameObject leafObj = _carriedRb.gameObject;
+                            Drop();
+                            if (Application.isPlaying) Destroy(leafObj);
+                            else UnityEngine.Object.DestroyImmediate(leafObj);
+                            ClearPrompts();
+                            return;
+                        }
+                        else
+                        {
+                            ShowInfo("Fuel Tank is already full!");
+                        }
+                        // 已确认是叶片，无论成功与否都不再进行通用燃料检查
+                        return;
+                    }
+                    // ─────────────────────────────────────────────────────────────────────
+
                     string itemName = _carriedWo.gameObject.name.ToLower();
                     // Check if it's fuel (simple name filter or configurable filter)
                     if (itemName.Contains(_lookedAtFuelTank.fuelItemNameFilter.ToLower()) || (_carriedWo.collectItemData != null && _carriedWo.collectItemData.itemName.ToLower().Contains(_lookedAtFuelTank.fuelItemNameFilter.ToLower())))

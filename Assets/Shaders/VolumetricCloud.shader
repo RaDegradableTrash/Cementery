@@ -42,17 +42,8 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
     {
         Tags { "RenderType" = "Transparent" "RenderPipeline" = "UniversalPipeline" }
         ZTest Always ZWrite Off Cull Off
-        Blend SrcAlpha OneMinusSrcAlpha
 
-        Pass
-        {
-            Name "Volumetric Clouds"
-            //非常好云层
-
-            HLSLPROGRAM
-            #pragma vertex FullscreenVert
-            #pragma fragment Fragment
-
+        HLSLINCLUDE
             // Added shadow keywords to receive geometry shadows
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE
             #pragma multi_compile _ _SHADOWS_SOFT
@@ -64,6 +55,8 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
             // 3D Textures
             TEXTURE3D(_BaseNoiseTex);
             TEXTURE3D(_DetailNoiseTex);
+            
+
 
             CBUFFER_START(UnityPerMaterial)
                 float _CloudMinHeight;
@@ -91,6 +84,8 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
                 float _MaxRenderDist;
                 float _FarDist;
                 float _FarSteps;
+                float4x4 _InvViewProj;
+                float _ShaderReversedZ;
             CBUFFER_END
 
             struct Attributes
@@ -163,8 +158,6 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
                 float3 detailScaleVec = float3(_DetailScale, _DetailScale / _VerticalStretch, _DetailScale);
 
                 // --- 1. PROCEDURAL VERTICAL RANDOMNESS (纵向随机弯曲与起伏) ---
-                // We sample a low-frequency noise based on horizontal coordinates to shift the vertical space.
-                // This is 100% continuous and creates organic, wavy shapes without any block seams!
                 float2 uvwVertShift = pos.xz * (_BaseScale * 0.4) + _BaseWindSpeed.xz * _Time.y * 0.15;
                 float vertShiftNoise = SAMPLE_TEXTURE3D(_BaseNoiseTex, sampler_LinearRepeat, float3(uvwVertShift.x, 0.5, uvwVertShift.y)).r;
                 
@@ -173,7 +166,6 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
                 warpedPos.y += (vertShiftNoise - 0.5) * 500.0 * _VerticalRandomness;
 
                 // --- 2. MULTI-SCALE DYNAMIC HEIGHT ENVELOPE (宏观高度遮罩) ---
-                // Sample unwarped base noise to determine the height range of the local cloud group
                 float3 uvwBaseRaw = pos * baseScaleVec + _BaseWindSpeed.xyz * _Time.y;
                 float baseNoiseRaw = SAMPLE_TEXTURE3D(_BaseNoiseTex, sampler_LinearRepeat, uvwBaseRaw).r;
 
@@ -193,8 +185,6 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
                 float verticalEnvelope = bottomMask * topMask;
 
                 // --- 3. 100% CONTINUOUS DOMAIN WARPING (中频空间扰动) ---
-                // Sample 3D noise continuously to construct a smooth warp vector.
-                // This is fully continuous and completely immune to grid coordinate wrapping seams!
                 float3 uvwWarp = warpedPos * (baseScaleVec * 1.5) + _BaseWindSpeed.xyz * _Time.y * 0.4;
                 float warpX = SAMPLE_TEXTURE3D(_BaseNoiseTex, sampler_LinearRepeat, uvwWarp + float3(0.1, 0.2, 0.3)).r;
                 float warpY = SAMPLE_TEXTURE3D(_BaseNoiseTex, sampler_LinearRepeat, uvwWarp + float3(0.4, 0.5, 0.6)).r;
@@ -209,9 +199,6 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
                 float baseNoise = SAMPLE_TEXTURE3D(_BaseNoiseTex, sampler_LinearRepeat, uvwBase).r;
                 
                 // --- 5. CONVECTIVE MUSHROOM SPREADING via DYNAMIC THRESHOLD (横向无缝蔓生) ---
-                // Instead of discontinuous coordinate offsets, we use a continuous vertical gradient 
-                // to shrink the cloud base and expand the cloud top horizontally!
-                // This spreads the cloud top outwards by up to 45% of the cell radius completely seamlessly!
                 float baseSpread = (1.0 - heightFactor) * _ConvectiveWarp * 0.36;
 
                 // --- 6. LOW-FREQUENCY ISLAND COVERAGE (宏观云岛分布) ---
@@ -220,13 +207,10 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
                 float coverage = SAMPLE_TEXTURE3D(_BaseNoiseTex, sampler_LinearRepeat, uvwCoverage).r;
                 
                 // --- 7. DYNAMIC RADIUS THRESHOLDING (云块体积与大小控制)
-                // Make the coverage noise higher contrast to create larger empty gaps
                 float coverageMask = smoothstep(0.32, 0.58, coverage);
                 
                 float distToCam = length(pos - _WorldSpaceCameraPos);
                 float distRatio = saturate(distToCam / _MaxRenderDist);
-                // 距离大片云（云岛）越远，(1.0 - coverageMask) 的惩罚越重（从 0.35 提至 1.5），
-                // 彻底抹除岛屿外围的细碎小云。同时随距离 distRatio 增加基础抹除率。
                 float localThreshold = _CloudThreshold * 0.5 + baseSpread + (1.0 - coverageMask) * 1.5 + distRatio * 0.25;
                 
                 // Apply vertical profile envelope directly to shape
@@ -239,12 +223,7 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
                 float3 uvwDetail = warpedPos * detailScaleVec + _DetailWindSpeed.xyz * _Time.y;
                 float detailNoise = SAMPLE_TEXTURE3D(_DetailNoiseTex, sampler_LinearRepeat, uvwDetail).r;
                 
-                // Warp the boundary of the cloud slightly outward in detailed spherical patterns (convective bubbling)
-                // Kept very gentle to make the clouds look light, clean, and通透 rather than sticky/hairy!
-                // 近实远虚：远处细节噪声衰减，减少噪点和破碎感，保留大块平滑的体积
                 float detailFade = saturate(1.0 - distRatio * 1.5);
-                // --- 8. INTENSE CAULIFLOWER CARVING & POPCORN STRUCTURE ---
-                // Increase erosion multiplier to carve deep, structured canyons into the smooth ellipse
                 float erosionModifier = lerp(0.2, 1.2, heightFactor); // Carve more at the fluffy tops, less at the flat bottoms
                 float edgeCarving = (1.0 - detailNoise) * (_DetailInfluence * detailFade) * erosionModifier * 0.7;
                 
@@ -257,8 +236,6 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
                 float finalShape = carvedShape + boundaryWarp;
 
                 // --- 9. SOLID CORE NORMALIZATION (动漫风格坚实边缘切片) ---
-                // Dividing by max(_EdgeSoftness, 0.001) scales the shape gradient, creating beautifully crisp,
-                // sharp anime-style boundaries that completely erase fuzzy/powdery pixels!
                 float normalizedDensity = saturate(finalShape / max(_EdgeSoftness, 0.001));
                 float finalDensity = saturate(normalizedDensity * _CloudDensityScale);
 
@@ -277,18 +254,10 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
                 return max(beer, backlit);
             }
 
-            
-            
-
-            
             // --- ROBUST 3D-PARALLAX CLOUD SHADOW & TYNDALL MASK ---
             float SampleShadowMask(float3 worldPos, float3 sunDir)
             {
                 if (sunDir.y <= 0.05) return 0.0;
-                
-                // To guarantee 1-to-1 correspondence with the clouds, we take 3 samples 
-                // along the sun's ray slicing through the volume. This flawlessly captures 
-                // the 3D volume shape, convective warp, and prevents low-angle sun parallax mismatches!
                 
                 float diff = _CloudMaxHeight - _CloudMinHeight;
                 float h1 = _CloudMinHeight + diff * 0.2;
@@ -334,11 +303,14 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
                 
                 // Generous skybox threshold to immunize against MSAA and depth precision filters
                 bool isSkybox = false;
-                #if UNITY_REVERSED_Z
+                if (_ShaderReversedZ > 0.5)
+                {
                     if (depth < 0.0005) isSkybox = true;
-                #else
+                }
+                else
+                {
                     if (depth > 0.9995) isSkybox = true;
-                #endif
+                }
 
                 // Reconstruct World Space camera ray
                 float3 sceneWorldPos = ComputeWorldSpacePosition(uv, depth, UNITY_MATRIX_I_VP);
@@ -365,10 +337,8 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
                     
                     if (shadow > 0.01) 
                     {
-                        // 使用更大的系数提高阴影的最暗处的深度（增强反差），同时因为 shadow 变量现在是渐变的，
-                        // 所以阴影边缘会自然过渡，同一片云也会呈现出深浅不一的质感。
                         finalColor.rgb = float3(0.0, 0.0, 0.0);
-                        finalColor.a = shadow * 0.51; // 降低到原来的 60% (0.85 * 0.6 = 0.51)，不再黑得过头
+                        finalColor.a = shadow * 0.51;
                     }
                 }
                 
@@ -377,7 +347,7 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
                 
                 if (maxTyndallDist > 20.0)
                 {
-                    int tyndallSteps = 16; // 高精度步数
+                    int tyndallSteps = 16;
                     float stepSize = maxTyndallDist / (float)tyndallSteps;
                     float accumulatedLight = 0.0;
                     
@@ -389,10 +359,7 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
                         float3 pos = rayOrigin + rayDir * t;
                         float shadowAtPos = SampleShadowMask(pos, mainLight.direction);
                         
-                        // 1.0 means full sunlight, 0.0 means shadowed by clouds
                         float illumination = pow(1.0 - shadowAtPos, 2.0);
-                        
-                        // Add light based on step distance (Riemann sum)
                         accumulatedLight += illumination * stepSize * 0.0005;
                         
                         t += stepSize;
@@ -400,11 +367,9 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
                     
                     if (accumulatedLight > 0.01)
                     {
-                        // Phase function gives sun glare
                         float phase = lerp(0.5, 3.0, pow(saturate(dot(rayDir, mainLight.direction) * 0.5 + 0.5), 3.0));
                         float3 godRayColor = _MaxLightColor.rgb * accumulatedLight * phase;
                         
-                        // Additive blending for realistic light shafts
                         finalColor.rgb += godRayColor * (1.0 - finalColor.a);
                         finalColor.a = saturate(finalColor.a + accumulatedLight * 0.3);
                     }
@@ -418,80 +383,53 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
                 // Setup raymarching parameters
                 int maxSteps = min((int)_StepCount, 64);
                 
-                // Clamp far clipping plane to maximum visible distance to concentrate steps in the active cloud area!
-                // This gives extremely high visual density and eliminates banding under macOS Metal
                 tFar = min(tFar, 160000.0);
                 
                 float stepSize = (tFar - tNear) / (float)maxSteps;
-                
-                // Use screen-space pixel position (SV_POSITION) to eliminate floating-point moire diagonal banding lines!
-                // Apply a tiny randomized step size jitter (+/- 6%) per pixel to completely smash the grid aliasing shells,
-                // making 3D texture undersampling Moire patterns 100% mathematically impossible!
                 float pixelStepSize = stepSize * (1.0 + (jitter - 0.5) * 0.12);
                 
                 [loop]
                 for (int i = 0; i < maxSteps; i++)
                 {
-                    // Full step jitter eliminates banding (slicing) at low step counts
-                    // Scale by _JitterStrength (typically 1.0 to fully hide slices)
                     float t = tNear + (float(i) + jitter * max(0.5, _JitterStrength * 2.0)) * stepSize;
                     float3 currentPos = rayOrigin + rayDir * t;
                     
                     float density = SampleCloudDensity(currentPos);
                     
-                    // Smooth distance-based fade (渐隐衰减) to dissolve clouds before they tile weirdly at the horizon
-                    // Clouds smoothly fade to 0 between 96000m and 160000m from the camera to prevent sharp circular borders (800% range)
                     float distanceFade = saturate((_MaxRenderDist - t) / (_MaxRenderDist * 0.4));
                     density *= distanceFade;
                     
                     if (density > 0.001)
                     {
-                        // Cheap One-Step Solar shadow sampling along sun direction
                         float3 shadowSamplePos = currentPos + mainLight.direction * _LightStepDistance;
                         float densityToSun = SampleCloudDensity(shadowSamplePos) * distanceFade;
                         
-                        // Calculate light absorption multiplier (太阳光自阴影衰减)
                         float lightMultiplier = LightEnergy(densityToSun, _Absorption);
                         
-                        // Forward-scattering phase glow (Silver Lining) for dynamic rim lighting
                         float cosAngle = dot(rayDir, mainLight.direction);
                         float phaseGlow = lerp(0.8, 1.8, saturate(cosAngle * 0.5 + 0.5));
                         
-                        // Direct Light term: directly coupled to mainLight color, scaled by self-shadowing and phase glow
                         float3 directLight = mainLight.color * lightMultiplier * phaseGlow * 1.3;
                         
-                        // Height factor for cloud vertical profile
                         float heightFactor = (currentPos.y - _CloudMinHeight) / (_CloudMaxHeight - _CloudMinHeight);
                         
-                        // Dynamic Ambient Sky color sampled directly from Unity's dynamic ambient probe (SH)
-                        // Safeguarded with a daylight baseline so unbaked environments never turn clouds black!
                         float3 dynamicAmbient = max(SampleSH(float3(0.1, 1.0, 0.1)), mainLight.color * 0.22);
                         
-                        // Multiple-scattering indirect light transmission (透光漫射): allows sunlight to bleed softly into backlit zones
                         float3 backlitGlow = mainLight.color * exp(-density * 0.2) * 0.28;
                         
-                        // Ambient sky dome light (boosted baseline to 58% to prevent harsh dark shadows, softened with backlit glow)
                         float3 ambientLight = _ShadowColor.rgb * (dynamicAmbient + backlitGlow) * lerp(0.58, 1.0, heightFactor);
                         
-                        // Total incoming light at this voxel (环境光与直接光求和)
                         float3 voxelLighting = ambientLight + directLight;
                         
-                        // Real-world Forward Scattering Edge Glow (边缘前向散射亮化):
-                        // Thin, wispy boundary layers scatter light intensely, making them look bright and translucent.
-                        // We blend the shadow color towards the sky light at low densities to keep edges light and通透!
                         float edgeGlowFactor = saturate(1.0 - density * 1.5);
                         float3 voxelAlbedo = lerp(_ShadowColor.rgb, _MaxLightColor.rgb, saturate(heightFactor + edgeGlowFactor * 1.6));
                         
-                        // Final cloud color is the product of albedo and lighting (乘性着色，完美保留体积自阴影与明暗梯度)
                         float3 cloudColor = voxelAlbedo * voxelLighting;
                         
-                        // Beer-Lambert law transmittance: mathematically invariant to stepSize and stepCount,
-                        // completely eliminating the contour slicing/banding artifacts!
                         float alpha = 1.0 - exp(-density * pixelStepSize * 0.0055);
                         finalColor.rgb += (1.0 - finalColor.a) * cloudColor * alpha;
                         finalColor.a += (1.0 - finalColor.a) * alpha;
                         
-                        // Early exit if cloud has reached high opacity
                         if (finalColor.a >= 0.95)
                         {
                             finalColor.a = 1.0;
@@ -501,6 +439,48 @@ Shader "Hidden/Universal Render Pipeline/VolumetricCloud"
                 }
                 
                 return finalColor;
+            }
+
+            half4 FragmentFull(Varyings input) : SV_Target
+            {
+                return Fragment(input);
+            }
+        ENDHLSL
+
+        Pass
+        {
+            Name "Volumetric Clouds Full"
+            Blend SrcAlpha OneMinusSrcAlpha
+            HLSLPROGRAM
+            #pragma vertex FullscreenVert
+            #pragma fragment FragmentFull
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Volumetric Clouds LowRes"
+            Blend Off
+            HLSLPROGRAM
+            #pragma vertex FullscreenVert
+            #pragma fragment Fragment
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Volumetric Clouds Upscale"
+            Blend SrcAlpha OneMinusSrcAlpha
+            HLSLPROGRAM
+            #pragma vertex FullscreenVert
+            #pragma fragment FragmentUpscale
+            
+            TEXTURE2D(_MainTex);
+            SAMPLER(sampler_MainTex);
+            
+            half4 FragmentUpscale(Varyings input) : SV_Target
+            {
+                return SAMPLE_TEXTURE2D(_MainTex, sampler_LinearClamp, input.uv);
             }
             ENDHLSL
         }
