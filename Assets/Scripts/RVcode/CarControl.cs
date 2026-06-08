@@ -397,6 +397,26 @@ public float SmoothEngineRpm => smoothEngineRpm;
                 break;
         }
 
+        if (engineOn)
+        {
+            if (FuelTank.SharedFuel <= 0f)
+            {
+                SetEngineOn(false);
+                if (startProcedure != null)
+                {
+                    startProcedure.ForceShutdownEngine();
+                }
+                throttleInput = 0f;
+            }
+            else
+            {
+                float baseRate = 0.5f;
+                float activeRate = 1.5f;
+                float consumption = (baseRate + Mathf.Abs(rawVertical) * activeRate) * Time.deltaTime;
+                FuelTank.SharedFuel -= consumption;
+            }
+        }
+
         if (!engineOn)
         {
             throttleInput = 0f;

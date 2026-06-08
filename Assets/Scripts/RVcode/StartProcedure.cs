@@ -60,7 +60,7 @@ public class StartProcedure : MonoBehaviour
 
     public bool CanStartEngine()
     {
-        return HasAnyBatteryOn() && (leftPumpOn || rightPumpOn);
+        return HasAnyBatteryOn() && (leftPumpOn || rightPumpOn) && FuelTank.SharedFuel > 0f;
     }
 
     public void ToggleBattery(int index)
@@ -119,6 +119,17 @@ public class StartProcedure : MonoBehaviour
         if (carControl != null)
         {
             carControl.SetEngineOn(false);
+        }
+        OnStateChanged?.Invoke();
+    }
+
+    public void ForceShutdownEngine()
+    {
+        engineOn = false;
+        if (carControl != null)
+        {
+            carControl.SetEngineOn(false);
+            carControl.SetGear(CarControl.GearMode.Park);
         }
         OnStateChanged?.Invoke();
     }
