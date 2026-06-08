@@ -103,6 +103,9 @@ public class PlayerController : NetworkBehaviour
     private bool _hasSetupKinematic = false;
     private float _startupTime;
 
+    // 🌟 核心新增：控制玩家当前是否因使用家具（躺下/坐下）而全面冻结控制器逻辑
+    public bool IsUsingFurniture { get; set; } = false;
+
     // ── Lifecycle ────────────────────────────────────────────────────────────
     void Awake()
     {
@@ -202,6 +205,14 @@ public class PlayerController : NetworkBehaviour
 
     void Update()
     {
+        // 🌟 强力拦截 1：如果正在床上或椅子上，无条件切断输入和逻辑计算，保持相机消隐
+        if (IsUsingFurniture)
+        {
+            _inputMove = Vector2.zero;
+            BobOffset = Vector3.Lerp(BobOffset, Vector3.zero, Time.deltaTime * 12f);
+            return;
+        }
+
         if (!_hasSetupKinematic)
         {
             bool shouldEnable = false;
@@ -289,26 +300,10 @@ public class PlayerController : NetworkBehaviour
                 Debug.Log("[Jump Debug] Executing FIRST JUMP!");
                 ExecuteJump();
             }
-            // 2. SECOND JUMP (Strictly for climbing walls/ledges) - Temporarily disabled per user request
-            /*
-            else if (_jumpCount == 1 && _jumpCount < maxJumps)
-            {
-                Debug.Log("[Jump Debug] Trying CLIMB/SECOND JUMP!");
-                if (TryStartClimb())
-                {
-                    Debug.Log("[Jump Debug] Climb/Double Jump success!");
-                }
-                else
-                {
-                    Debug.Log("[Jump Debug] Climb/Double Jump failed!");
-                }
-            }
-            */
         }
 
         GatherInput();
         HandleHeadBob();
-        // UpdateDebugCollisionLog(); // Commented out per user request
         TrackJumpPeak();
         HandleAnimation();
     }
@@ -349,45 +344,19 @@ public class PlayerController : NetworkBehaviour
         }
     }
 
-    private float _collisionDebugTimer = 0f;
-    private void UpdateDebugCollisionLog()
-    {
-        _collisionDebugTimer += Time.deltaTime;
-        if (_collisionDebugTimer >= 1f)
-        {
-            _collisionDebugTimer = 0f;
-            
-            CapsuleCollider col = GetComponent<CapsuleCollider>();
-            if (col == null) return;
-
-            // Calculate capsule world points
-            Vector3 point0, point1;
-            float radius = col.radius * Mathf.Max(transform.lossyScale.x, transform.lossyScale.z);
-            float height = col.height * transform.lossyScale.y;
-            Vector3 dir = Vector3.up; // Standard capsule direction is Y
-            
-            float centerOffset = (height / 2f) - radius;
-            point0 = transform.TransformPoint(col.center - dir * centerOffset);
-            point1 = transform.TransformPoint(col.center + dir * centerOffset);
-
-            // Detect all colliders in this area
-            Collider[] hits = Physics.OverlapCapsule(point0, point1, radius, ~0, QueryTriggerInteraction.Collide);
-            
-            if (hits.Length > 1) // 1 because it will always hit itself
-            {
-                string log = $"[Player Collision Debug] Touching {hits.Length - 1} other colliders:\n";
-                foreach (var hit in hits)
-                {
-                    if (hit.gameObject == gameObject) continue;
-                    log += $"- {hit.name} (Layer: {LayerMask.LayerToName(hit.gameObject.layer)}, Trigger: {hit.isTrigger}, Type: {hit.GetType().Name})\n";
-                }
-                Debug.Log(log);
-            }
-        }
-    }
-
     void FixedUpdate()
     {
+        // 🌟 强力拦截 2：如果正在靠着/躺在家具上，物理帧绝对禁止重写速度或应用物理力
+        if (IsUsingFurniture)
+        {
+            if (_rb != null)
+            {
+                _rb.velocity = Vector3.zero;
+                _rb.angularVelocity = Vector3.zero;
+            }
+            return;
+        }
+
         // 同样的逻辑应用到物理更新
         bool isNetworkActive = NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening;
         if (isNetworkActive && (!IsSpawned || !IsOwner)) return;
@@ -401,7 +370,6 @@ public class PlayerController : NetworkBehaviour
         if (IsInventoryModeActive()) return;
 
         HandleMovement();
-        // HandleJump(); // Now fully handled immediately in Update to prevent input loss
         
         // Clear collision state for the upcoming physics step
         _isTouchingWall = false;
@@ -582,10 +550,8 @@ public class PlayerController : NetworkBehaviour
         Vector3 targetVelocity = moveDir * speed;
         
         // --- Wall Slide Projection ---
-        // Prevent setting velocity into walls, which causes severe clipping and teleportation
         if (_isTouchingWall)
         {
-            // Flatten the wall normal to prevent projection from launching us into the air or ground
             Vector3 flatWallNormal = new Vector3(_wallNormal.x, 0, _wallNormal.z).normalized;
             if (flatWallNormal.sqrMagnitude > 0.001f && Vector3.Dot(targetVelocity, flatWallNormal) < 0)
             {
@@ -598,10 +564,6 @@ public class PlayerController : NetworkBehaviour
         // --- isStairs Aggressive Grip ---
         if (_isOnStairs && verticalVelocity < 0.5f)
         {
-            // FUNDAMENTAL FIX: Do not override _rb.velocity on stairs. 
-            // Forcing velocity on a ramp into a wall causes deep wedge penetration, resulting in explosive pop-ups.
-            
-            // Counteract most of gravity so we don't slide down easily, but keep 10% to stay grounded and avoid jitter.
             _rb.AddForce(-Physics.gravity * 0.9f, ForceMode.Acceleration);
             
             Vector3 currentVel = _rb.velocity;
@@ -613,14 +575,11 @@ public class PlayerController : NetworkBehaviour
             }
             
             Vector3 velChange = desiredVel - currentVel;
-            
-            // Clamp acceleration so the physics solver can still push us back from walls
             float maxStairsAccel = 120f;
             velChange = Vector3.ClampMagnitude(velChange, maxStairsAccel * Time.fixedDeltaTime);
             
             _rb.AddForce(velChange, ForceMode.VelocityChange);
-            
-            return; // Skip standard assignment
+            return;
         }
 
         // --- Slow Climb Physics ---
@@ -631,7 +590,6 @@ public class PlayerController : NetworkBehaviour
         }
 
         // --- Climb Struggle Mechanic ---
-        // If mid-air, touching wall, holding Mouse0 + W, slowly hoist up
         bool recentlyTouchedWall = _climbCandidateCol != null && (Time.time - _climbCandidateTime < 0.3f);
         bool struggleInput = Input.GetMouseButton(0) && _inputMove.y > 0.1f;
 
@@ -640,53 +598,38 @@ public class PlayerController : NetworkBehaviour
             float struggleSpeed = 1.8f;
             verticalVelocity = struggleSpeed;
             _struggleHeightGained += struggleSpeed * Time.deltaTime;
-            
-            // Apply a small forward nudge into the wall to maintain contact
             _rb.AddForce(transform.forward * 5f, ForceMode.Acceleration);
         }
 
         // --- Final Velocity Assignment ---
-        // FUNDAMENTAL FIX: Instead of hard-overriding _rb.velocity (which ignores physics 
-        // bounce-back and causes teleportation), we calculate the required velocity change 
-        // and apply it as a clamped force.
         Vector3 currentHorizontal = new Vector3(_rb.velocity.x, 0, _rb.velocity.z);
         Vector3 velocityChange = targetVelocity - currentHorizontal;
         
-        // Clamp acceleration to prevent infinite pushing force (allows physics to push back)
         float maxAccel = 150f; 
         velocityChange = Vector3.ClampMagnitude(velocityChange, maxAccel * Time.fixedDeltaTime);
         
         _rb.AddForce(velocityChange, ForceMode.VelocityChange);
         
-        // We only forcefully override the Y velocity if our custom mechanics (like struggle or stairs) modified it.
-        // Otherwise, we leave the Y velocity exactly as the physics engine calculated it!
         if (Mathf.Abs(verticalVelocity - _rb.velocity.y) > 0.001f)
         {
             _rb.velocity = new Vector3(_rb.velocity.x, verticalVelocity, _rb.velocity.z);
         }
     }
 
-
-
     void CheckGrounded()
     {
         if (_col == null) return;
         
         float radius = _col.radius * 0.9f;
-        // Calculate the true bottom of the capsule in world space, independent of pivot point
         Vector3 localBottom = _col.center + Vector3.down * (_col.height / 2f);
         Vector3 worldBottom = transform.TransformPoint(localBottom);
         
-        // Start the spherecast slightly above the bottom so it doesn't start already clipped into the ground
         Vector3 origin = worldBottom + Vector3.up * (radius + 0.05f);
-        float castDist = 0.28f; // Increased from 0.15f to support uneven terrains and skin-width contact offsets
+        float castDist = 0.28f;
         
         _isGrounded = false;
         
-        // 1. Primary check: Use SphereCastAll to query all colliders in the sweep path using the Inspector-defined mask.
-        // This is crucial because a single SphereCast will get blocked if it starts inside the player's own collider!
         RaycastHit[] hits = Physics.SphereCastAll(origin, radius, Vector3.down, castDist, groundMask, QueryTriggerInteraction.Ignore);
-        
         RaycastHit bestHit = default;
         bool foundValidGround = false;
         
@@ -697,11 +640,10 @@ public class PlayerController : NetworkBehaviour
             {
                 bestHit = hit;
                 foundValidGround = true;
-                break; // SphereCastAll automatically orders by distance, so first non-player hit is the closest ground!
+                break;
             }
         }
         
-        // 2. Dual-Pass Fallback: If primary check fails, query all layers (~0) as fallback to prevent layer misconfiguration bugs
         if (!foundValidGround)
         {
             RaycastHit[] fallbackHits = Physics.SphereCastAll(origin, radius, Vector3.down, castDist, ~0, QueryTriggerInteraction.Ignore);
@@ -732,39 +674,16 @@ public class PlayerController : NetworkBehaviour
     {
         if (_activePlatform == null) return;
         
-        // ONLY manually track platform position if it's a Kinematic (script-driven) platform like an elevator.
-        // For dynamic physics objects (like boxes or debris), we must NOT manually teleport the player,
-        // because standard physics friction handles the movement naturally. Manual teleports cause severe clipping.
         if (_activePlatform.isKinematic)
         {
             Vector3 platformDelta = _activePlatform.position - _lastPlatformPos;
             if (platformDelta.sqrMagnitude > 0.0001f && platformDelta.sqrMagnitude < 100f)
             {
-                // MovePosition is safer than direct position assignment for dynamic rigidbodies
                 _rb.MovePosition(_rb.position + platformDelta);
             }
         }
         
         _lastPlatformPos = _activePlatform.position;
-    }
-
-    void HandleJump()
-    {
-        if (Time.time > _jumpBufferedUntil) return;
-
-        // 1. FIRST JUMP (Only from ground)
-        if (_jumpCount == 0 && _isGrounded)
-        {
-            ExecuteJump();
-        }
-        // 2. SECOND JUMP (Strictly for climbing walls/ledges)
-        else if (_jumpCount == 1 && _jumpCount < maxJumps)
-        {
-            if (TryStartClimb())
-            {
-                // TryStartClimb handles the jumpCount increment
-            }
-        }
     }
 
     private void ExecuteJump()
@@ -773,12 +692,9 @@ public class PlayerController : NetworkBehaviour
         _isGrounded = false;
         _jumpCount++;
         _jumpBufferedUntil = 0f;
-        
-        // Disable grounding for 0.15s to prevent immediate reset while leaving the floor
         _groundCheckDisabledUntil = Time.time + 0.15f;
     }
 
-    // Head Bobbing
     void HandleHeadBob()
     {
         bool isMoving = new Vector3(_rb.velocity.x, 0f, _rb.velocity.z).sqrMagnitude > 0.04f && _isGrounded;
@@ -813,11 +729,7 @@ public class PlayerController : NetworkBehaviour
 
         if (targetCol != null && (isFacingWall || (Time.time - _climbCandidateTime < 0.25f)))
         {
-            // --- Precise Vertical Exit Detection ---
-            // 1. Use the actual collision/raycast hit point to find the scan position
             Vector3 scanPos = hitPoint + transform.forward * 0.1f;
-            
-            // 2. Scan DOWN from above to find the exact top surface
             float scanLimitY = transform.position.y + climbMaxHeight + 1.0f;
             Vector3 rayOrigin = new Vector3(scanPos.x, scanLimitY, scanPos.z);
             
@@ -827,7 +739,6 @@ public class PlayerController : NetworkBehaviour
             bool foundLedge = false;
             foreach (var hit in hits)
             {
-                // Skip our own colliders (including any interaction spheres/triggers)
                 if (hit.transform.root == transform.root) continue;
 
                 if (hit.point.y > targetHeightY)
@@ -839,28 +750,16 @@ public class PlayerController : NetworkBehaviour
 
             if (!foundLedge)
             {
-                // Fallback to collider bounds if raycast missed but we know something is there
                 targetHeightY = targetCol.bounds.max.y;
             }
 
-            // 3. Calculation and Reachability Check
             float heightDiff = targetHeightY - transform.position.y;
             
-            // CRITICAL: If the target height is not significantly above us, it's not a climb!
-            // This prevents "Double Jumping" on the floor or in empty air.
-            if (heightDiff < 0.4f)
+            if (heightDiff < 0.4f || heightDiff > climbMaxHeight)
             {
                 return false;
             }
 
-            // If too high, fail climb
-            if (heightDiff > climbMaxHeight)
-            {
-                Debug.Log($"[Climb Debug] Too high: {heightDiff:F2}m. Fail.");
-                return false;
-            }
-
-            // Calculate force for the height
             float h = heightDiff + 0.2f;
             float gravity = Mathf.Abs(Physics.gravity.y);
             float vY = Mathf.Sqrt(2f * gravity * h);
@@ -869,7 +768,6 @@ public class PlayerController : NetworkBehaviour
 
             _rb.velocity = new Vector3(_rb.velocity.x, vY, _rb.velocity.z);
             
-            // Track climb target for momentum erasure
             _isClimbing = true;
             _activeClimbTargetY = targetHeightY - 0.05f;
             _climbStartTime = Time.time;
@@ -878,11 +776,6 @@ public class PlayerController : NetworkBehaviour
             _isOnStairs = false;
             _jumpBufferedUntil = 0f;
             _canClimbThisJump = false;
-
-            if (mouseLook != null)
-            {
-                // Ready for future camera effects
-            }
                 
             return true;
         }
@@ -890,36 +783,30 @@ public class PlayerController : NetworkBehaviour
         return false;
     }
 
-    // 碰撞墙壁检测
-    
+    // ── 碰撞墙壁检测 ──────────────────────────────────────────────────────────
     private bool _isTouchingWall = false;
     private Vector3 _wallNormal = Vector3.zero;
 
     void OnCollisionEnter(Collision collision)
     {
-        // Intentional empty: standard physics handles initial impacts. 
-        // Custom anti-crush logic removed to prevent explosive lateral teleportation bugs.
+        // Intentional empty
     }
 
     void OnCollisionStay(Collision collision)
     {
+        // 🌟 强力拦截 3：如果正在使用家具，绝不处理任何外部碰撞逻辑，避免被家具碰撞体误判为墙壁
+        if (IsUsingFurniture) return;
+
         foreach (ContactPoint cp in collision.contacts)
         {
             float relativeY = cp.point.y - transform.position.y;
             
-            // 1. Wall Projection Tracking
-            // If contact is vertical-ish
             if (Mathf.Abs(cp.normal.y) < 0.5f)
             {
-                // Treat ALL vertical contacts as walls to prevent penetration.
-                // If it's a pushable object, our custom push logic will move it safely.
-                // If it's stuck, we simply won't penetrate it, preventing explosive clipping.
                 _isTouchingWall = true;
-                _wallNormal += cp.normal; // Accumulate to average out corners
+                _wallNormal += cp.normal; 
             }
 
-            // 2. Climb Candidate Detection
-            // Ensure the contact is above knee height to prevent treating the ground as a wall
             if (relativeY > 0.25f && Mathf.Abs(cp.normal.y) < 0.4f)
             {
                 _climbCandidateCol = cp.otherCollider;
@@ -932,7 +819,6 @@ public class PlayerController : NetworkBehaviour
             _wallNormal.Normalize();
         }
 
-        // 安全的碰撞检测
         Rigidbody otherRb = collision.rigidbody;
         if (otherRb != null && !otherRb.isKinematic)
         {
@@ -949,7 +835,6 @@ public class PlayerController : NetworkBehaviour
                 if (pushDir.sqrMagnitude > 0.01f && _inputMove.sqrMagnitude > 0.01f)
                 {
                     pushDir.Normalize();
-                    // Apply physics-safe force based on mass instead of hard-setting velocity
                     otherRb.AddForce(pushDir * (pushForce * 50f), ForceMode.Force);
                 }
             }

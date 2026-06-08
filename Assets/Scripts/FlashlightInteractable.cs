@@ -21,7 +21,7 @@ public class FlashlightInteractable : MonoBehaviour
 
     private WorldObject _worldObject;
     private Rigidbody _rb;
-    private Collider _collider; // 【新增】用于获取并开关碰撞体
+    private Collider[] _colliders; // 【修改】改为数组，支持关闭自身及子物体所有的碰撞体
     private bool _isEquipped = false;
     private Transform _originalParent;
 
@@ -29,7 +29,8 @@ public class FlashlightInteractable : MonoBehaviour
     {
         _worldObject = GetComponent<WorldObject>();
         _rb = GetComponent<Rigidbody>();
-        _collider = GetComponent<Collider>(); // 自动抓取碰撞体
+        // 【修改】获取该物体以及所有子物体上的碰撞体，防止部分碰撞体漏网导致物理冲突
+        _colliders = GetComponentsInChildren<Collider>(); 
         _originalParent = transform.parent;
     }
 
@@ -67,20 +68,25 @@ public class FlashlightInteractable : MonoBehaviour
         _worldObject.TriggerPickUp(actor);
         _worldObject.CancelAnims();
 
-        // 1. 【核心修复】关闭碰撞体，彻底杜绝和玩家物理碰撞导致的“自推”滑行
-        if (_collider != null)
+        // 1. 【彻底关闭】循环关闭所有碰撞体，彻底杜绝和玩家的物理碰撞
+        if (_colliders != null)
         {
-            _collider.enabled = false;
+            foreach (var col in _colliders)
+            {
+                if (col != null) col.enabled = false;
+            }
         }
 
-        // 2. 剥离刚体物理
-        if (_rb != null)
-        {
-            _rb.isKinematic = true;
-            _rb.useGravity = false;
-            _rb.velocity = Vector3.zero;
-            _rb.angularVelocity = Vector3.zero;
-        }
+        // 2. 【彻底关闭】剥离并禁用 Rigidbody 组件
+// 2. 【彻底关闭】剥离并禁用 Rigidbody 的物理检测
+if (_rb != null)
+{
+    _rb.isKinematic = true;
+    _rb.useGravity = false;
+    _rb.velocity = Vector3.zero;
+    _rb.angularVelocity = Vector3.zero;
+    _rb.detectCollisions = false; // 【改为这个】让刚体彻底停止物理碰撞检测
+}
 
         _worldObject.isPlacedAndAttached = true;
 
@@ -105,20 +111,27 @@ public class FlashlightInteractable : MonoBehaviour
         transform.SetParent(_originalParent);
 
         _worldObject.isPlacedAndAttached = false;
-        if (_rb != null)
-        {
-            _rb.isKinematic = false;
-            _rb.useGravity = true;
-            if (playerCamera != null)
-            {
-                _rb.velocity = playerCamera.forward * 1.5f + Vector3.up * 0.5f;
-            }
-        }
+        
+        // 4. 【恢复】重新启用 Rigidbody 组件并给予物理速度
+// 4. 【恢复】重新启用 Rigidbody 并给予物理速度
+if (_rb != null)
+{
+    _rb.detectCollisions = true; // 【改为这个】扔掉时重新开启刚体的碰撞检测
+    _rb.isKinematic = false;
+    _rb.useGravity = true;
+    if (playerCamera != null)
+    {
+        _rb.velocity = playerCamera.forward * 1.5f + Vector3.up * 0.5f;
+    }
+}
 
-        // 4. 【核心修复】丢到地上时，重新开启碰撞体，让它能正常落到地面上而不会穿模掉进虚空
-        if (_collider != null)
+        // 5. 【恢复】重新开启所有碰撞体，使其能正常落到地面上
+        if (_colliders != null)
         {
-            _collider.enabled = true;
+            foreach (var col in _colliders)
+            {
+                if (col != null) col.enabled = true;
+            }
         }
 
         if (flashlightLight != null) flashlightLight.enabled = false;

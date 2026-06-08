@@ -68,6 +68,30 @@ public class MouseLook : MonoBehaviour
     }
 
 
+    /// <summary>
+/// 设置镜头的基础朝向（例如上床或上车时同步方向）
+/// </summary>
+public void SetBaseRotation(Quaternion targetRotation)
+{
+    // 提取目标旋转的 Y 轴角度（水平方向）
+    float targetYAngle = targetRotation.eulerAngles.y;
+    
+    // 假设你的 MouseLook 维护水平旋转的变量叫 m_CharacterTargetRot 或 xRotation
+    // 这里将其强制同步为目标角度，防止视角计算叠加导致闪回
+    // 示例（如果使用的是 Euler 角度数值）：
+    // rotationX = targetYAngle; 
+    // rotationY = 0f; // 躺下时视线水平看前方
+    
+    // 如果你的 MouseLook 是直接控制 transform 的：
+    transform.rotation = targetRotation;
+    
+    // 💡 记得同时重置你脚本内部用于累加鼠标输入的 pitch 和 yaw（或 lookAngles）变量！
+    // 例如：
+    // _currentYaw = targetYAngle;
+    // _currentPitch = 0f;
+}
+
+
 
     // ── State ─────────────────────────────────────────────────────────────────
     [HideInInspector] public bool suspendMouseLook = false;
