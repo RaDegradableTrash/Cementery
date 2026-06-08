@@ -40,8 +40,9 @@ public class CreateKelpLeafPrefab
         WorldObject wo = leafObj.AddComponent<WorldObject>();
         wo.carryable = true;
         wo.interactable = false;
-        wo.collectable = false;
+        wo.collectable = true;
         wo.canBePlacedOnFloor = true;
+        wo.collectItemData = AssetDatabase.LoadAssetAtPath<ItemData>("Assets/ItemDataKelpLeaf.asset");
 
         leafObj.AddComponent<KelpLeaf>();
 

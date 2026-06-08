@@ -28,6 +28,9 @@ namespace EnvironmentSystem
         [Tooltip("The prefix of the baked chunk scenes, e.g. Desert_Chunk_X_Z")]
         public string sceneNamePrefix = "Desert_Chunk";
 
+        [Tooltip("The grid range of chunks to load around the player (e.g. 2 is a 5x5 grid, 3 is a 7x7 grid).")]
+        public int loadingRange = 3;
+
         private HashSet<string> _requestedChunks = new HashSet<string>();
         private HashSet<string> _loadedChunks = new HashSet<string>();
         private Dictionary<string, Coroutine> _unloadRoutines = new Dictionary<string, Coroutine>();
@@ -109,7 +112,7 @@ namespace EnvironmentSystem
                 }
             }
 
-            // 2. Perform grid projection and load 7x7 surrounding chunks
+            // 2. Perform grid projection and load surrounding chunks based on loadingRange
             if (trackingTarget != null)
             {
                 // Refresh chunk size from active chunk every ChunkSizeCacheInterval (not every frame!)
@@ -145,11 +148,10 @@ namespace EnvironmentSystem
         {
             List<string> requiredList = new List<string>();
 
-            // 3x3 grid (9 chunks) on WebGL instead of 5x5 (25 chunks) for much better performance
-            int range = 2;
+            int range = loadingRange;
             if (Application.platform == RuntimePlatform.WebGLPlayer)
             {
-                range = 1;
+                range = Mathf.Max(1, loadingRange - 1);
             }
 
             for (int dx = -range; dx <= range; dx++)

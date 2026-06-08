@@ -18,9 +18,19 @@ public class FuelTank : MonoBehaviour
     public string fuelItemNameFilter = "fuel"; // If matching held item name
 
     // Static variables to ensure the fuel level is globally unique and shared across both tanks
-    private static float _sharedFuel = 20f; // Initial default fuel
+    private static float _sharedFuel = 100f; // Initial default fuel
     private static float _sharedMaxCapacity = 100f;
     private static System.Collections.Generic.List<FuelTank> _activeTanks = new System.Collections.Generic.List<FuelTank>();
+
+    public static float SharedFuel
+    {
+        get => _sharedFuel;
+        set
+        {
+            _sharedFuel = Mathf.Clamp(value, 0f, _sharedMaxCapacity);
+            NotifyAllTanksToUpdate();
+        }
+    }
 
     public float currentFuel
     {

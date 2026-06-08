@@ -18,13 +18,34 @@ namespace RVSystem
         public float steer;
         public bool braking;
 
+        [Header("Fuel Consumption")]
+        [Tooltip("Fuel consumed per second while driving (idle / engine on).")]
+        public float baseFuelConsumption = 0.5f;
+        [Tooltip("Additional fuel consumed per second when full throttle is applied.")]
+        public float activeFuelConsumption = 1.5f;
+
         void Update()
         {
             if (currentState == RVState.Active)
             {
-                throttle = Input.GetAxis("Vertical");
-                steer = Input.GetAxis("Horizontal");
-                braking = Input.GetKey(KeyCode.Space);
+                float fuel = FuelTank.SharedFuel;
+
+                if (fuel > 0f)
+                {
+                    throttle = Input.GetAxis("Vertical");
+                    steer = Input.GetAxis("Horizontal");
+                    braking = Input.GetKey(KeyCode.Space);
+
+                    // Gradually consume fuel while driving
+                    float currentConsumption = baseFuelConsumption + Mathf.Abs(throttle) * activeFuelConsumption;
+                    FuelTank.SharedFuel -= currentConsumption * Time.deltaTime;
+                }
+                else
+                {
+                    throttle = 0f;
+                    steer = Input.GetAxis("Horizontal");
+                    braking = true; // Auto brake when out of fuel
+                }
                 
                 controller.ApplyInputs(throttle, steer, braking);
 

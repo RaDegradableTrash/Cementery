@@ -529,6 +529,22 @@ public class Kelp : MonoBehaviour
         // Spawn harvested leaf items popping out
         if (activeLeafScales.Count > 0)
         {
+#if UNITY_EDITOR
+            if (leafPrefab == null)
+            {
+                leafPrefab = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/KelpLeaf.prefab");
+            }
+#endif
+            ItemData leafItem = null;
+            if (leafPrefab != null)
+            {
+                WorldObject prefabWo = leafPrefab.GetComponent<WorldObject>();
+                if (prefabWo != null)
+                {
+                    leafItem = prefabWo.collectItemData;
+                }
+            }
+
             // Find a source leaf transform to duplicate (so we copy the exact mesh and renderer settings)
             Transform sourceLeaf = null;
             if (leafTransforms != null)
@@ -562,8 +578,9 @@ public class Kelp : MonoBehaviour
                     if (woComp == null) woComp = spawned.AddComponent<WorldObject>();
                     woComp.carryable = true;
                     woComp.interactable = false;
-                    woComp.collectable = false;
+                    woComp.collectable = true;
                     woComp.canBePlacedOnFloor = true;
+                    woComp.collectItemData = leafItem;
 
                     if (spawned.GetComponent<KelpLeaf>() == null)
                     {
@@ -589,6 +606,10 @@ public class Kelp : MonoBehaviour
                     {
                         col.enabled = true;
                         col.isTrigger = false;
+                        if (col is MeshCollider mc)
+                        {
+                            mc.convex = true;
+                        }
                     }
                 }
                 else
