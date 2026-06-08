@@ -38,8 +38,8 @@ public class DesertPropPlacementTool : EditorWindow
     private float visibilityHysteresis = 15f;
     private float visibilityCheckInterval = 0.4f;
 
-    // Static stack to record spawned holders for immediate undo
-    private static Stack<GameObject> spawnedHolders = new Stack<GameObject>();
+    // Static stack to record spawned GameObjects for immediate undo
+    private static Stack<List<GameObject>> spawnedObjectsHistory = new Stack<List<GameObject>>();
 
     private void OnGUI()
     {
@@ -143,14 +143,15 @@ public class DesertPropPlacementTool : EditorWindow
             return;
         }
 
+        // Randomize seed for this placement to ensure a different pattern each time
+        seed = Random.Range(1, 100000);
+
         // Setup deterministic random states
         Random.InitState(seed);
         Vector2 seedOffset = new Vector2(Random.Range(-10000f, 10000f), Random.Range(-10000f, 10000f));
         int totalSpawned = 0;
 
-        // Create a parent holder group for this execution so we can undo the entire placement step
-        GameObject executionGroup = new GameObject($"PlacementGroup_Seed_{seed}");
-        Undo.RegisterCreatedObjectUndo(executionGroup, "Desert Prop Placement");
+        List<GameObject> currentSpawns = new List<GameObject>();
 
         foreach (var chunk in chunks)
         {
@@ -163,29 +164,28 @@ public class DesertPropPlacementTool : EditorWindow
             Scene chunkScene = chunk.gameObject.scene;
 
             // Create chunk-specific props holder inside the chunk's hierarchy (and scene!)
-            // First check and clear existing props in this chunk
+            // Reuse existing holder if it exists to avoid overwriting previously placed props
             Transform existingHolder = chunkTransform.Find("Spawned_Props");
+            GameObject holder;
             if (existingHolder != null)
             {
-                Undo.DestroyObjectImmediate(existingHolder.gameObject);
+                holder = existingHolder.gameObject;
             }
+            else
+            {
+                holder = new GameObject("Spawned_Props");
+                holder.transform.SetParent(chunkTransform);
+                holder.transform.localPosition = Vector3.zero;
+                holder.transform.localRotation = Quaternion.identity;
+                holder.transform.localScale = Vector3.one;
+                Undo.RegisterCreatedObjectUndo(holder, "Spawn Chunk Props");
 
-            GameObject holder = new GameObject("Spawned_Props");
-            holder.transform.SetParent(chunkTransform);
-            holder.transform.localPosition = Vector3.zero;
-            holder.transform.localRotation = Quaternion.identity;
-            holder.transform.localScale = Vector3.one;
-            Undo.RegisterCreatedObjectUndo(holder, "Spawn Chunk Props");
-
-            // Attach visibility LOD manager
-            PropVisibilityManager visLOD = holder.AddComponent<PropVisibilityManager>();
-            visLOD.visibilityRadius = visibilityRadius;
-            visLOD.hysteresis = visibilityHysteresis;
-            visLOD.checkInterval = visibilityCheckInterval;
-
-            // Also keep track of it as a child of our execution group for easy UI referencing,
-            // but keep the scene/parent reference to chunk to place it in correct scene.
-            // (Setting parent to chunk already forces it into the chunk's scene).
+                // Attach visibility LOD manager
+                PropVisibilityManager visLOD = holder.AddComponent<PropVisibilityManager>();
+                visLOD.visibilityRadius = visibilityRadius;
+                visLOD.hysteresis = visibilityHysteresis;
+                visLOD.checkInterval = visibilityCheckInterval;
+            }
 
             // Fetch mesh data directly if it exists, to support sculpted/deformed meshes in the editor
             MeshFilter filter = chunk.GetComponent<MeshFilter>();
@@ -221,6 +221,13 @@ public class DesertPropPlacementTool : EditorWindow
             float heightRange = maxChunkH - minChunkH + 0.001f;
 
             List<Vector3> spawnedPositions = new List<Vector3>();
+            if (existingHolder != null)
+            {
+                foreach (Transform child in existingHolder)
+                {
+                    spawnedPositions.Add(child.position);
+                }
+            }
 
             for (int i = 0; i < spawnAttemptsPerChunk; i++)
             {
@@ -363,9 +370,12 @@ public class DesertPropPlacementTool : EditorWindow
                 GameObject spawnedObj = (GameObject)PrefabUtility.InstantiatePrefab(prefabToSpawn, holder.scene);
                 if (spawnedObj != null)
                 {
+                    Undo.RegisterCreatedObjectUndo(spawnedObj, "Desert Prop Placement");
+                    currentSpawns.Add(spawnedObj);
+
                     // Apply scale variation first
                     float scaleFactor = Random.Range(minScale, maxScale);
-                    spawnedObj.transform.localScale = Vector3.one * scaleFactor;
+                    spawnedObj.transform.localScale = prefabToSpawn.transform.localScale * scaleFactor;
 
                     spawnedObj.transform.SetParent(holder.transform);
                     // Push the object upward along the terrain normal relative to its scale to avoid sinking too deep
@@ -386,33 +396,31 @@ public class DesertPropPlacementTool : EditorWindow
         }
 
         // Store execution group in stack for Undo operation
-        spawnedHolders.Push(executionGroup);
+        spawnedObjectsHistory.Push(currentSpawns);
         Debug.Log($"[PropPlacementTool] Spawned {totalSpawned} props on {chunks.Length} chunks based on '{trendMode}' terrain trend.");
     }
 
     private void UndoLastPlacement()
     {
-        if (spawnedHolders.Count > 0)
+        if (spawnedObjectsHistory.Count > 0)
         {
-            GameObject group = spawnedHolders.Pop();
-            if (group != null)
+            List<GameObject> lastSpawns = spawnedObjectsHistory.Pop();
+            int count = 0;
+            foreach (var obj in lastSpawns)
             {
-                // Find and clear matching spawned holders inside active chunks
-                DesertTerrainChunk[] chunks = FindObjectsOfType<DesertTerrainChunk>();
-                int count = 0;
-                foreach (var chunk in chunks)
+                if (obj != null)
                 {
-                    Transform t = chunk.transform.Find("Spawned_Props");
-                    if (t != null)
-                    {
-                        Undo.DestroyObjectImmediate(t.gameObject);
-                        EditorSceneManager.MarkSceneDirty(chunk.gameObject.scene);
-                        count++;
-                    }
+                    Undo.DestroyObjectImmediate(obj);
+                    count++;
                 }
-                DestroyImmediate(group);
-                Debug.Log($"[PropPlacementTool] Undone placement on {count} chunks.");
             }
+            // Mark affected scenes as dirty
+            DesertTerrainChunk[] chunks = FindObjectsOfType<DesertTerrainChunk>();
+            foreach (var chunk in chunks)
+            {
+                EditorSceneManager.MarkSceneDirty(chunk.gameObject.scene);
+            }
+            Debug.Log($"[PropPlacementTool] Undone placement of {count} props.");
         }
         else
         {
@@ -435,7 +443,7 @@ public class DesertPropPlacementTool : EditorWindow
                 count++;
             }
         }
-        spawnedHolders.Clear();
+        spawnedObjectsHistory.Clear();
         Debug.Log($"[PropPlacementTool] Cleared all spawned props across {count} chunks.");
     }
 }
