@@ -60,6 +60,17 @@ public class LightControl : MonoBehaviour
 
         CacheBaseEmissionColors(brakeRenderers, baseEmissionColors);
         CacheBaseEmissionColors(headRenderers, baseHeadEmissionColors);
+
+        // Turn off shadows to prevent lights from being blocked by the RV's own body/chassis
+        foreach (Light light in brakeLights)
+        {
+            if (light != null) light.shadows = LightShadows.None;
+        }
+        foreach (Light light in headLights)
+        {
+            if (light != null) light.shadows = LightShadows.None;
+        }
+
         ApplyPowerState(false);
         ApplyBrakeState(false, false);
     }

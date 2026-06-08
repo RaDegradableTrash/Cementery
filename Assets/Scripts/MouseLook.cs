@@ -66,7 +66,15 @@ public class MouseLook : MonoBehaviour
         ResolveAttractPivot();
         InitializeAttractOrbitBaseline();
     }
-
+    public void ResetRotation()
+    {
+        _pitch = transform.localEulerAngles.x;
+        if (_pitch > 180f) _pitch -= 360f;
+        if (player != null)
+        {
+            _yaw = player.eulerAngles.y;
+        }
+    }
 
 
     // ── State ─────────────────────────────────────────────────────────────────

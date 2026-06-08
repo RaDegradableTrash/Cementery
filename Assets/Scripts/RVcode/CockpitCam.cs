@@ -452,6 +452,9 @@ public class CockpitCam : MonoBehaviour
 		}
 
 		isDriving = true;
+		yaw = 0f;
+		pitch = 0f;
+		rotationRoot.localRotation = Quaternion.identity;
 		SetLook(true);
 	}
 
@@ -478,13 +481,6 @@ public class CockpitCam : MonoBehaviour
 		// 1. Restore the Main Camera back to the player
 		if (cockpitCamera != null)
 		{
-			// Re-enable the MouseLook script
-			MouseLook ml = cockpitCamera.GetComponent<MouseLook>();
-			if (ml != null)
-			{
-				ml.enabled = true;
-			}
-
 			if (originalCameraParent != null)
 			{
 				cockpitCamera.transform.SetParent(originalCameraParent);
@@ -496,9 +492,21 @@ public class CockpitCam : MonoBehaviour
 		// 2. Reactivate player and set their position to the vehicle's current position
 		if (activePlayer != null)
 		{
+			activePlayer.transform.rotation = transform.rotation;
 			// Move player slightly back to step out of the driver's seat into the RV living cabin space!
 			activePlayer.transform.position = transform.position - transform.forward * 1.0f + transform.up * 0.1f;
 			activePlayer.SetActive(true);
+		}
+
+		// 3. Re-enable the MouseLook script and align baseline rotation
+		if (cockpitCamera != null)
+		{
+			MouseLook ml = cockpitCamera.GetComponent<MouseLook>();
+			if (ml != null)
+			{
+				ml.enabled = true;
+				ml.ResetRotation();
+			}
 		}
 
 		activePlayer = null;
