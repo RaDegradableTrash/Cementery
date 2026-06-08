@@ -541,6 +541,7 @@ GameObject:
   m_Component:
   - component: {fileID: 8518180826548636275}
   - component: {fileID: 4799072628110976908}
+  - component: {fileID: 4357622115722457432}
   - component: {fileID: 5687875146194857281}
   m_Layer: 0
   m_Name: Bed
@@ -612,6 +613,27 @@ MonoBehaviour:
   onCollect:
     m_PersistentCalls:
       m_Calls: []
+--- !u!114 &4357622115722457432
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2501620910991816186}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  GlobalObjectIdHash: 4139082964
+  InScenePlacedSourceGlobalObjectIdHash: 0
+  AlwaysReplicateAsRoot: 0
+  SynchronizeTransform: 1
+  ActiveSceneSynchronization: 0
+  SceneMigrationSynchronization: 1
+  SpawnWithObservers: 1
+  DontDestroyWithOwner: 0
+  AutoObjectParentSync: 1
 --- !u!114 &5687875146194857281
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -624,23 +646,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f51cc95d158175b4d868784a3a29f84b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  sitPoint: {fileID: 1622881726256771098}
-  autoCreateSitPoint: 1
-  autoSitPosition: {x: 0, y: 0.8, z: -0.5}
-  autoSitRotation: {x: 0, y: 180, z: 0}
-  isBed: 1
-  moveToSitDuration: 0.5
-  moveToLeaveDuration: 0.5
-  leaveBackDistance: 1.5
-  leaveKey: 27
-  canLeaveAnytime: 1
-  returnToOriginalPosition: 1
-  returnToOriginalRotation: 1
-  playerTag: Player
-  disableCharacterController: 1
-  setRigidbodyKinematic: 1
-  promptMessage: 
-  sitMessage: 
+  targetAnchor: {fileID: 0}
+  exitAnchor: {fileID: 0}
+  transitionDuration: 0.8
+  isOccupied: 0
+  occupyingClientId: 0
 --- !u!1 &5175102968010997943
 GameObject:
   m_ObjectHideFlags: 0
