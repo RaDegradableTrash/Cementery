@@ -25,17 +25,38 @@ public class KelpLeaf : MonoBehaviour
         _worldObject.interactable = false;
         _worldObject.carryable = true;
 
-        // Ensure collider exists and offset its center downwards so the visual leaf sits above the snow/ground
-        BoxCollider box = GetComponent<BoxCollider>();
-        if (box == null)
+        // We no longer use a generic BoxCollider on the root, because the leaf scales visually 
+        // and we want the collider to match exactly.
+        BoxCollider oldBox = GetComponent<BoxCollider>();
+        if (oldBox != null)
         {
-            box = gameObject.AddComponent<BoxCollider>();
+            Destroy(oldBox);
         }
-        if (box != null)
+
+        // Add a MeshCollider to the visual child so it inherits the correct rotation and scale
+        Transform plane = transform.Find("Plane");
+        if (plane != null)
         {
-            // Center is zero to keep center of mass aligned, avoiding physics torque/sliding instability.
-            box.size = new Vector3(0.5f, 0.35f, 0.5f);
-            box.center = Vector3.zero;
+            MeshCollider mc = plane.GetComponent<MeshCollider>();
+            if (mc == null)
+            {
+                mc = plane.gameObject.AddComponent<MeshCollider>();
+            }
+            mc.convex = true;
+
+            MeshFilter mf = plane.GetComponent<MeshFilter>();
+            if (mf != null && mf.sharedMesh != null)
+            {
+                mc.sharedMesh = mf.sharedMesh;
+            }
+            
+            // We let Unity automatically calculate the center of mass from the Convex MeshCollider.
+            // Setting it to Vector3.zero caused it to act like a tumbler toy and stand on its base
+            // because the origin of the mesh is at the very tip/base of the leaf!
+            if (_rb != null)
+            {
+                _rb.ResetCenterOfMass();
+            }
         }
     }
 }

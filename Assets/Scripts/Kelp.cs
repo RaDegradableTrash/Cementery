@@ -312,69 +312,26 @@ public class Kelp : MonoBehaviour
 
             Vector3 spawnPos = transform.position + Vector3.up * 0.3f + forceDir * 0.2f;
 
-            // Create root spawned object with scale (1,1,1) for stable physics
-            GameObject spawned = new GameObject("KelpLeaf");
-            spawned.transform.position = spawnPos;
-            spawned.transform.rotation = Quaternion.identity;
-            spawned.transform.localScale = Vector3.one;
-            spawned.layer = gameObject.layer; // Match the Kelp plant's layer for raycasting/interaction
+            if (leafPrefab == null)
+            {
+                Debug.LogError("[Kelp] leafPrefab is null, cannot spawn leaves.");
+                break;
+            }
 
-            // Add required components to the root
-            Rigidbody rb = spawned.AddComponent<Rigidbody>();
-            rb.isKinematic = false;
-            rb.useGravity = true;
-            rb.drag = 1.0f;           // High linear drag to prevent sliding infinitely
-            rb.angularDrag = 1.0f;    // High angular drag to prevent rolling infinitely
+            GameObject spawned = Instantiate(leafPrefab, spawnPos, Quaternion.identity);
+            
+            spawned.layer = gameObject.layer;
 
-            WorldObject woComp = spawned.AddComponent<WorldObject>();
-            woComp.carryable = true;
-            woComp.interactable = false;
-            woComp.collectable = true;
-            woComp.canBePlacedOnFloor = true;
-            woComp.collectItemData = leafItem;
-            woComp.BaseScale = Vector3.one;
+            Rigidbody rb = spawned.GetComponent<Rigidbody>();
+            if (rb != null)
+            {
+                rb.isKinematic = false;
+                rb.useGravity = true;
+                rb.drag = 1.0f;
+                rb.angularDrag = 1.0f;
+            }
 
-            // Add KelpLeaf component which sets up the BoxCollider
-            KelpLeaf leafComp = spawned.AddComponent<KelpLeaf>();
             BoxCollider box = spawned.GetComponent<BoxCollider>();
-            if (box != null)
-            {
-                box.size = new Vector3(0.5f, 0.35f, 0.5f);
-                box.center = Vector3.zero;
-            }
-
-            // Instantiate visual child
-            if (sourceLeaf != null)
-            {
-                GameObject visualChild = Instantiate(sourceLeaf.gameObject, spawned.transform);
-                visualChild.transform.localPosition = Vector3.zero;
-                visualChild.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
-                visualChild.transform.localScale = sourceLeaf.lossyScale;
-                visualChild.SetActive(true);
-
-                // Destroy any colliders on the visual child mesh to prevent duplicate/overlapping physics conflicts
-                Collider[] childCols = visualChild.GetComponentsInChildren<Collider>();
-                foreach (var c in childCols)
-                {
-                    if (c != null && c != box) Destroy(c);
-                }
-            }
-            else if (leafPrefab != null)
-            {
-                GameObject visualChild = Instantiate(leafPrefab, spawned.transform);
-                visualChild.transform.localPosition = Vector3.zero;
-                visualChild.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
-                visualChild.transform.localScale = new Vector3(0.3f, 0.3f, 0.3f);
-                visualChild.SetActive(true);
-
-                Collider[] childCols = visualChild.GetComponentsInChildren<Collider>();
-                foreach (var c in childCols)
-                {
-                    if (c != null && c != box) Destroy(c);
-                }
-            }
-
-            // Set up collision ignores
             if (box != null)
             {
                 // Ignore collision with other spawned leaves
@@ -403,11 +360,11 @@ public class Kelp : MonoBehaviour
                     }
                 }
             }
-
             // Apply gentle impulse force and torque to scatter them
             float forceMagnitude = Random.Range(1.5f, 2.5f);
             rb.AddForce(forceDir * forceMagnitude, ForceMode.Impulse);
             rb.AddTorque(new Vector3(Random.Range(-1f, 1f), Random.Range(-1f, 1f), Random.Range(-1f, 1f)), ForceMode.Impulse);
+
         }
 
         // Visually deactivate the leaves on the plant AFTER we are done instantiating them

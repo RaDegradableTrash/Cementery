@@ -1459,6 +1459,11 @@ public class InteractionSystem : MonoBehaviour
         }
 #endif
 
+        if (obj.collectItemData != null)
+        {
+            // Removed savedWorldScale assignment completely
+        }
+
         InventoryCameraController camCtrl = GetInventoryCameraController();
         if (camCtrl != null)
         {
