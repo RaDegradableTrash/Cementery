@@ -133,40 +133,52 @@ public class InventoryCameraController : MonoBehaviour
             RebuildRendererCache();
     }
 
-    void Update()
+void Update()
+{
+    if (!IsPrimaryController())
+        return;
+
+    if (allowToggleInventoryKey && Input.GetKeyDown(toggleInventoryKey))
     {
-        if (!IsPrimaryController())
-            return;
-
-        if (allowToggleInventoryKey && Input.GetKeyDown(toggleInventoryKey))
+        InteractionSystem interaction = GetInteractionSystem();
+        
+        if (inventoryActive)
         {
-            InteractionSystem interaction = GetInteractionSystem();
-            if (interaction != null && interaction.HasCarriedObject() && !inventoryActive)
-            {
-                // 交给 InteractionSystem 去处理收集逻辑，这里不打开空背包
+            if (Time.frameCount == _openedFrameCount)
                 return;
-            }
-
-            if (inventoryActive)
-            {
-                if (Time.frameCount == _openedFrameCount)
-                    return;
-                CloseInventoryFromKey();
-            }
-            else
-                EnterInventoryMode(null);
-
-            return;
-        }
-
-        // 仅允许Enter退出背包
-        if (inventoryActive && Input.GetKeyDown(KeyCode.Return))
-        {
             CloseInventoryFromKey();
         }
+        else
+        {
+            // 修改这里：如果手上拿着物品，先获取这个物品的数据，然后带入背包
+            if (interaction != null && interaction.HasCarriedObject())
+            {
+                // 假设你的 interactionSystem 有方法可以获取当前拿着的 ItemData
+                // 请根据你 InteractionSystem 的实际变量名替换 GetCarriedItemData()
+                ItemData carriedItem = interaction.GetCarriedItemData(); 
+                
+                if (carriedItem != null)
+                {
+                    EnterInventoryMode(carriedItem);
+                    return;
+                }
+            }
 
-        UpdateAggressiveFrustumCulling();
+            // 如果没拿东西，正常打开空背包
+            EnterInventoryMode(null);
+        }
+
+        return;
     }
+
+    // 仅允许Enter退出背包
+    if (inventoryActive && Input.GetKeyDown(KeyCode.Return))
+    {
+        CloseInventoryFromKey();
+    }
+
+    UpdateAggressiveFrustumCulling();
+}
 
     void CloseInventoryFromKey()
     {

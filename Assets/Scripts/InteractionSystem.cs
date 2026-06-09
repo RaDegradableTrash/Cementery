@@ -2347,6 +2347,28 @@ public class InteractionSystem : MonoBehaviour
         }
     }
 
+    // ── 供外部背包系统调用的接口 ───────────────────────────────────────────
+/// <summary>
+/// 获取当前玩家手里正抓着的物体的 ItemData 数据（供背包/放置系统使用）
+/// </summary>
+// ── 请把原本的 private 改成 public，并修正逻辑 ───────────────────────────────────
+public ItemData GetCarriedItemData()
+{
+    // 优先：如果手里正抓着物体，背包系统应该获取手里物体的完整数据
+    if (_carriedWo != null)
+    {
+        return _carriedWo.collectItemData;
+    }
+
+    // 次优先：如果手里没拿，但眼睛正看着某个场景物体（保留你原本的逻辑）
+    if (_lookedAt != null)
+    {
+        return _lookedAt.collectItemData;
+    }
+
+    return null;
+}
+
     void ExecuteThrow()
     {
         float t = Mathf.Clamp01(_throwChargeTimer / maxThrowChargeTime);
