@@ -34,7 +34,6 @@ public class KelpLeaf : MonoBehaviour
         if (box != null)
         {
             // Center is zero to keep center of mass aligned, avoiding physics torque/sliding instability.
-            // Increased Y size lets the flat visual float ~17cm above the collision contact plane (above snow).
             box.size = new Vector3(0.5f, 0.35f, 0.5f);
             box.center = Vector3.zero;
         }
