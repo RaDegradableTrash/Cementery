@@ -26,7 +26,7 @@ RenderSettings:
   m_AmbientIntensity: 1
   m_AmbientMode: 1
   m_SubtractiveShadowColor: {r: 0.42, g: 0.478, b: 0.627, a: 1}
-  m_SkyboxMaterial: {fileID: 587123460}
+  m_SkyboxMaterial: {fileID: 1834207747}
   m_HaloStrength: 0.5
   m_FlareStrength: 1
   m_FlareFadeSpeed: 3
@@ -4084,46 +4084,6 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 563367156}
   m_CullTransparentMesh: 1
---- !u!21 &587123460
-Material:
-  serializedVersion: 8
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_Name: Runtime_DayNightSkybox
-  m_Shader: {fileID: 106, guid: 0000000000000000f000000000000000, type: 0}
-  m_Parent: {fileID: 0}
-  m_ModifiedSerializedProperties: 0
-  m_ValidKeywords:
-  - _SUNDISK_HIGH_QUALITY
-  m_InvalidKeywords: []
-  m_LightmapFlags: 4
-  m_EnableInstancingVariants: 0
-  m_DoubleSidedGI: 0
-  m_CustomRenderQueue: -1
-  stringTagMap: {}
-  disabledShaderPasses: []
-  m_LockedProperties: 
-  m_SavedProperties:
-    serializedVersion: 3
-    m_TexEnvs: []
-    m_Ints: []
-    m_Floats:
-    - _AtmosphereThickness: 0.79811674
-    - _Exposure: 0.9971027
-    - _GodrayPower: 2.6
-    - _GodrayStrength: 0
-    - _SunDisk: 2
-    - _SunSize: 0.035
-    - _SunSizeConvergence: 5
-    - _SunSoftness: 0.0018
-    m_Colors:
-    - _GodrayTint: {r: 1, g: 0.82, b: 0.62, a: 1}
-    - _GroundColor: {r: 0.3002895, g: 0.31697708, b: 0.34797353, a: 1}
-    - _SkyTint: {r: 0.44976765, g: 0.48021322, b: 0.52714026, a: 1}
-    - _SunColor: {r: 1, g: 0.956, b: 0.84, a: 1}
-  m_BuildTextureStacks: []
 --- !u!1 &592986395
 GameObject:
   m_ObjectHideFlags: 0
@@ -5255,6 +5215,7 @@ Transform:
   - {fileID: 1714649879}
   - {fileID: 2061480761}
   - {fileID: 963315334}
+  - {fileID: 1460252983}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &694285466
@@ -16201,6 +16162,53 @@ MonoBehaviour:
   m_OnValueChanged:
     m_PersistentCalls:
       m_Calls: []
+--- !u!1 &1460252982
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1460252983}
+  - component: {fileID: 1460252984}
+  m_Layer: 0
+  m_Name: BetterGameplayManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1460252983
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1460252982}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 671014512}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1460252984
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1460252982}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ac35fbe3b578e45b0b5a002f69d4790f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  defaultVisibilityRadius: 150
+  hysteresis: 15
+  objectsCheckedPerFrame: 200
 --- !u!1 &1475127543
 GameObject:
   m_ObjectHideFlags: 0
@@ -19510,6 +19518,46 @@ MonoBehaviour:
   m_OnValueChanged:
     m_PersistentCalls:
       m_Calls: []
+--- !u!21 &1834207747
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Runtime_DayNightSkybox
+  m_Shader: {fileID: 106, guid: 0000000000000000f000000000000000, type: 0}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords:
+  - _SUNDISK_HIGH_QUALITY
+  m_InvalidKeywords: []
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs: []
+    m_Ints: []
+    m_Floats:
+    - _AtmosphereThickness: 0.79811674
+    - _Exposure: 0.9971027
+    - _GodrayPower: 2.6
+    - _GodrayStrength: 0
+    - _SunDisk: 2
+    - _SunSize: 0.035
+    - _SunSizeConvergence: 5
+    - _SunSoftness: 0.0018
+    m_Colors:
+    - _GodrayTint: {r: 1, g: 0.82, b: 0.62, a: 1}
+    - _GroundColor: {r: 0.3002895, g: 0.31697708, b: 0.34797353, a: 1}
+    - _SkyTint: {r: 0.44976765, g: 0.48021322, b: 0.52714026, a: 1}
+    - _SunColor: {r: 1, g: 0.956, b: 0.84, a: 1}
+  m_BuildTextureStacks: []
 --- !u!1 &1852032053
 GameObject:
   m_ObjectHideFlags: 0

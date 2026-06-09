@@ -33,11 +33,6 @@ public class DesertPropPlacementTool : EditorWindow
     private float heightOffset = 0.35f; // Relative height offset based on scale to control embedding depth
     private int seed = 1337;
 
-    // Visibility LOD Settings
-    private float visibilityRadius = 120f;
-    private float visibilityHysteresis = 15f;
-    private float visibilityCheckInterval = 0.4f;
-
     // Static stack to record spawned GameObjects for immediate undo
     private static Stack<List<GameObject>> spawnedObjectsHistory = new Stack<List<GameObject>>();
 
@@ -75,18 +70,7 @@ public class DesertPropPlacementTool : EditorWindow
 
         EditorGUILayout.Space();
 
-        // 4. VISIBILITY LOD SETTINGS
-        EditorGUILayout.BeginVertical("box");
-        GUILayout.Label("Visibility LOD Settings (距离可见性优化)", EditorStyles.boldLabel);
-        visibilityRadius = EditorGUILayout.FloatField("Visibility Radius (可见距离)", visibilityRadius);
-        visibilityHysteresis = EditorGUILayout.FloatField("Hysteresis Band (抖动防护宽度)", visibilityHysteresis);
-        visibilityCheckInterval = EditorGUILayout.FloatField("Check Interval (检测间隔秒)", visibilityCheckInterval);
-        EditorGUILayout.HelpBox("在运行时，离玩家超出可见距离的仙人掌将自动隐藏，重新靠近后恢复显示。", MessageType.None);
-        EditorGUILayout.EndVertical();
 
-        EditorGUILayout.Space();
-
-        // HELP BOX
         string trendHelp = "";
         switch (trendMode)
         {
@@ -179,12 +163,8 @@ public class DesertPropPlacementTool : EditorWindow
                 holder.transform.localRotation = Quaternion.identity;
                 holder.transform.localScale = Vector3.one;
                 Undo.RegisterCreatedObjectUndo(holder, "Spawn Chunk Props");
-
-                // Attach visibility LOD manager
-                PropVisibilityManager visLOD = holder.AddComponent<PropVisibilityManager>();
-                visLOD.visibilityRadius = visibilityRadius;
-                visLOD.hysteresis = visibilityHysteresis;
-                visLOD.checkInterval = visibilityCheckInterval;
+                // Note: PropVisibilityManager is no longer used.
+                // BetterGameplayManager (global singleton) handles all prop visibility.
             }
 
             // Fetch mesh data directly if it exists, to support sculpted/deformed meshes in the editor
@@ -385,6 +365,16 @@ public class DesertPropPlacementTool : EditorWindow
                     Quaternion rot = Quaternion.FromToRotation(Vector3.up, normal);
                     rot = rot * Quaternion.Euler(0f, Random.Range(0f, 360f), 0f);
                     spawnedObj.transform.rotation = rot;
+
+                    // Register with BetterGameplayManager via OptimizableObject
+                    // (only add if not already present, e.g. if the prefab already has one)
+                    OptimizableObject optObj = spawnedObj.GetComponent<OptimizableObject>();
+                    if (optObj == null)
+                    {
+                        optObj = Undo.AddComponent<OptimizableObject>(spawnedObj);
+                    }
+                    optObj.disableEntireGameObject = true;
+                    optObj.useFrustumCulling = true;
 
                     spawnedPositions.Add(spawnPos);
                     totalSpawned++;
