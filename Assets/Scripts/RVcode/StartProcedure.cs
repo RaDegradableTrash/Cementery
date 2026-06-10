@@ -134,6 +134,25 @@ public class StartProcedure : MonoBehaviour
         OnStateChanged?.Invoke();
     }
 
+// 添加在 StartProcedure 类中，ForceShutdownEngine 方法之后
+
+// ★★★ 检查并自动恢复启动（当油量恢复时）★★★
+public void TryAutoRestartEngine()
+{
+    // 如果引擎未启动，但有油量且启动条件满足
+    if (!engineOn && CanStartEngine())
+    {
+        // 可选：自动重启，或者触发提示让玩家手动启动
+        // 这里实现自动重启（如果你希望自动的话）
+        engineOn = true;
+        if (carControl != null)
+        {
+            carControl.SetEngineOn(true);
+        }
+        OnStateChanged?.Invoke();
+        Debug.Log("Engine auto-restarted due to fuel added!");
+    }
+}
 
     public void ForceStartVehicle()
 {

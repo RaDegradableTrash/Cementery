@@ -29,8 +29,8 @@ public class CarControl : MonoBehaviour
     public event System.Action<bool> OnElectricalPowerChanged;
 
     [Header("Start Procedure")]
-[SerializeField] private StartProcedure startProcedure;
-[SerializeField] private bool startWithEngineRunning = false;  // 新增：是否以启动状态开始
+    [SerializeField] private StartProcedure startProcedure;
+    [SerializeField] private bool startWithEngineRunning = false;
 
     [Header("Modes")]
     [SerializeField] private float sportTorque = 50000f;
@@ -63,9 +63,27 @@ public class CarControl : MonoBehaviour
     private int currentTransmissionGear = 0;
     private float shiftTimer = 0f;
     private float smoothEngineRpm = 500f;
+    public float SmoothEngineRpm => smoothEngineRpm;
 
-    // 暴露给外部脚本（如相机晃动脚本）访问的平滑发动机转速接口
-public float SmoothEngineRpm => smoothEngineRpm;
+    [Header("Fuel & Regeneration System")]
+    [Tooltip("燃油消耗速率倍率。1为默认，数值越小越慢（如0.5），数值越大越快（如2）")]
+    [SerializeField] private float fuelConsumptionMultiplier = 1f;
+    
+    [Tooltip("滑行或怠速（未踩油门）时的基础轻微消耗百分比（占最大油门消耗的比例，0.02表示2%）")]
+    [SerializeField] private float idleConsumptionFactor = 0.02f;
+    
+    [Header("Regenerative Braking")]
+    [Tooltip("动能回收效率 (0-1)。0=无回收，1=100%动能转化为电量")]
+    [SerializeField] private float regenEfficiency = 0.3f;
+    
+    [Tooltip("动能回收最大功率（每秒回收多少燃油当量）")]
+    [SerializeField] private float maxRegenPower = 2f;
+    
+    [Tooltip("动能回收生效的最小速度 (km/h)")]
+    [SerializeField] private float regenMinSpeed = 5f;
+    
+    [Tooltip("动能回收生效的最大刹车力度阈值 (0-1)")]
+    [SerializeField] private float regenBrakeThreshold = 0.1f;
 
     [Header("Control Override")]
     [SerializeField] private bool activeControl = false;
@@ -137,6 +155,10 @@ public float SmoothEngineRpm => smoothEngineRpm;
     private double turboPhase;
     private double samplingRate;
     private uint noiseSeed = 123456789u;
+    
+    // 动能回收相关
+    private float lastFrameVelocity = 0f;
+    private Vector3 lastFramePosition;
 
     public void SetGear(GearMode gear)
     {
@@ -295,37 +317,33 @@ public float SmoothEngineRpm => smoothEngineRpm;
             steeringWheelInitialLocalRotation = steeringWheel.localRotation;
         }
 
-SetGearInternal(startGear, true);
+        SetGearInternal(startGear, true);
+        
+        // 初始化位置记录用于动能回收
+        lastFramePosition = transform.position;
 
-// 新增：根据 startWithEngineRunning 决定初始状态
-if (startWithEngineRunning)
-{
-    // 强制启动状态：引擎开，电源开
-    SetEngineOn(true);
-    SetElectricalPower(true);
-    
-    // 如果有 StartProcedure 组件，也同步其状态
-    if (startProcedure != null)
-    {
-        // 使用反射或公共方法强制启动 StartProcedure
-        // 由于 StartProcedure 可能需要启动油泵等，我们直接调用其公共方法（如果有的话）
-        // 如果没有，至少确保电源和引擎状态同步
-        startProcedure.ForceStartVehicle(); // 需要你在 StartProcedure 中添加这个方法
-    }
-}
-else
-{
-    // 原来的逻辑
-    SetEngineOn(engineOn);
-    if (startProcedure != null)
-    {
-        SetElectricalPower(startProcedure.HasAnyBatteryOn());
-    }
-    else
-    {
-        SetElectricalPower(true);
-    }
-}
+        if (startWithEngineRunning)
+        {
+            SetEngineOn(true);
+            SetElectricalPower(true);
+            
+            if (startProcedure != null)
+            {
+                startProcedure.ForceStartVehicle();
+            }
+        }
+        else
+        {
+            SetEngineOn(engineOn);
+            if (startProcedure != null)
+            {
+                SetElectricalPower(startProcedure.HasAnyBatteryOn());
+            }
+            else
+            {
+                SetElectricalPower(true);
+            }
+        }
     }
 
     void Update()
@@ -338,6 +356,7 @@ else
                 SetEngineOn(startProcedure.EngineOn);
             }
         }
+        
         float rawVertical = activeControl ? Input.GetAxis("Vertical") : 0f;
         float hInputRaw = activeControl ? Input.GetAxisRaw("Horizontal") : 0f;
 
@@ -420,35 +439,6 @@ else
                 break;
         }
 
-        if (engineOn)
-        {
-            if (FuelTank.SharedFuel <= 0f)
-            {
-                SetEngineOn(false);
-                if (startProcedure != null)
-                {
-                    startProcedure.ForceShutdownEngine();
-                }
-                throttleInput = 0f;
-            }
-            else
-            {
-                float baseRate = 0.5f;
-                float activeRate = 1.5f;
-                float consumption = (baseRate + Mathf.Abs(rawVertical) * activeRate) * Time.deltaTime;
-                FuelTank.SharedFuel -= consumption;
-            }
-        }
-
-        if (!engineOn)
-        {
-            throttleInput = 0f;
-        }
-        else if (startProcedure != null && !startProcedure.HasAnyPumpOn())
-        {
-            throttleInput = 0f;
-        }
-
         float appliedThrottleInput = throttleInput;
         if (currentGear == GearMode.L6)
         {
@@ -513,35 +503,28 @@ else
         // ========== 用转速限制车速 ==========
         float maxEngineRpm = 2800f;
 
-        // 获取当前车轮半径
         float wheelRadius = 0.35f;
         if (wheels != null && wheels.Length > 0 && wheels[0] != null && wheels[0].WheelCollider != null)
         {
             wheelRadius = wheels[0].WheelCollider.radius;
         }
 
-        // 根据当前档位计算理论最高车速
         if (currentGear == GearMode.Drive || currentGear == GearMode.Sport || IsSixLockGear(currentGear))
         {
             float maxWheelRpmForCurrentGear = maxEngineRpm / (currentGearRatio * finalDriveRatio);
             float maxForwardSpeedForCurrentGear = maxWheelRpmForCurrentGear * (2f * Mathf.PI * wheelRadius) / 60f;
             
-            // 限制 forwardSpeed 不超过理论最高速度
             float absForwardSpeed = Mathf.Abs(forwardSpeed);
             if (absForwardSpeed > maxForwardSpeedForCurrentGear)
             {
                 float limitedSpeed = Mathf.Sign(forwardSpeed) * maxForwardSpeedForCurrentGear;
-                
-                // 修正刚体速度
                 Vector3 currentVel = rigidBody.velocity;
                 float currentSideways = Vector3.Dot(transform.right, currentVel);
                 float currentUp = Vector3.Dot(transform.up, currentVel);
                 rigidBody.velocity = transform.forward * limitedSpeed + transform.right * currentSideways + transform.up * currentUp;
-                
                 forwardSpeed = limitedSpeed;
             }
         }
-        // ============================================
 
         float absWheelRpm = GetStableWheelRpm(forwardSpeed);
         float calculatedEngineRpm = absWheelRpm * currentGearRatio * finalDriveRatio;
@@ -573,6 +556,7 @@ else
             targetEngineRpm = engineMinRpm + Mathf.Abs(throttleInput) * (upshiftRpm - engineMinRpm);
         }
 
+        // ★★★ 关键修改：引擎熄火时强制 throttle 为 0 ★★★
         if (!engineOn)
         {
             targetEngineRpm = 0f;
@@ -590,7 +574,6 @@ else
             smoothEngineRpm = Mathf.Lerp(smoothEngineRpm, 0f, Time.deltaTime * 3f);
         }
 
-        // 更新引擎负载（用于声音）
         float targetLoad = engineOn ? Mathf.Abs(appliedThrottleInput) : 0f;
         engineLoad = Mathf.Lerp(engineLoad, targetLoad, Time.deltaTime * 8f);
 
@@ -612,6 +595,9 @@ else
         }
 
         bool isHandBraking = activeControl && Input.GetKey(KeyCode.Space);
+        
+        // ★★★ 动能回收处理 ★★★
+        HandleRegenerativeBraking(brakeInput, isHandBraking);
 
         foreach (var wheel in wheels)
         {
@@ -654,7 +640,9 @@ else
                 bool isSixLock = IsSixLockGear(currentGear);
                 bool allowSixLockDrive = isSixLock && (sixLockWheelSet.Count == 0 || sixLockWheelSet.Contains(wheel));
                 bool isMotorized = isSixLock ? allowSixLockDrive : wheel.motorized;
-                if (isMotorized)
+                
+                // ★★★ 引擎熄火时完全不输出动力 ★★★
+                if (isMotorized && engineOn)
                 {
                     wheel.WheelCollider.motorTorque = appliedThrottleInput * currentMotorTorque;
                 }
@@ -674,6 +662,151 @@ else
             float targetAngle = steeringNormalized * steeringWheelMaxTurn * dir;
             steeringWheel.localRotation = steeringWheelInitialLocalRotation * Quaternion.AngleAxis(targetAngle, steeringWheelLocalAxis);
         }
+
+        throttleInput = Mathf.Clamp01(Input.GetAxis("Vertical")); 
+
+        // ★★★ 燃油消耗管理（会自动熄火）★★★
+        HandleFuelConsumption(throttleInput);
+        
+        // 更新上一帧位置用于动能回收
+        lastFramePosition = transform.position;
+    }
+
+    // ★★★ 燃油系统（新增自动熄火逻辑）★★★
+    private void HandleFuelConsumption(float throttle)
+    {
+        // 如果油箱没油，强制熄火
+        if (FuelTank.SharedFuel <= 0f)
+        {
+            if (engineOn)
+            {
+                engineOn = false;
+                OnEngineStateChanged?.Invoke(false);
+                
+                // 通知 StartProcedure 同步状态
+                if (startProcedure != null && startProcedure.EngineOn)
+                {
+                    startProcedure.ForceShutdownEngine();
+                }
+            }
+            return;
+        }
+        
+        // 引擎没发动或没通电，不消耗燃油
+        if (!engineOn || !electricalPowerOn) return;
+
+        float maxCapacity = 100f;
+        float fullThrottleRatePerSecond = (maxCapacity * 0.5f) / 60f;
+
+        float currentRate = 0f;
+
+        if (throttle > 0.05f)
+        {
+            currentRate = fullThrottleRatePerSecond * throttle;
+        }
+        else
+        {
+            currentRate = fullThrottleRatePerSecond * idleConsumptionFactor;
+        }
+
+        float finalConsumption = currentRate * fuelConsumptionMultiplier * Time.deltaTime;
+        
+        // 防止油量变负数并自动熄火
+        if (finalConsumption >= FuelTank.SharedFuel)
+        {
+            FuelTank.SharedFuel = 0f;
+            engineOn = false;
+            OnEngineStateChanged?.Invoke(false);
+            
+            if (startProcedure != null && startProcedure.EngineOn)
+            {
+                startProcedure.ForceShutdownEngine();
+            }
+        }
+        else
+        {
+            FuelTank.SharedFuel -= finalConsumption;
+        }
+    }
+    
+    // ★★★ 动能回收系统 ★★★
+    private void HandleRegenerativeBraking(float brakeInput, bool isHandBraking)
+    {
+        // 条件检查：引擎必须运行（或者有电气系统），车速足够，不在空档或倒车？可以根据需要调整
+        if (!electricalPowerOn || isHandBraking || currentSpeedKmh < regenMinSpeed)
+        {
+            return;
+        }
+        
+        // 检查是否在刹车
+// 检查是否在刹车
+bool isBraking = brakeInput > regenBrakeThreshold;
+if (!isBraking)
+{
+    return;
+}
+        
+        // 计算动能回收量
+        // 基于减速度计算回收能量
+        Vector3 currentVelocity = rigidBody.velocity;
+        float forwardVelocity = Vector3.Dot(transform.forward, currentVelocity);
+        
+        // 简单的物理计算：动能变化 = 0.5 * m * (v1^2 - v2^2)
+        // 我们使用上一帧速度来估算动能损失
+        Vector3 lastVel = (lastFramePosition - transform.position) / Time.deltaTime;
+        float lastForwardVel = Vector3.Dot(transform.forward, lastVel);
+        
+        float deltaVelocity = Mathf.Max(0, lastForwardVel - forwardVelocity);
+        
+        if (deltaVelocity > 0.1f)
+        {
+            float mass = rigidBody.mass;
+            float kineticEnergyLost = 0.5f * mass * (lastForwardVel * lastForwardVel - forwardVelocity * forwardVelocity);
+            
+            // 转换能量为燃油当量（假设1单位燃油 = 1000焦耳，可根据需要调整）
+            float energyToFuel = kineticEnergyLost / 1000f;
+            
+            // 应用效率和最大功率限制
+            float regenAmount = energyToFuel * regenEfficiency;
+            regenAmount = Mathf.Min(regenAmount, maxRegenPower * Time.deltaTime);
+            
+            // 回收燃油到油箱
+            if (regenAmount > 0)
+            {
+                AddFuel(regenAmount);
+                
+                // 可选：添加UI提示（如显示"再生制动 +X"）
+                // Debug.Log($"Regen: +{regenAmount:F3} fuel");
+            }
+        }
+    }
+    
+    // ★★★ 公共接口：添加燃油 ★★★
+    public void AddFuel(float amount)
+    {
+        if (amount <= 0) return;
+        
+        float oldFuel = FuelTank.SharedFuel;
+        FuelTank.SharedFuel = Mathf.Min(100f, FuelTank.SharedFuel + amount);
+        
+        float added = FuelTank.SharedFuel - oldFuel;
+        if (added > 0)
+        {
+            Debug.Log($"Added {added:F2} fuel. Total: {FuelTank.SharedFuel:F2}/100");
+            
+            // 如果有加油动画或UI事件可以在这里触发
+            // OnFuelAdded?.Invoke(added);
+                    if (oldFuel <= 0f && FuelTank.SharedFuel > 0f && startProcedure != null)
+        {
+            startProcedure.TryAutoRestartEngine();
+        }
+        }
+    }
+    
+    // ★★★ 获取当前油量（方便外部显示）★★★
+    public float GetCurrentFuel()
+    {
+        return FuelTank.SharedFuel;
     }
 
     // ========== 引擎声音生成 ==========
@@ -727,7 +860,6 @@ else
             float signal = 0f;
             float phaseAngle = (float)(localPhase * Mathf.PI * 2f);
             
-            // 点火脉冲
             float pulse = 0f;
             if (localPhase < pWidth)
             {
@@ -740,13 +872,11 @@ else
             pulse *= cylinderVar;
             signal += pulse * 0.7f;
             
-            // 十字曲轴律动
             float rumble = Mathf.Sin(phaseAngle) * 0.25f;
             rumble += Mathf.Sin(phaseAngle * 2f) * 0.12f * rpmRatio;
             rumble += Mathf.Sin(phaseAngle * 3f) * 0.06f * highRpmBias;
             signal += rumble;
             
-            // 排气系统
             float exhaustAngle = (float)(localExhaustPhase * Mathf.PI * 2f);
             float exhaust = 0f;
             exhaust += Mathf.Sin(exhaustAngle * 2f) * 0.4f * exhaustRes;
@@ -754,7 +884,6 @@ else
             exhaust += Mathf.Exp(-Mathf.Abs(Mathf.Sin(exhaustAngle))) * 0.2f;
             signal += exhaust * 0.3f;
             
-            // 进气系统
             float intakeAngle = (float)(localIntakePhase * Mathf.PI * 2f);
             float intakeSig = 0f;
             float intakeBias = Mathf.Sin(rpmRatio * Mathf.PI) * 0.8f;
@@ -762,7 +891,6 @@ else
             intakeSig += Mathf.Sin(intakeAngle * 3f) * 0.15f * highRpmBias;
             signal += intakeSig * intake;
             
-            // 涡轮
             float turboAngle = (float)(localTurboPhase * Mathf.PI * 2f);
             float turbosound = 0f;
             if (rpmRatio > 0.4f)
@@ -777,21 +905,17 @@ else
             }
             signal += turbosound * turbo;
             
-            // 机械噪音
             float mechNoise = GetDeterministicNoise() * mechanical;
             mechNoise *= (0.5f + rpmRatio * 0.5f);
             signal += mechNoise;
             
-            // 发动机负载感
             float loadPulse = Mathf.Sin(phaseAngle * 4f) * engineLoad * 0.2f;
             signal += loadPulse;
             
-            // 音量包络
             float volumeEnvelope = Mathf.Lerp(0.65f, 1.0f, rpmRatio);
             volumeEnvelope += engineLoad * 0.2f;
             volumeEnvelope = Mathf.Clamp01(volumeEnvelope);
             
-            // 低通滤波
             float filteredSignal = signal;
             if (rpmRatio < 0.3f)
             {

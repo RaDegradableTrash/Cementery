@@ -9,10 +9,14 @@ public abstract class GearButtonBase : MonoBehaviour, ICockpitInteractable, ICoc
     [SerializeField] private Color highlightEmissionColor = new Color(0.95f, 0.95f, 0.95f, 1f);
     [SerializeField] private float highlightEmissionHdr = -4.5f;
 
-    // ── 🌟 核心新增：音效播放接口的静态引用 ─────────────────────────────────
-    // 使用静态（static）引用，这样全局只需要有一个音效管理者注册进来，所有按钮都能直接调用
-    public static IGearAudioPlayer AudioPlayer { get; set; }
+    // ── 🌟 核心修改：在 Inspector 中公开音效槽位 ──────────────────────────────
+    [Header("Audio Settings")]
+    [Tooltip("在这里拖入你想要播放的点击音效 MP3 文件")]
+    [SerializeField] private AudioClip clickSound; 
+    private AudioSource _audioSource;
     // ────────────────────────────────────────────────────────────────────────
+
+    public static IGearAudioPlayer AudioPlayer { get; set; }
 
     private Color inactiveEmissionColor = Color.black;
     private bool hasEmission;
@@ -35,6 +39,15 @@ public abstract class GearButtonBase : MonoBehaviour, ICockpitInteractable, ICoc
 
         CacheEmissionColor();
         UpdateVisual(ShouldGlow(carControl));
+
+        // ── 🌟 核心修改：全自动挂载/获取播放器组件（不需要手动去加 AudioSource） ──
+        _audioSource = GetComponent<AudioSource>();
+        if (_audioSource == null)
+        {
+            _audioSource = gameObject.AddComponent<AudioSource>();
+        }
+        _audioSource.playOnAwake = false;
+        _audioSource.spatialBlend = 0.0f; // 2D音效，保证无论离多远都听得最清楚
     }
 
     private void OnEnable()
@@ -65,21 +78,25 @@ public abstract class GearButtonBase : MonoBehaviour, ICockpitInteractable, ICoc
         UpdateVisual(ShouldGlow(carControl));
     }
 
-    // ── 🌟 核心修改：在换挡交互时，调用音效接口 ─────────────────────────────
+    // ── 🌟 核心修改：点击时，播放你在 Inspector 里拖进去的音效 ────────────────
     public void Interact()
     {
+        // 1. 检查有没有在 Inspector 里拖入音效，如果有，立刻播放
+        if (clickSound != null && _audioSource != null)
+        {
+            _audioSource.PlayOneShot(clickSound, 0.8f); // 0.8f 是音量大小
+        }
+
+        // 2. 原本的换挡逻辑
         if (carControl != null)
         {
             if (carControl.EngineOn)
             {
                 carControl.SetGear(Gear);
-                
-                // 成功时：通知音效器播放成功音效，并把当前的档位传过去（方便你不同档位播不同声音）
                 AudioPlayer?.PlayShiftSuccess(Gear);
             }
             else
             {
-                // 失败时：通知音效器播放失败/警报音效
                 AudioPlayer?.PlayShiftFail(Gear);
             }
         }

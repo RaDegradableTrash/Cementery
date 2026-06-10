@@ -13,6 +13,14 @@ public class FuelTank : MonoBehaviour
     [Tooltip("3D Text Mesh (TextMeshPro) for displaying percentage directly in the 3D space.")]
     public TextMeshPro fuelText;
 
+    // ── 🌟 核心新增：车内显示屏的 TMP 槽位 ─────────────────────────────────
+    [Header("Car Dashboard Display (New)")]
+    [Tooltip("将你车辆内部、中控屏或仪表盘上的 TextMeshPro-Text (UI 或 3D) 拖到这里")]
+    public TextMeshProUGUI carDashboardFuelText; // 如果你车内屏幕是 Canvas UI，用 TextMeshProUGUI
+    [Tooltip("如果车内屏幕是 3D 空间的 TextMeshPro，请把上面留空，把组件拖到这个槽位")]
+    public TextMeshPro carDashboardFuelText3D;   // 如果是 3D 物体 TMP，用这个
+    // ────────────────────────────────────────────────────────────────────────
+
     [Header("Fuel Config")]
     public float maxCapacity = 100f;
     public string fuelItemNameFilter = "fuel"; // If matching held item name
@@ -92,25 +100,21 @@ public class FuelTank : MonoBehaviour
     {
         if (mat == null) return;
 
-        // Support for URP Lit shader Surface Type
         if (mat.HasProperty("_Surface"))
         {
             mat.SetFloat("_Surface", 1f); // 1 = Transparent
         }
 
-        // Support for URP Blend Mode
         if (mat.HasProperty("_Blend"))
         {
             mat.SetFloat("_Blend", 0f); // 0 = Alpha Blending
         }
 
-        // Standard Shader mode
         if (mat.HasProperty("_Mode"))
         {
             mat.SetFloat("_Mode", 3f); // 3 = Transparent
         }
 
-        // Configure blending factor settings
         mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
         mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
         mat.SetInt("_ZWrite", 0);
@@ -119,13 +123,11 @@ public class FuelTank : MonoBehaviour
         mat.EnableKeyword("_ALPHABLEND_ON");
         mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
 
-        // Force transparent render queue (3000)
         mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
     }
 
     private void Awake()
     {
-        // Register this instance to the shared active list
         if (!_activeTanks.Contains(this))
         {
             _activeTanks.Add(this);
@@ -133,7 +135,6 @@ public class FuelTank : MonoBehaviour
         
         _sharedMaxCapacity = maxCapacity;
 
-        // Enforce clean Neon hologram colors on awake
         lowFuelColor = new Color(0.9f, 0.2f, 0.2f, 0.85f);
         mediumFuelColor = new Color(0.9f, 0.6f, 0.1f, 0.85f);
         fullFuelColor = new Color(0.0f, 0.85f, 0.95f, 0.85f);
@@ -144,30 +145,25 @@ public class FuelTank : MonoBehaviour
             _fillMeshFilter = fuelBarFillRenderer.GetComponent<MeshFilter>();
             if (_fillMeshFilter != null)
             {
-                // Create custom mesh instance so we deform vertices properly
                 _proceduralMesh = new Mesh();
                 _proceduralMesh.name = "ProceduralFuelWaveMesh";
                 _fillMeshFilter.mesh = _proceduralMesh;
                 BuildBaseWaveMesh();
             }
 
-            // Programmatically configure material for transparency
             if (fuelBarFillRenderer.material != null)
             {
                 SetupMaterialTransparent(fuelBarFillRenderer.material);
             }
 
-            // Disable shadow casting and receiving on the wave fill mesh to strip shadows
             fuelBarFillRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             fuelBarFillRenderer.receiveShadows = false;
         }
 
-        // Apply shadow disabling on all displayObject outlines/backgrounds
         if (displayObject != null)
         {
             foreach (var r in displayObject.GetComponentsInChildren<Renderer>(true))
             {
-                // Programmatically configure material for transparency
                 if (r.material != null)
                 {
                     SetupMaterialTransparent(r.material);
@@ -191,15 +187,13 @@ public class FuelTank : MonoBehaviour
             displayObject.SetActive(false);
         }
         UpdateUI();
-        _currentRatio = _targetRatio; // Initialize instantly to avoid startup lag
+        _currentRatio = _targetRatio;
     }
 
     private void Update()
     {
-        // Smoothly interpolate the visual ratio towards the target fuel ratio
         _currentRatio = Mathf.MoveTowards(_currentRatio, _targetRatio, Time.deltaTime * fillTransitionSpeed);
 
-        // Debug fuel control via keyboard: '-' decreases by 5%, '=' increases by 5%
         if (Input.GetKeyDown(KeyCode.Minus) || Input.GetKeyDown(KeyCode.KeypadMinus))
         {
             float amountToReduce = maxCapacity * 0.05f;
@@ -211,23 +205,20 @@ public class FuelTank : MonoBehaviour
             currentFuel += amountToAdd;
         }
 
-        // Animate wave vertices over time
         if (displayObject != null && displayObject.activeSelf && _proceduralMesh != null)
         {
             AnimateWaveMesh();
         }
 
-        // 1-second delay buffer when looking away
         bool shouldShow = _isLookingAt;
         if (!_isLookingAt && _lookAwayTimer > 0f)
         {
             _lookAwayTimer -= Time.deltaTime;
-            shouldShow = true; // Stay visible during the 1-second grace period
+            shouldShow = true;
         }
 
         float targetAlpha = shouldShow ? 1f : 0f;
         
-        // Handle visual activation and fading
         if (displayObject != null)
         {
             if (shouldShow && !displayObject.activeSelf)
@@ -240,7 +231,6 @@ public class FuelTank : MonoBehaviour
             _currentAlpha = Mathf.MoveTowards(_currentAlpha, targetAlpha, Time.deltaTime * 8f);
             displayObject.transform.localScale = Vector3.one * Mathf.SmoothStep(0.8f, 1f, _currentAlpha);
 
-            // Apply fading to display alpha
             SetDisplayAlpha(_currentAlpha);
 
             if (!_isLookingAt && Mathf.Approximately(_currentAlpha, 0f))
@@ -248,6 +238,10 @@ public class FuelTank : MonoBehaviour
                 displayObject.SetActive(false);
             }
         }
+
+        // ── 🌟 核心新增：确保车内中控屏文本的每一帧动画和色彩变化同步 ───────
+        UpdateCarDashboardText();
+        // ────────────────────────────────────────────────────────────────────────
     }
 
     private void BuildBaseWaveMesh()
@@ -264,7 +258,6 @@ public class FuelTank : MonoBehaviour
 
             if (fillHeightAxis == WaveAxis.LocalX)
             {
-                // X is height, Y is horizontal segment (Rotated Quad case)
                 vertices[i * 2] = new Vector3(-0.5f, primary, 0f);
                 uvs[i * 2] = new Vector2(0f, t);
 
@@ -273,7 +266,6 @@ public class FuelTank : MonoBehaviour
             }
             else if (fillHeightAxis == WaveAxis.LocalZ)
             {
-                // Z is height
                 vertices[i * 2] = new Vector3(primary, 0f, -0.5f);
                 uvs[i * 2] = new Vector2(t, 0f);
 
@@ -282,7 +274,6 @@ public class FuelTank : MonoBehaviour
             }
             else
             {
-                // Standard Y-up
                 vertices[i * 2] = new Vector3(primary, -0.5f, 0f);
                 uvs[i * 2] = new Vector2(t, 0f);
 
@@ -353,7 +344,6 @@ public class FuelTank : MonoBehaviour
     {
         if (displayObject == null) return;
 
-        // Automatically scale color transparency for all components in displayObject
         Renderer[] renderers = displayObject.GetComponentsInChildren<Renderer>(true);
         foreach (var r in renderers)
         {
@@ -361,7 +351,6 @@ public class FuelTank : MonoBehaviour
 
             r.GetPropertyBlock(_propBlock);
             
-            // Neon Hologram background/outline glows with fading 30% alpha (alpha * 0.3f)
             Color baseCol = Color.white;
             if (r.material != null)
             {
@@ -374,7 +363,6 @@ public class FuelTank : MonoBehaviour
             }
             baseCol.a = alpha * 0.3f;
             
-            // Set both URP and Standard color variables
             _propBlock.SetColor("_Color", baseCol);
             _propBlock.SetColor("_BaseColor", baseCol);
             _propBlock.SetFloat("_Alpha", alpha);
@@ -389,7 +377,6 @@ public class FuelTank : MonoBehaviour
             }
         }
 
-        // Float fluid glows with 60% neon transparency (alpha * 0.6f)
         if (fuelBarFillRenderer != null)
         {
             Color targetColor = fullFuelColor;
@@ -414,7 +401,6 @@ public class FuelTank : MonoBehaviour
             }
         }
 
-        // Handle percentage text transparency - 50% opacity (alpha * 0.5f)
         if (fuelText != null)
         {
             Color targetColor = fullFuelColor;
@@ -426,15 +412,42 @@ public class FuelTank : MonoBehaviour
         }
     }
 
+    // ── 🌟 核心新增：专门更新车内中控屏文本的私有函数 ───────────────────────
+    private void UpdateCarDashboardText()
+    {
+        // 计算文本和根据油量改变颜色
+        float percent = _currentRatio * 100f;
+        string displayText = $"{percent:F0}%";
+
+        Color targetColor = fullFuelColor;
+        if (_currentRatio < 0.3f) targetColor = Color.Lerp(lowFuelColor, mediumFuelColor, _currentRatio / 0.3f);
+        else targetColor = Color.Lerp(mediumFuelColor, fullFuelColor, (_currentRatio - 0.3f) / 0.7f);
+
+        // 情况一：如果你拖入的是 UI Canvas 里的 TextMeshPro
+        if (carDashboardFuelText != null)
+        {
+            carDashboardFuelText.text = displayText;
+            carDashboardFuelText.color = targetColor;
+        }
+
+        // 情况二：如果你拖入的是直接贴在 3D 屏幕模型上的 TextMeshPro
+        if (carDashboardFuelText3D != null)
+        {
+            carDashboardFuelText3D.text = displayText;
+            carDashboardFuelText3D.color = targetColor;
+        }
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     public void ShowUI(bool isLooking)
     {
         if (isLooking)
         {
-            _lookAwayTimer = 0f; // Reset buffer timer if focused again
+            _lookAwayTimer = 0f;
         }
-        else if (_isLookingAt) // Transition from focused to unfocused
+        else if (_isLookingAt)
         {
-            _lookAwayTimer = 1.0f; // Initialize 1-second delay buffer
+            _lookAwayTimer = 1.0f;
         }
         _isLookingAt = isLooking;
     }

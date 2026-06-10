@@ -10,6 +10,15 @@ public class SimpleLightButton : MonoBehaviour, ICockpitInteractable, ICockpitHi
     [SerializeField] private Color highlightEmissionColor = new Color(0.95f, 0.95f, 0.95f, 1f);
     [SerializeField] private float highlightEmissionHdr = -4.5f;
 
+    // ── 🌟 核心新增：在 Inspector 中公开音效槽位 ──────────────────────────────
+    [Header("Audio Settings")]
+    [Tooltip("在这里拖入你想要播放的开关灯点击音效 MP3 文件")]
+    [SerializeField] private AudioClip clickSound; 
+    [Range(0f, 1f)] [SerializeField] private float volume = 0.8f;
+    
+    private AudioSource _audioSource;
+    // ────────────────────────────────────────────────────────────────────────
+
     private Color inactiveEmissionColor = Color.black;
     private bool hasEmission;
     private bool isHighlighted;
@@ -32,6 +41,16 @@ public class SimpleLightButton : MonoBehaviour, ICockpitInteractable, ICockpitHi
 
         CacheEmissionColor();
         UpdateVisual();
+
+        // ── 🌟 核心新增：全自动挂载/获取播放器组件，省去手动操作 ─────────────────
+        _audioSource = GetComponent<AudioSource>();
+        if (_audioSource == null)
+        {
+            _audioSource = gameObject.AddComponent<AudioSource>();
+        }
+        _audioSource.playOnAwake = false;
+        _audioSource.spatialBlend = 0.0f; // 2D音效，保证在座舱内戴耳机听得最清晰
+        // ────────────────────────────────────────────────────────────────────────
     }
 
     private void Update()
@@ -41,6 +60,13 @@ public class SimpleLightButton : MonoBehaviour, ICockpitInteractable, ICockpitHi
 
     public void Interact()
     {
+        // ── 🌟 核心新增：只要触发了交互，无条件播放点击音效 ──────────────────────
+        if (clickSound != null && _audioSource != null)
+        {
+            _audioSource.PlayOneShot(clickSound, volume);
+        }
+        // ────────────────────────────────────────────────────────────────────────
+
         if (lightTargets == null || lightTargets.Length == 0)
         {
             return;
