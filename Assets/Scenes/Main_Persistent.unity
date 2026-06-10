@@ -26,7 +26,7 @@ RenderSettings:
   m_AmbientIntensity: 1
   m_AmbientMode: 1
   m_SubtractiveShadowColor: {r: 0.42, g: 0.478, b: 0.627, a: 1}
-  m_SkyboxMaterial: {fileID: 163980260}
+  m_SkyboxMaterial: {fileID: 1469611929}
   m_HaloStrength: 0.5
   m_FlareStrength: 1
   m_FlareFadeSpeed: 3
@@ -1002,46 +1002,6 @@ RectTransform:
   m_AnchoredPosition: {x: 10, y: 10}
   m_SizeDelta: {x: 0, y: 45}
   m_Pivot: {x: 0, y: 0}
---- !u!21 &163980260
-Material:
-  serializedVersion: 8
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_Name: Runtime_DayNightSkybox
-  m_Shader: {fileID: 106, guid: 0000000000000000f000000000000000, type: 0}
-  m_Parent: {fileID: 0}
-  m_ModifiedSerializedProperties: 0
-  m_ValidKeywords:
-  - _SUNDISK_HIGH_QUALITY
-  m_InvalidKeywords: []
-  m_LightmapFlags: 4
-  m_EnableInstancingVariants: 0
-  m_DoubleSidedGI: 0
-  m_CustomRenderQueue: -1
-  stringTagMap: {}
-  disabledShaderPasses: []
-  m_LockedProperties: 
-  m_SavedProperties:
-    serializedVersion: 3
-    m_TexEnvs: []
-    m_Ints: []
-    m_Floats:
-    - _AtmosphereThickness: 0.79811674
-    - _Exposure: 0.9971027
-    - _GodrayPower: 2.6
-    - _GodrayStrength: 0
-    - _SunDisk: 2
-    - _SunSize: 0.035
-    - _SunSizeConvergence: 5
-    - _SunSoftness: 0.0018
-    m_Colors:
-    - _GodrayTint: {r: 1, g: 0.82, b: 0.62, a: 1}
-    - _GroundColor: {r: 0.3002895, g: 0.31697708, b: 0.34797353, a: 1}
-    - _SkyTint: {r: 0.44976765, g: 0.48021322, b: 0.52714026, a: 1}
-    - _SunColor: {r: 1, g: 0.956, b: 0.84, a: 1}
-  m_BuildTextureStacks: []
 --- !u!1 &168055263
 GameObject:
   m_ObjectHideFlags: 0
@@ -3332,7 +3292,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 255839828627434107, guid: 68eb488757389164dad56af32c6679c2, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 233.19998
+      value: 504.8
       objectReference: {fileID: 0}
     - target: {fileID: 255839828627434107, guid: 68eb488757389164dad56af32c6679c2, type: 3}
       propertyPath: m_LocalPosition.z
@@ -4416,7 +4376,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 713372528974561830, guid: fc7e4c721ec7e49f687ac3cd76e603ca, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 233.4
+      value: 505
       objectReference: {fileID: 0}
     - target: {fileID: 713372528974561830, guid: fc7e4c721ec7e49f687ac3cd76e603ca, type: 3}
       propertyPath: m_LocalPosition.z
@@ -4462,10 +4422,6 @@ PrefabInstance:
       propertyPath: GlobalObjectIdHash
       value: 3726895841
       objectReference: {fileID: 0}
-    - target: {fileID: 5809101294757508204, guid: fc7e4c721ec7e49f687ac3cd76e603ca, type: 3}
-      propertyPath: InScenePlacedSourceGlobalObjectIdHash
-      value: 838229449
-      objectReference: {fileID: 0}
     - target: {fileID: 7769544824101110699, guid: fc7e4c721ec7e49f687ac3cd76e603ca, type: 3}
       propertyPath: inventoryCameraController
       value: 
@@ -4474,62 +4430,11 @@ PrefabInstance:
       propertyPath: staminaBarFill
       value: 
       objectReference: {fileID: 2118902345}
-    - target: {fileID: 7994805563834010040, guid: fc7e4c721ec7e49f687ac3cd76e603ca, type: 3}
-      propertyPath: playerController
-      value: 
-      objectReference: {fileID: 781895494}
-    - target: {fileID: 8537555603563570803, guid: fc7e4c721ec7e49f687ac3cd76e603ca, type: 3}
-      propertyPath: far clip plane
-      value: 10000
-      objectReference: {fileID: 0}
-    - target: {fileID: 8537555603563570803, guid: fc7e4c721ec7e49f687ac3cd76e603ca, type: 3}
-      propertyPath: near clip plane
-      value: 0.2
-      objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
-    m_AddedComponents:
-    - targetCorrespondingSourceObject: {fileID: 2210897107320198471, guid: fc7e4c721ec7e49f687ac3cd76e603ca, type: 3}
-      insertIndex: -1
-      addedObject: {fileID: 972206125}
-    - targetCorrespondingSourceObject: {fileID: 8219106002261432286, guid: fc7e4c721ec7e49f687ac3cd76e603ca, type: 3}
-      insertIndex: -1
-      addedObject: {fileID: 597231138}
+    m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: fc7e4c721ec7e49f687ac3cd76e603ca, type: 3}
---- !u!1 &597231136 stripped
-GameObject:
-  m_CorrespondingSourceObject: {fileID: 2210897107320198471, guid: fc7e4c721ec7e49f687ac3cd76e603ca, type: 3}
-  m_PrefabInstance: {fileID: 597231135}
-  m_PrefabAsset: {fileID: 0}
---- !u!1 &597231137 stripped
-GameObject:
-  m_CorrespondingSourceObject: {fileID: 8219106002261432286, guid: fc7e4c721ec7e49f687ac3cd76e603ca, type: 3}
-  m_PrefabInstance: {fileID: 597231135}
-  m_PrefabAsset: {fileID: 0}
---- !u!114 &597231138
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 597231137}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 474bcb49853aa07438625e644c072ee6, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  m_Version: 3
-  m_UsePipelineSettings: 1
-  m_AdditionalLightsShadowResolutionTier: 2
-  m_LightLayerMask: 1
-  m_RenderingLayers: 1
-  m_CustomShadowLayers: 0
-  m_ShadowLayerMask: 1
-  m_ShadowRenderingLayers: 1
-  m_LightCookieSize: {x: 1, y: 1}
-  m_LightCookieOffset: {x: 0, y: 0}
-  m_SoftShadowQuality: 0
 --- !u!1 &608370588
 GameObject:
   m_ObjectHideFlags: 0
@@ -5574,17 +5479,6 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 751540070}
   m_CullTransparentMesh: 1
---- !u!114 &781895494 stripped
-MonoBehaviour:
-  m_CorrespondingSourceObject: {fileID: 1602665888250434695, guid: fc7e4c721ec7e49f687ac3cd76e603ca, type: 3}
-  m_PrefabInstance: {fileID: 597231135}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: f205e49dd5d264a07814082ab70169cc, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
 --- !u!1 &782335849
 GameObject:
   m_ObjectHideFlags: 0
@@ -11730,24 +11624,6 @@ Camera:
   m_CorrespondingSourceObject: {fileID: 8537555603563570803, guid: fc7e4c721ec7e49f687ac3cd76e603ca, type: 3}
   m_PrefabInstance: {fileID: 597231135}
   m_PrefabAsset: {fileID: 0}
---- !u!114 &972206125
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 597231136}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 2bc4c0baaf0484277b6e1b4853cac325, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  interactionRadius: 2
-  vacuumSpeed: 0.5
-  maxDistance: 10
-  terrainLayer:
-    serializedVersion: 2
-    m_Bits: 4294967295
 --- !u!1 &980235164
 GameObject:
   m_ObjectHideFlags: 0
@@ -16229,6 +16105,46 @@ MonoBehaviour:
   hiddenObjectFastRecheck: 200
   scanDelayFrames: 3
   verboseLogging: 0
+--- !u!21 &1469611929
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Runtime_DayNightSkybox
+  m_Shader: {fileID: 106, guid: 0000000000000000f000000000000000, type: 0}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords:
+  - _SUNDISK_HIGH_QUALITY
+  m_InvalidKeywords: []
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs: []
+    m_Ints: []
+    m_Floats:
+    - _AtmosphereThickness: 0.79811674
+    - _Exposure: 0.9971027
+    - _GodrayPower: 2.6
+    - _GodrayStrength: 0
+    - _SunDisk: 2
+    - _SunSize: 0.035
+    - _SunSizeConvergence: 5
+    - _SunSoftness: 0.0018
+    m_Colors:
+    - _GodrayTint: {r: 1, g: 0.82, b: 0.62, a: 1}
+    - _GroundColor: {r: 0.3002895, g: 0.31697708, b: 0.34797353, a: 1}
+    - _SkyTint: {r: 0.44976765, g: 0.48021322, b: 0.52714026, a: 1}
+    - _SunColor: {r: 1, g: 0.956, b: 0.84, a: 1}
+  m_BuildTextureStacks: []
 --- !u!1 &1475127543
 GameObject:
   m_ObjectHideFlags: 0
