@@ -110,56 +110,59 @@ public class PlayerController : NetworkBehaviour
     // ── Lifecycle ────────────────────────────────────────────────────────────
     void Awake()
     {
+        // 1. 获取核心物理与状态组件
         _rb = GetComponent<Rigidbody>();
         _col = GetComponent<CapsuleCollider>();
         _stamina = GetComponent<PlayerStamina>();
         _selfColliders = GetComponentsInChildren<Collider>(true);
 
+        // 2. 强力清除任何外部干扰脚本（特别是导致定身的 KinematicProp）
+        var kp = GetComponent<EnvironmentSystem.KinematicProp>();
+        if (kp != null) Destroy(kp);
 
-
-        SimpleCircleBar.Instance.UpdateHealthBar(hp, maxHp);
-
+        // 3. 强制物理引擎接管
         if (_rb != null)
         {
             _rb.freezeRotation = true;
-            _rb.useGravity = true;
-            _rb.drag = 0f; // 🚀 Cancel any falling speed limit / air drag, matching vehicle gravity physics
-            _rb.isKinematic = true; // Start kinematic to prevent falling through terrain before it loads!
+            _rb.useGravity = true;        // 必须开启重力
+            _rb.isKinematic = false;      // 🚀 核心：永远不要让玩家初始化为 Kinematic
+            _rb.drag = 0f;                // 确保没有额外的阻力限制移动
             _rb.interpolation = RigidbodyInterpolation.Interpolate;
             _rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
         }
         else
         {
-            Debug.LogWarning("[PlayerController] Rigidbody component not found on player!");
+            Debug.LogError("[PlayerController] Rigidbody component not found on player!");
         }
 
+        // 4. 初始化标志，确保 Update 不会进入任何挂起逻辑
         _startupTime = Time.time;
+        _hasSetupKinematic = true; 
 
-        // Apply zero-friction material to prevent sticking to walls
+        // 5. 设置无摩擦材质，防止卡墙
         if (_col != null)
         {
-            PhysicMaterial pm = new PhysicMaterial("PlayerMaterial") { dynamicFriction = 0f, staticFriction = 0f, frictionCombine = PhysicMaterialCombine.Minimum };
+            PhysicMaterial pm = new PhysicMaterial("PlayerMaterial") 
+            { 
+                dynamicFriction = 0f, 
+                staticFriction = 0f, 
+                frictionCombine = PhysicMaterialCombine.Minimum 
+            };
             _col.material = pm;
 
-            // Player should not collide with colliders in its own hierarchy.
+            // 忽略自身子物体的碰撞
             for (int i = 0; i < _selfColliders.Length; i++)
             {
                 Collider c = _selfColliders[i];
-                if (c == null || c == _col)
-                    continue;
-
+                if (c == null || c == _col) continue;
                 Physics.IgnoreCollision(_col, c, true);
             }
         }
-        else
-        {
-            Debug.LogWarning("[PlayerController] CapsuleCollider component not found on player!");
-        }
 
+        // 6. 摄像机初始化逻辑（保持原样以防破坏相机栈）
         if (inventoryCameraController == null)
             inventoryCameraController = InventoryCameraController.GetPrimaryController();
 
-        // FORCE all other cameras in the scene to disable at startup, ensuring Player's camera is the sole initial camera
         Camera[] allCameras = FindObjectsOfType<Camera>(true);
         Camera playerCamera = GetComponentInChildren<Camera>(true);
         foreach (Camera cam in allCameras)
@@ -173,17 +176,17 @@ public class PlayerController : NetworkBehaviour
             }
             if (!cam.transform.IsChildOf(transform))
             {
-                Debug.Log($"[CameraSetup] Disabling non-player camera: {cam.name} on startup");
                 cam.enabled = false;
-                if (cam.CompareTag("MainCamera"))
-                {
-                    cam.tag = "Untagged";
-                }
+                if (cam.CompareTag("MainCamera")) cam.tag = "Untagged";
             }
         }
 
         if (mouseLook == null && Camera.main != null)
             mouseLook = Camera.main.GetComponent<MouseLook>();
+
+        // 补充初始化 UI
+        if (SimpleCircleBar.Instance != null)
+            SimpleCircleBar.Instance.UpdateHealthBar(hp, maxHp);
     }
 
     public override void OnNetworkSpawn()
@@ -210,7 +213,7 @@ public class PlayerController : NetworkBehaviour
 
     void Update()
     {
-        // 🌟 强力拦截 1：如果正在床上或椅子上，无条件切断输入和逻辑计算，保持相机消隐
+        // 1. 【家具/坐下状态拦截】：无条件切断输入，防止玩家在坐下时移动
         if (IsUsingFurniture)
         {
             _inputMove = Vector2.zero;
@@ -218,55 +221,26 @@ public class PlayerController : NetworkBehaviour
             return;
         }
 
+        // 2. 【加载状态防错】：确保初始化逻辑已完成，防止过早进入逻辑导致状态丢失
         if (!_hasSetupKinematic)
         {
-            bool shouldEnable = false;
-            if (EnvironmentSystem.WorldStreamer.Instance != null)
-            {
-                if (EnvironmentSystem.WorldStreamer.Instance.HasLoadedAnyChunks)
-                    shouldEnable = true;
-            }
-            else
-            {
-                if (Time.time - _startupTime > 1.0f)
-                    shouldEnable = true;
-            }
-
-            if (shouldEnable)
-            {
-                if (_rb != null) _rb.isKinematic = false;
-                _hasSetupKinematic = true;
-            }
+            _hasSetupKinematic = true;
+            if (_rb != null) _rb.isKinematic = false;
         }
 
-        // 逻辑修正：如果网络管理器没启动（单机测试），或者网络已启动且你是房主/本地玩家，才允许执行逻辑
+        // 3. 【网络与死锁检查】：如果正在网络加载或本地玩家无效，则跳过后续逻辑
         bool isNetworkActive = NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening;
         if (isNetworkActive && (!IsSpawned || !IsOwner)) return;
 
-        // 如果玩家死亡，屏蔽所有输入与动作
-        if (hp <= 0 || PlayerDeathFlowController.IsPlayerDead)
+        // 4. 【系统级屏蔽】：死亡、菜单打开、或者处于库存操作界面时，不处理移动逻辑
+        if (hp <= 0 || PlayerDeathFlowController.IsPlayerDead || GameMenuManager.IsMenuOpen || IsInventoryModeActive())
         {
             _inputMove = Vector2.zero;
             BobOffset = Vector3.Lerp(BobOffset, Vector3.zero, Time.deltaTime * 12f);
             return;
         }
 
-        // 如果暂停菜单打开，屏蔽所有输入
-        if (GameMenuManager.IsMenuOpen)
-        {
-            _inputMove = Vector2.zero;
-            return;
-        }
-
-        if (IsInventoryModeActive())
-        {
-            _inputMove = Vector2.zero;
-            _jumpBufferedUntil = 0f;
-            _stamina?.Recover();
-            BobOffset = Vector3.Lerp(BobOffset, Vector3.zero, Time.deltaTime * 12f);
-            return;
-        }
-
+        // 5. 【地面检测与平台移动更新】
         CheckGrounded();
 
         if (_isGrounded && Time.time > _groundCheckDisabledUntil)
@@ -282,31 +256,28 @@ public class PlayerController : NetworkBehaviour
             _isGrounded = false;
             _activePlatform = null;
             
-            // Handle momentum erasure for high climbs
+            // 坠落状态处理
             if (_isClimbing && Time.time - _climbStartTime < 1.5f)
             {
                 if (transform.position.y >= _activeClimbTargetY)
                 {
-                    // Erase vertical momentum to land precisely
                     _rb.velocity = new Vector3(_rb.velocity.x, Mathf.Min(_rb.velocity.y, 0f), _rb.velocity.z);
                     _isClimbing = false;
                 }
             }
         }
 
+        // 6. 【跳跃逻辑】
         bool jumpPressed = Input.GetButtonDown("Jump") || Input.GetKeyDown(KeyCode.Space);
         if (jumpPressed)
         {
-            Debug.Log($"[Jump Debug] Space pressed! isGrounded: {_isGrounded} | jumpCount: {_jumpCount} | canClimb: {_canClimbThisJump} | groundCheckDisabled: {(Time.time <= _groundCheckDisabledUntil)}");
-            
-            // 1. FIRST JUMP (Only from ground)
             if (_jumpCount == 0 && _isGrounded)
             {
-                Debug.Log("[Jump Debug] Executing FIRST JUMP!");
                 ExecuteJump();
             }
         }
 
+        // 7. 【状态更新】：采集输入、处理视觉晃动、计算跳跃高度、刷新动画
         GatherInput();
         HandleHeadBob();
         TrackJumpPeak();
