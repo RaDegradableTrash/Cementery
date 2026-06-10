@@ -76,6 +76,17 @@ public class DroneControl : MonoBehaviour
     [Tooltip("触发超高时，强制往下压回的速度")]
     [SerializeField] private float ceilingPushDownSpeed = 4f;
 
+    // ── 🌟 新增：无人机引擎音频配置 ──────────────────────────────────────────
+    [Header("Drone Audio Settings")]
+    [Tooltip("无人机引擎/螺旋桨的循环 MP3 音效")]
+    [SerializeField] private AudioClip droneEngineSound;
+    [Range(0f, 1f)] [SerializeField] private float maxVolume = 0.8f;
+    [Tooltip("声音随转速变化的敏感度（数值越大，高速飞行时声音越尖锐）")]
+    [SerializeField] private float pitchChangeRange = 0.3f;
+
+    private AudioSource _audioSource;
+    // ────────────────────────────────────────────────────────────────────────
+
     public float CurrentAltitude { get; private set; } = float.PositiveInfinity;
     public bool HasAltitudeHit { get; private set; }
 
@@ -127,6 +138,35 @@ public class DroneControl : MonoBehaviour
         _gimbalLocalPitch = 0f;
         _gimbalLocalYaw = 0f;
         if (gimbalCamera != null) gimbalCamera.localRotation = Quaternion.identity;
+
+        // ── 🌟 新增：动态初始化并立刻播放音频 ────────────────────────────────────
+        InitAndPlayDroneAudio();
+        // ────────────────────────────────────────────────────────────────────────
+    }
+
+    private void InitAndPlayDroneAudio()
+    {
+        // 获取或自动添加 AudioSource 组件
+        _audioSource = GetComponent<AudioSource>();
+        if (_audioSource == null)
+        {
+            _audioSource = gameObject.AddComponent<AudioSource>();
+        }
+
+        if (droneEngineSound != null)
+        {
+            _audioSource.clip = droneEngineSound;
+            _audioSource.loop = true;          // 开启循环播放
+            _audioSource.playOnAwake = false;
+            _audioSource.spatialBlend = 1.0f;   // 开启 3D 空间音效（声音从无人机位置发出）
+            _audioSource.volume = maxVolume * 0.5f; // 初始给予基础音量
+            _audioSource.pitch = 1.0f;
+            _audioSource.Play();               // Awake 时立刻开始播放
+        }
+        else
+        {
+            Debug.LogWarning($"<color=yellow>[DroneControl]</color> 未在 Inspector 面板中分配 'Drone Engine Sound' 音频文件！");
+        }
     }
 
     private void Update()
@@ -137,6 +177,24 @@ public class DroneControl : MonoBehaviour
         GatherInputAndPhysics(dt);
         UpdateInspire3Morph(dt);
         UpdatePropellers(dt);
+
+        // ── 🌟 新增：每一帧根据螺旋桨的转速动态改变音量和音高 ────────────────────
+        UpdateAudioDynamics();
+        // ────────────────────────────────────────────────────────────────────────
+    }
+
+    private void UpdateAudioDynamics()
+    {
+        if (_audioSource == null || droneEngineSound == null) return;
+
+        // 计算当前转速占最高转速的比例 (0.0 到 1.0)
+        float speedRatio = Mathf.InverseLerp(basePropellerSpeed * 0.3f, maxPropellerSpeed, _currentPropellerRotationSpeed);
+
+        // 1. 动态音量：转速快时声音大，断电摔落时声音变弱
+        _audioSource.volume = Mathf.Lerp(maxVolume * 0.3f, maxVolume, speedRatio);
+
+        // 2. 动态音高：转速快时螺旋桨声音更尖锐高频
+        _audioSource.pitch = Mathf.Lerp(1.0f - pitchChangeRange, 1.0f + pitchChangeRange, speedRatio);
     }
 
     private void LateUpdate()
@@ -279,11 +337,9 @@ public class DroneControl : MonoBehaviour
         _currentYawVelocity = Mathf.Clamp(_currentYawVelocity, -maxYawSpeedDeg, maxYawSpeedDeg);
         _yawDeg = Mathf.Repeat(_yawDeg + _currentYawVelocity * dt, 360f);
 
-        Quaternion yawRotation = Quaternion.Euler(0f, _yawDeg, 0f);
-
         // 6. 基础运动推力计算
         Vector3 localInputMove = Vector3.ClampMagnitude(new Vector3(inputX, 0f, inputZ), 1f);
-        Vector3 worldInputMove = yawRotation * localInputMove;
+        Vector3 worldInputMove = Quaternion.Euler(0f, _yawDeg, 0f) * localInputMove;
 
         if (worldInputMove.sqrMagnitude > 0.01f)
         {
@@ -340,13 +396,13 @@ public class DroneControl : MonoBehaviour
         _currentVerticalVelocity += finalDrift.y;
 
         // 8. 计算机体视觉物理倾斜
-        Vector3 localVelocity = Quaternion.Inverse(yawRotation) * _currentHorizontalVelocity;
+        Vector3 localVelocity = Quaternion.Inverse(Quaternion.Euler(0f, _yawDeg, 0f)) * _currentHorizontalVelocity;
         float targetPitch = (localVelocity.z / maxHorizontalSpeed) * maxPitchDeg;
         float targetRoll = -(localVelocity.x / maxHorizontalSpeed) * maxRollDeg;
         Quaternion tiltRotation = Quaternion.Euler(targetPitch, 0f, targetRoll);
         
         float t = 1f - Mathf.Exp(-Mathf.Max(0.01f, tiltResponsiveness) * dt);
-        _targetBodyTiltRotation = Quaternion.Slerp(_targetBodyTiltRotation, yawRotation * tiltRotation, t);
+        _targetBodyTiltRotation = Quaternion.Slerp(_targetBodyTiltRotation, Quaternion.Euler(0f, _yawDeg, 0f) * tiltRotation, t);
     }
 
     private void UpdateInspire3Morph(float dt)

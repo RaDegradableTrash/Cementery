@@ -14,6 +14,9 @@ GameObject:
   - component: {fileID: -3841280549597432026}
   - component: {fileID: 22534876290020906}
   - component: {fileID: 9103595467655853994}
+  - component: {fileID: 8176433262256157439}
+  - component: {fileID: 5970190987902185491}
+  - component: {fileID: 5106498764965191484}
   m_Layer: 0
   m_Name: core
   m_TagString: Untagged
@@ -158,6 +161,59 @@ Rigidbody:
   m_Constraints: 0
   m_CollisionDetection: 0
 --- !u!64 &9103595467655853994
+MeshCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 586235290869795129}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 5
+  m_Convex: 1
+  m_CookingOptions: 30
+  m_Mesh: {fileID: -5495902117074765545, guid: 4783772b72baa274fa826c09a79dc766, type: 3}
+--- !u!114 &8176433262256157439
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 586235290869795129}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f7ff2dd1e7c2b904cb27347adbada257, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  width: 6
+  height: 4
+  length: 6
+--- !u!114 &5970190987902185491
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 586235290869795129}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3fbd046d79487484583a1c88cf749ad0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  inventoryCamera: {fileID: 0}
+  invSystem: {fileID: 0}
+  testingItem: {fileID: 11400000, guid: af2fc306fc1839647a249bf09bceba04, type: 2}
+  cellSize: 1
+--- !u!64 &5106498764965191484
 MeshCollider:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
