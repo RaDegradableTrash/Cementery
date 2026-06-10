@@ -7,8 +7,6 @@ using UnityEditor.SceneManagement;
 
 public class DesertPropPlacementTool : EditorWindow
 {
-    private const string PREF_PREFIX = "DesertPropTool_";
-
     [MenuItem("Tools/Cemetery/Desert Prop Placement Tool")]
     public static void ShowWindow()
     {
@@ -17,227 +15,150 @@ public class DesertPropPlacementTool : EditorWindow
 
     public enum TerrainTrendMode
     {
-        ValleysAndLowlands,
-        RidgesAndPeaks,
-        GentleSlopes,
-        NoiseClustered
+        ValleysAndLowlands, // 洼地与低谷（水分充足，生长茂密）
+        RidgesAndPeaks,     // 山脊与高地（风口，稀疏高耸）
+        GentleSlopes,       // 平缓开阔地（坡度小的地方密集）
+        NoiseClustered      // 纯柏林噪声聚类（疏密随机成簇）
     }
 
-    // ── 配置字段 ──
+    // ── Prefab ─────────────────────────────────────────────────────────────────
     private GameObject prefabToSpawn;
-    private TerrainTrendMode trendMode = TerrainTrendMode.ValleysAndLowlands;
-    private int spawnAttemptsPerChunk = 150;
-    private float minDistance = 3.0f;
-    private float minScale = 0.5f;
-    private float maxScale = 2.5f;
-    private float heightOffset = 0.35f;
-    private int seed = 1337;
-    private bool avoidRoads = true;
-    private float onRoadSpawnProbability = 0.02f;
-    private float roadClearDistance = 6f;
-    private float roadTransitionWidth = 10f;
-    private bool fillColor = false;
-    private List<string> spectrumHexColors = new List<string> { "FF4040", "FFD700", "40C0FF" };
-    private float gradientAngleDeg = 45f;
-    private float gradientRepeatDistance = 400f;
-    private float noiseBlend = 0.25f;
-    private float noiseScale = 150f;
-    private int colorSteps = 48;
-    private string colorProperty = "_BaseColor";
 
-    private Vector2 scrollPos;
-    private Vector2 _colorListScroll;
+    // ── Density & Placement ────────────────────────────────────────────────────
+    private TerrainTrendMode trendMode = TerrainTrendMode.ValleysAndLowlands;
+    private int   spawnAttemptsPerChunk = 150;
+    private float minDistance           = 3.0f;
+
+    // ── Scale & Variation ──────────────────────────────────────────────────────
+    private float minScale    = 0.5f;
+    private float maxScale    = 2.5f;
+    private float heightOffset = 0.35f;
+    private int   seed        = 1337;
+
+    // ── Road Avoidance ─────────────────────────────────────────────────────────
+    private bool  avoidRoads              = true;
+    private float onRoadSpawnProbability  = 0.02f;  // 道路正上方的生成概率 (0~1)
+    private float roadClearDistance       = 6f;     // 道路边缘内完全不生成的半径 (m)
+    private float roadTransitionWidth     = 10f;    // 从清除距离到正常密度的过渡宽度 (m)
+
+    // ── Undo History ───────────────────────────────────────────────────────────
     private static Stack<List<GameObject>> spawnedObjectsHistory = new Stack<List<GameObject>>();
 
-    private void OnEnable()
-    {
-        LoadSettings();
-    }
-
-    private void LoadSettings()
-    {
-        spawnAttemptsPerChunk = EditorPrefs.GetInt(PREF_PREFIX + "Density", 150);
-        minDistance = EditorPrefs.GetFloat(PREF_PREFIX + "MinDist", 3.0f);
-        minScale = EditorPrefs.GetFloat(PREF_PREFIX + "MinScale", 0.5f);
-        maxScale = EditorPrefs.GetFloat(PREF_PREFIX + "MaxScale", 2.5f);
-        avoidRoads = EditorPrefs.GetBool(PREF_PREFIX + "AvoidRoads", true);
-    }
-
-    private void SaveSettings()
-    {
-        EditorPrefs.SetInt(PREF_PREFIX + "Density", spawnAttemptsPerChunk);
-        EditorPrefs.SetFloat(PREF_PREFIX + "MinDist", minDistance);
-        EditorPrefs.SetFloat(PREF_PREFIX + "MinScale", minScale);
-        EditorPrefs.SetFloat(PREF_PREFIX + "MaxScale", maxScale);
-        EditorPrefs.SetBool(PREF_PREFIX + "AvoidRoads", avoidRoads);
-    }
+    // ── GUI ────────────────────────────────────────────────────────────────────
 
     private void OnGUI()
     {
-        scrollPos = EditorGUILayout.BeginScrollView(scrollPos);
-        EditorGUI.BeginChangeCheck();
-
         GUILayout.Label("Desert Prop Placement Tool", EditorStyles.boldLabel);
-        
-        // ... (此处省略与之前逻辑相同的布局代码，确保所有的 BeginVertical 都有对应 EndVertical) ...
-        // 为了简便，请确保你的 OnGUI 中 Begin 和 End 数量严格相等
-        
-        // --- 核心修复：确保在此处调用 EndChangeCheck ---
-        if (EditorGUI.EndChangeCheck()) SaveSettings();
+        EditorGUILayout.Space();
 
-        // 按钮区域
-        if (GUILayout.Button("🚀 Place Props", GUILayout.Height(40))) PlaceProps();
-        
-        EditorGUILayout.EndScrollView();
-    }
-
-    // [在此处放置你原有的 PlaceProps, ApplyColorSpectrum 等方法...]
-
-
-    // ── Color Spectrum GUI ─────────────────────────────────────────────────
-
-    private void DrawColorSpectrumGUI()
-    {
+        // 1. PREFAB SLOT
         EditorGUILayout.BeginVertical("box");
-        GUILayout.Label("Color Spectrum (色谱填色)", EditorStyles.boldLabel);
+        GUILayout.Label("Object Placement Target (预制体挂载)", EditorStyles.boldLabel);
+        prefabToSpawn = (GameObject)EditorGUILayout.ObjectField("Prefab (拖入物体)", prefabToSpawn, typeof(GameObject), false);
+        EditorGUILayout.EndVertical();
 
-        fillColor = EditorGUILayout.Toggle("Fill Color (填色)", fillColor);
+        EditorGUILayout.Space();
 
-        if (fillColor)
+        // 2. TERRAIN TREND
+        EditorGUILayout.BeginVertical("box");
+        GUILayout.Label("Distribution Settings (地形趋势与疏密)", EditorStyles.boldLabel);
+        trendMode             = (TerrainTrendMode)EditorGUILayout.EnumPopup("Terrain Trend (地形趋势)", trendMode);
+        spawnAttemptsPerChunk = EditorGUILayout.IntField("Density (密度/每区块尝试次数)", spawnAttemptsPerChunk);
+        minDistance           = EditorGUILayout.FloatField("Min Distance (防穿模最小距离)", minDistance);
+        EditorGUILayout.EndVertical();
+
+        EditorGUILayout.Space();
+
+        // 3. SCALE & VARIATION
+        EditorGUILayout.BeginVertical("box");
+        GUILayout.Label("Variation Settings (大小与随机变化)", EditorStyles.boldLabel);
+        minScale     = EditorGUILayout.FloatField("Min Scale Multiplier", minScale);
+        maxScale     = EditorGUILayout.FloatField("Max Scale Multiplier", maxScale);
+        heightOffset = EditorGUILayout.FloatField("Height Offset (Y轴向上偏移比例)", heightOffset);
+        seed         = EditorGUILayout.IntField("Random Seed (随机种子)", seed);
+        EditorGUILayout.EndVertical();
+
+        EditorGUILayout.Space();
+
+        // 4. ROAD AVOIDANCE
+        EditorGUILayout.BeginVertical("box");
+        GUILayout.Label("Road Avoidance (道路回避设置)", EditorStyles.boldLabel);
+
+        avoidRoads = EditorGUILayout.Toggle("Avoid Roads (避开道路)", avoidRoads);
+
+        if (avoidRoads)
         {
             EditorGUI.indentLevel++;
-            EditorGUILayout.Space(4);
 
-            // ── Color list ─────────────────────────────────────────────────
-            GUILayout.Label("Spectrum Colors (色谱颜色列表，按顺序循环):", EditorStyles.miniLabel);
+            onRoadSpawnProbability = EditorGUILayout.Slider(
+                new GUIContent("On-Road Probability (道路上的生成概率)",
+                    "道路正中心的生成概率。0 = 完全不生成，1 = 和普通地面一样"),
+                onRoadSpawnProbability, 0f, 1f);
 
-            float rowH  = 22f;
-            float listH = Mathf.Min(spectrumHexColors.Count * rowH + 8f, 160f);
-            _colorListScroll = EditorGUILayout.BeginScrollView(_colorListScroll, GUILayout.Height(listH));
+            roadClearDistance = EditorGUILayout.FloatField(
+                new GUIContent("Clear Distance (硬性清除距离)",
+                    "道路边缘到此距离内完全不生成物体（即使生成概率不为0）。单位：米"),
+                roadClearDistance);
 
-            int removeIdx = -1;
-            for (int i = 0; i < spectrumHexColors.Count; i++)
-            {
-                EditorGUILayout.BeginHorizontal();
+            roadTransitionWidth = EditorGUILayout.FloatField(
+                new GUIContent("Transition Width (过渡宽度)",
+                    "从清除距离到正常密度的线性渐变宽度。越大过渡越柔和。单位：米"),
+                roadTransitionWidth);
 
-                GUILayout.Label($"{i + 1}.", GUILayout.Width(22));
-
-                string newHex = EditorGUILayout.TextField(spectrumHexColors[i], GUILayout.Width(80));
-                if (newHex != spectrumHexColors[i])
-                    spectrumHexColors[i] = newHex.ToUpper().Replace("#", "").Trim();
-
-                if (TryParseHex(spectrumHexColors[i], out Color swatchCol))
-                {
-                    Rect swatchRect = GUILayoutUtility.GetRect(28, 18, GUILayout.Width(28));
-                    EditorGUI.DrawRect(swatchRect, swatchCol);
-                    EditorGUI.DrawRect(new Rect(swatchRect.x, swatchRect.y, swatchRect.width, 1), Color.black * 0.4f);
-                    EditorGUI.DrawRect(new Rect(swatchRect.x, swatchRect.yMax - 1, swatchRect.width, 1), Color.black * 0.4f);
-                }
-                else
-                {
-                    GUILayout.Label("?", GUILayout.Width(28));
-                }
-
-                GUI.backgroundColor = new Color(1f, 0.5f, 0.5f);
-                if (GUILayout.Button("x", GUILayout.Width(24), GUILayout.Height(18)))
-                    removeIdx = i;
-                GUI.backgroundColor = Color.white;
-
-                EditorGUILayout.EndHorizontal();
-            }
-
-            if (removeIdx >= 0 && spectrumHexColors.Count > 1)
-                spectrumHexColors.RemoveAt(removeIdx);
-
-            EditorGUILayout.EndScrollView();
-
-            EditorGUILayout.BeginHorizontal();
-            GUI.backgroundColor = new Color(0.6f, 1f, 0.7f);
-            if (GUILayout.Button("+ Add Color (添加颜色)", GUILayout.Height(20)))
-                spectrumHexColors.Add("FFFFFF");
-            GUI.backgroundColor = Color.white;
-            EditorGUILayout.EndHorizontal();
-
-            EditorGUILayout.Space(4);
-
-            // ── Gradient preview strip ─────────────────────────────────────
-            DrawGradientPreviewStrip();
-
-            EditorGUILayout.Space(4);
-
-            // ── Gradient settings ──────────────────────────────────────────
-            GUILayout.Label("Gradient Settings (渐变方向与分布):", EditorStyles.miniLabel);
-
-            gradientAngleDeg = EditorGUILayout.Slider(
-                new GUIContent("Direction Angle (方向角度)",
-                    "色谱在地图上变化的方向。0=沿X轴，90=沿Z轴，45=斜对角"),
-                gradientAngleDeg, 0f, 360f);
-
-            gradientRepeatDistance = Mathf.Max(10f, EditorGUILayout.FloatField(
-                new GUIContent("Repeat Distance (重复距离, 米)",
-                    "色谱走完一遍后重新从头开始的距离。越小变化越快，越大色块越大"),
-                gradientRepeatDistance));
-
-            noiseBlend = EditorGUILayout.Slider(
-                new GUIContent("Noise Blend (噪声混合)",
-                    "0 = 纯线性条纹渐变；1 = 纯 Perlin 噪声色块"),
-                noiseBlend, 0f, 1f);
-
-            if (noiseBlend > 0f)
-            {
-                EditorGUI.indentLevel++;
-                noiseScale = Mathf.Max(10f, EditorGUILayout.FloatField(
-                    new GUIContent("Noise Scale (噪声尺度)"),
-                    noiseScale));
-                EditorGUI.indentLevel--;
-            }
-
-            colorSteps = Mathf.Clamp(EditorGUILayout.IntField(
-                new GUIContent("Color Steps (色阶数)",
-                    "生成多少个不同颜色的材质档位（越多越丝滑）"),
-                colorSteps), 4, 128);
-
-            colorProperty = EditorGUILayout.TextField(
-                new GUIContent("Shader Color Property",
-                    "要修改的材质属性名。URP通常是 _BaseColor，旧版Standard是 _Color"),
-                colorProperty);
+            // Clamp to sensible values
+            roadClearDistance   = Mathf.Max(0f, roadClearDistance);
+            roadTransitionWidth = Mathf.Max(0.1f, roadTransitionWidth);
 
             EditorGUILayout.HelpBox(
-                $"将创建 {colorSteps} 个颜色档位的材质资产 → Assets/Generated/PropColorMaterials/",
+                $"效果预览：\n" +
+                $"  ≤ {roadClearDistance:F1}m 处（道路边缘）：完全不生成\n" +
+                $"  {roadClearDistance:F1}m → {roadClearDistance + roadTransitionWidth:F1}m：线性渐变到正常密度\n" +
+                $"  道路中心处生成概率：{onRoadSpawnProbability * 100f:F0}%\n\n" +
+                "需要道路涂层（Road Overlay）已绘制并保存到场景中。",
                 MessageType.None);
 
             EditorGUI.indentLevel--;
         }
 
         EditorGUILayout.EndVertical();
-    }
 
+        EditorGUILayout.Space();
 
-    /// <summary>Draws a horizontal gradient strip preview inside the inspector.</summary>
-    private void DrawGradientPreviewStrip()
-    {
-        List<Color> parsedColors = GetParsedSpectrumColors();
-        if (parsedColors.Count < 2) return;
-
-        Rect stripRect = GUILayoutUtility.GetRect(GUIContent.none, GUIStyle.none,
-            GUILayout.ExpandWidth(true), GUILayout.Height(18));
-        stripRect = EditorGUI.IndentedRect(stripRect);
-        int w = Mathf.Max(1, (int)stripRect.width);
-
-        for (int x = 0; x < w; x++)
+        // TERRAIN TREND HELP
+        string trendHelp = "";
+        switch (trendMode)
         {
-            float t = (float)x / (w - 1);
-            Color c = SampleCyclicGradient(parsedColors, t);
-            EditorGUI.DrawRect(new Rect(stripRect.x + x, stripRect.y, 1, stripRect.height), c);
+            case TerrainTrendMode.ValleysAndLowlands:
+                trendHelp = "洼地与低谷模式：低海拔处水分较多，仙人掌明显多且密；高处非常少。"; break;
+            case TerrainTrendMode.RidgesAndPeaks:
+                trendHelp = "山脊与高地模式：高山顶部和沙丘山脊生长较多；低谷平原较少。"; break;
+            case TerrainTrendMode.GentleSlopes:
+                trendHelp = "平缓开阔地模式：地面越平坦生长的越密集；陡坡区域几乎不生长。"; break;
+            case TerrainTrendMode.NoiseClustered:
+                trendHelp = "纯柏林噪声模式：不受地形起伏影响，随机呈岛屿状成簇分布，有些地方极密，有些地方全无。"; break;
         }
-        // Border
-        EditorGUI.DrawRect(new Rect(stripRect.x, stripRect.y, stripRect.width, 1), Color.black * 0.5f);
-        EditorGUI.DrawRect(new Rect(stripRect.x, stripRect.yMax - 1, stripRect.width, 1), Color.black * 0.5f);
+        EditorGUILayout.HelpBox(trendHelp + "\n物体将自动放置在所属区块 scene 内的 'Spawned_Props' 节点中。", MessageType.Info);
+
+        EditorGUILayout.Space();
+
+        // ACTION BUTTONS
+        if (GUILayout.Button("Place Props on ALL Loaded Chunks (开始放置)", GUILayout.Height(35)))
+        {
+            PlaceProps();
+        }
+
+        EditorGUILayout.Space();
+
+        // UNDO BUTTONS
+        EditorGUILayout.BeginHorizontal();
+        if (GUILayout.Button("Undo Last Placement (撤回上次放置)", GUILayout.Height(25)))
+            UndoLastPlacement();
+        if (GUILayout.Button("Clear ALL Spawned Props (清除所有放置)", GUILayout.Height(25)))
+            ClearAllProps();
+        EditorGUILayout.EndHorizontal();
     }
 
-    // ═════════════════════════════════════════════════════════════════════════
-    // Core Placement
-    // ═════════════════════════════════════════════════════════════════════════
+    // ── Core placement ─────────────────────────────────────────────────────────
 
     private void PlaceProps()
     {
@@ -269,8 +190,14 @@ public class DesertPropPlacementTool : EditorWindow
             Vector3 chunkPos         = chunkTransform.position;
             Scene chunkScene         = chunk.gameObject.scene;
 
-            RoadSampler roadSampler = avoidRoads ? BuildRoadSampler(chunk) : null;
+            // ── Road overlay data (cached once per chunk) ──────────────────────
+            RoadSampler roadSampler = null;
+            if (avoidRoads)
+            {
+                roadSampler = BuildRoadSampler(chunk);
+            }
 
+            // ── Props holder ───────────────────────────────────────────────────
             Transform existingHolder = chunkTransform.Find("Spawned_Props");
             GameObject holder;
             if (existingHolder != null)
@@ -287,16 +214,18 @@ public class DesertPropPlacementTool : EditorWindow
                 Undo.RegisterCreatedObjectUndo(holder, "Spawn Chunk Props");
             }
 
-            MeshFilter filter  = chunk.GetComponent<MeshFilter>();
-            Vector3[] vertices = null;
-            Vector3[] normals  = null;
+            // ── Terrain mesh data ──────────────────────────────────────────────
+            MeshFilter filter   = chunk.GetComponent<MeshFilter>();
+            Vector3[] vertices  = null;
+            Vector3[] normals   = null;
             if (filter != null && filter.sharedMesh != null)
             {
                 vertices = filter.sharedMesh.vertices;
                 normals  = filter.sharedMesh.normals;
             }
 
-            float minChunkH = float.MaxValue, maxChunkH = float.MinValue;
+            float minChunkH = float.MaxValue;
+            float maxChunkH = float.MinValue;
             if (vertices != null && vertices.Length > 0)
             {
                 foreach (var v in vertices)
@@ -317,15 +246,19 @@ public class DesertPropPlacementTool : EditorWindow
             }
             float heightRange = maxChunkH - minChunkH + 0.001f;
 
+            // Collect existing spawned positions to prevent overlap
             List<Vector3> spawnedPositions = new List<Vector3>();
             if (existingHolder != null)
+            {
                 foreach (Transform child in existingHolder)
                     spawnedPositions.Add(child.position);
+            }
 
+            // ── Spawn loop ─────────────────────────────────────────────────────
             for (int i = 0; i < spawnAttemptsPerChunk; i++)
             {
-                float localX       = Random.Range(0f, chunkWidthWorld);
-                float localZ       = Random.Range(0f, chunkDepthWorld);
+                float localX = Random.Range(0f, chunkWidthWorld);
+                float localZ = Random.Range(0f, chunkDepthWorld);
                 Vector3 worldPos2D = new Vector3(chunkPos.x + localX, 0f, chunkPos.z + localZ);
                 Vector3 localPos   = chunkTransform.InverseTransformPoint(new Vector3(worldPos2D.x, 0f, worldPos2D.z));
 
@@ -341,21 +274,26 @@ public class DesertPropPlacementTool : EditorWindow
                     int x1 = Mathf.Clamp(x0 + 1, 0, chunk.width);
                     int z0 = Mathf.Clamp(Mathf.FloorToInt(gridZ), 0, chunk.depth);
                     int z1 = Mathf.Clamp(z0 + 1, 0, chunk.depth);
-                    float tx = gridX - x0, tz = gridZ - z0;
-                    int W = chunk.width + 1;
+                    float tx = gridX - x0;
+                    float tz = gridZ - z0;
+                    int numVertsWidth = chunk.width + 1;
 
-                    if (z1 * W + x1 < vertices.Length)
+                    if (z1 * numVertsWidth + x1 < vertices.Length)
                     {
-                        relativeHeight = Mathf.Lerp(
-                            Mathf.Lerp(vertices[z0*W+x0].y, vertices[z0*W+x1].y, tx),
-                            Mathf.Lerp(vertices[z1*W+x0].y, vertices[z1*W+x1].y, tx), tz);
+                        float h00 = vertices[z0 * numVertsWidth + x0].y;
+                        float h10 = vertices[z0 * numVertsWidth + x1].y;
+                        float h01 = vertices[z1 * numVertsWidth + x0].y;
+                        float h11 = vertices[z1 * numVertsWidth + x1].y;
+                        relativeHeight = Mathf.Lerp(Mathf.Lerp(h00, h10, tx), Mathf.Lerp(h01, h11, tx), tz);
                         height = chunkTransform.TransformPoint(new Vector3(localPos.x, relativeHeight, localPos.z)).y;
 
                         if (normals != null && normals.Length == vertices.Length)
                         {
-                            normal = Vector3.Lerp(
-                                Vector3.Lerp(normals[z0*W+x0], normals[z0*W+x1], tx),
-                                Vector3.Lerp(normals[z1*W+x0], normals[z1*W+x1], tx), tz).normalized;
+                            Vector3 n00 = normals[z0 * numVertsWidth + x0];
+                            Vector3 n10 = normals[z0 * numVertsWidth + x1];
+                            Vector3 n01 = normals[z1 * numVertsWidth + x0];
+                            Vector3 n11 = normals[z1 * numVertsWidth + x1];
+                            normal = Vector3.Lerp(Vector3.Lerp(n00, n10, tx), Vector3.Lerp(n01, n11, tx), tz).normalized;
                             normal = chunkTransform.TransformDirection(normal);
                         }
                     }
@@ -369,50 +307,72 @@ public class DesertPropPlacementTool : EditorWindow
                 {
                     relativeHeight = chunk.SampleHeight(worldPos2D.x, worldPos2D.z);
                     height = chunkPos.y + relativeHeight;
-                    float cs = chunk.cellSize;
-                    float hL = chunk.SampleHeight(worldPos2D.x - cs, worldPos2D.z);
-                    float hR = chunk.SampleHeight(worldPos2D.x + cs, worldPos2D.z);
-                    float hD = chunk.SampleHeight(worldPos2D.x, worldPos2D.z - cs);
-                    float hU = chunk.SampleHeight(worldPos2D.x, worldPos2D.z + cs);
-                    normal   = Vector3.Cross(new Vector3(0, hU - hD, cs * 2f),
-                                             new Vector3(cs * 2f, hR - hL, 0)).normalized;
+                    float cellSize = chunk.cellSize;
+                    float hL = chunk.SampleHeight(worldPos2D.x - cellSize, worldPos2D.z);
+                    float hR = chunk.SampleHeight(worldPos2D.x + cellSize, worldPos2D.z);
+                    float hD = chunk.SampleHeight(worldPos2D.x, worldPos2D.z - cellSize);
+                    float hU = chunk.SampleHeight(worldPos2D.x, worldPos2D.z + cellSize);
+                    normal = Vector3.Cross(new Vector3(0, hU - hD, cellSize * 2f),
+                                          new Vector3(cellSize * 2f, hR - hL, 0)).normalized;
                 }
 
-                Vector3 spawnPos  = new Vector3(worldPos2D.x, height, worldPos2D.z);
-                float slopeAngle  = Vector3.Angle(normal, Vector3.up);
-                float normH       = Mathf.Clamp01((relativeHeight - minChunkH) / heightRange);
+                float slopeAngle = Vector3.Angle(normal, Vector3.up);
+                Vector3 spawnPos = new Vector3(worldPos2D.x, height, worldPos2D.z);
 
-                float probability = trendMode switch
+                // ── Terrain trend probability ──────────────────────────────────
+                float probability = 1f;
+                float normalizedHeight = Mathf.Clamp01((relativeHeight - minChunkH) / heightRange);
+
+                switch (trendMode)
                 {
-                    TerrainTrendMode.ValleysAndLowlands => Mathf.Pow(1f - normH, 1.8f),
-                    TerrainTrendMode.RidgesAndPeaks     => Mathf.Pow(normH, 1.8f),
-                    TerrainTrendMode.GentleSlopes       => Mathf.Clamp01(1f - slopeAngle / 22f),
-                    TerrainTrendMode.NoiseClustered     =>
-                        Mathf.PerlinNoise((worldPos2D.x + seedOffset.x) / 70f,
-                                          (worldPos2D.z + seedOffset.y) / 70f) is float n && n > 0.52f
-                            ? (n - 0.52f) / 0.48f : 0f,
-                    _ => 1f
-                };
+                    case TerrainTrendMode.ValleysAndLowlands:
+                        probability = Mathf.Pow(1f - normalizedHeight, 1.8f); break;
+                    case TerrainTrendMode.RidgesAndPeaks:
+                        probability = Mathf.Pow(normalizedHeight, 1.8f); break;
+                    case TerrainTrendMode.GentleSlopes:
+                        probability = Mathf.Clamp01(1f - (slopeAngle / 22f)); break;
+                    case TerrainTrendMode.NoiseClustered:
+                        float noise = Mathf.PerlinNoise((worldPos2D.x + seedOffset.x) / 70f,
+                                                         (worldPos2D.z + seedOffset.y) / 70f);
+                        probability = noise > 0.52f ? (noise - 0.52f) / 0.48f : 0f; break;
+                }
 
+                // ── Road avoidance modifier ────────────────────────────────────
                 if (avoidRoads && roadSampler != null)
-                    probability *= SampleRoadFactor(roadSampler, localPos, chunk);
+                {
+                    float roadFactor = SampleRoadFactor(roadSampler, localPos, chunk);
+                    probability *= roadFactor;
+                }
 
                 if (Random.value > probability) continue;
 
+                // ── Overlap check ──────────────────────────────────────────────
                 bool tooClose = false;
                 foreach (var pos in spawnedPositions)
-                    if (Vector3.Distance(spawnPos, pos) < minDistance) { tooClose = true; break; }
+                {
+                    if (Vector3.Distance(spawnPos, pos) < minDistance)
+                    {
+                        tooClose = true;
+                        break;
+                    }
+                }
                 if (tooClose) continue;
 
+                // ── Collider fallback ──────────────────────────────────────────
                 if (vertices == null || vertices.Length == 0)
                 {
                     if (chunk.TryGetComponent<Collider>(out var col))
                     {
-                        if (col.Raycast(new Ray(spawnPos + Vector3.up * 50f, Vector3.down), out RaycastHit hit, 100f))
-                        { spawnPos = hit.point; normal = hit.normal; }
+                        Ray ray = new Ray(spawnPos + Vector3.up * 50f, Vector3.down);
+                        if (col.Raycast(ray, out RaycastHit hit, 100f))
+                        {
+                            spawnPos = hit.point;
+                            normal   = hit.normal;
+                        }
                     }
                 }
 
+                // ── Instantiate ────────────────────────────────────────────────
                 GameObject spawnedObj = (GameObject)PrefabUtility.InstantiatePrefab(prefabToSpawn, holder.scene);
                 if (spawnedObj != null)
                 {
@@ -422,13 +382,16 @@ public class DesertPropPlacementTool : EditorWindow
                     float scaleFactor = Random.Range(minScale, maxScale);
                     spawnedObj.transform.localScale = prefabToSpawn.transform.localScale * scaleFactor;
                     spawnedObj.transform.SetParent(holder.transform);
-                    spawnedObj.transform.position  = spawnPos + normal * (heightOffset * scaleFactor);
-                    Quaternion rot = Quaternion.FromToRotation(Vector3.up, normal)
-                                     * Quaternion.Euler(0f, Random.Range(0f, 360f), 0f);
+                    spawnedObj.transform.position = spawnPos + normal * (heightOffset * scaleFactor);
+
+                    Quaternion rot = Quaternion.FromToRotation(Vector3.up, normal);
+                    rot = rot * Quaternion.Euler(0f, Random.Range(0f, 360f), 0f);
                     spawnedObj.transform.rotation = rot;
 
+                    // Register with BetterGameplayManager
                     OptimizableObject optObj = spawnedObj.GetComponent<OptimizableObject>();
-                    if (optObj == null) optObj = Undo.AddComponent<OptimizableObject>(spawnedObj);
+                    if (optObj == null)
+                        optObj = Undo.AddComponent<OptimizableObject>(spawnedObj);
                     optObj.disableEntireGameObject = true;
                     optObj.useFrustumCulling = true;
 
@@ -441,313 +404,136 @@ public class DesertPropPlacementTool : EditorWindow
         }
 
         spawnedObjectsHistory.Push(currentSpawns);
-
-        // ── Color spectrum pass ─────────────────────────────────────────────
-        if (fillColor && currentSpawns.Count > 0)
-        {
-            ApplyColorSpectrum(currentSpawns);
-            Debug.Log($"[PropPlacementTool] Applied color spectrum to {currentSpawns.Count} props.");
-        }
-
-        Debug.Log($"[PropPlacementTool] Spawned {totalSpawned} props on {chunks.Length} chunks.");
+        Debug.Log($"[PropPlacementTool] Spawned {totalSpawned} props on {chunks.Length} chunks based on '{trendMode}' terrain trend." +
+                  (avoidRoads ? " (Road avoidance active)" : ""));
     }
 
-    // ═════════════════════════════════════════════════════════════════════════
-    // Color Spectrum Application
-    // ═════════════════════════════════════════════════════════════════════════
+    // ── Road Sampling ──────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Called from the standalone "Apply Color to Existing Props" button.
-    /// Collects all props from all Spawned_Props holders in the scene.
+    /// Holds the overlay vertex + color data for fast per-point sampling.
     /// </summary>
-    private void ApplyColorSpectrumToExistingProps()
-    {
-        List<Color> parsedColors = GetParsedSpectrumColors();
-        if (parsedColors.Count < 2)
-        {
-            EditorUtility.DisplayDialog("需要颜色", "请至少添加 2 个有效的十六进制颜色。", "OK");
-            return;
-        }
-
-        List<GameObject> allProps = new List<GameObject>();
-        foreach (var chunk in FindObjectsOfType<DesertTerrainChunk>())
-        {
-            Transform holder = chunk.transform.Find("Spawned_Props");
-            if (holder == null) continue;
-            foreach (Transform child in holder)
-                allProps.Add(child.gameObject);
-        }
-
-        if (allProps.Count == 0)
-        {
-            EditorUtility.DisplayDialog("无物体", "场景中没有找到 Spawned_Props 节点下的物体，请先放置物体。", "OK");
-            return;
-        }
-
-        ApplyColorSpectrum(allProps);
-        Debug.Log($"[PropPlacementTool] Re-colored {allProps.Count} existing props.");
-    }
-
-    /// <summary>
-    /// Core color application: assigns a gradient material to every prop's renderers.
-    /// Creates/reuses saved material assets so colors persist after reload.
-    /// </summary>
-    private void ApplyColorSpectrum(List<GameObject> props)
-    {
-        List<Color> parsedColors = GetParsedSpectrumColors();
-        if (parsedColors.Count < 2) return;
-
-        // Build gradient material palette ──────────────────────────────────
-        Material[] palette = BuildColorPalette(parsedColors, props);
-        if (palette == null || palette.Length == 0) return;
-
-        // Assign materials ─────────────────────────────────────────────────
-        float angleRad = gradientAngleDeg * Mathf.Deg2Rad;
-        float dirX     = Mathf.Cos(angleRad);
-        float dirZ     = Mathf.Sin(angleRad);
-
-        foreach (var prop in props)
-        {
-            if (prop == null) continue;
-
-            Vector3 pos = prop.transform.position;
-            float t     = ComputeGradientT(pos, dirX, dirZ);
-
-            // Map t to palette index
-            int step  = Mathf.Clamp(Mathf.RoundToInt(t * (colorSteps - 1)), 0, colorSteps - 1);
-            Material mat = palette[step];
-
-            // Apply to all MeshRenderers in the hierarchy
-            foreach (var mr in prop.GetComponentsInChildren<MeshRenderer>(true))
-            {
-                // Assign as sharedMaterial so it references the saved asset and persists
-                Undo.RecordObject(mr, "Apply Prop Color");
-                mr.sharedMaterial = mat;
-                EditorUtility.SetDirty(mr);
-            }
-
-            EditorUtility.SetDirty(prop);
-        }
-
-        AssetDatabase.SaveAssets();
-        AssetDatabase.Refresh();
-
-        // Mark all chunk scenes dirty
-        foreach (var chunk in FindObjectsOfType<DesertTerrainChunk>())
-            EditorSceneManager.MarkSceneDirty(chunk.gameObject.scene);
-    }
-
-    /// <summary>
-    /// Creates (or reloads from disk) colorSteps material assets for the gradient palette.
-    /// Finds a base material from the first renderable prop to clone from.
-    /// Returns the palette array indexed by step [0, colorSteps-1].
-    /// </summary>
-    private Material[] BuildColorPalette(List<Color> parsedColors, List<GameObject> propsForBaseMat)
-    {
-        // Ensure output folder exists
-        const string folder = "Assets/Generated/PropColorMaterials";
-        if (!System.IO.Directory.Exists(folder))
-        {
-            System.IO.Directory.CreateDirectory(folder);
-            AssetDatabase.Refresh();
-        }
-
-        // Find a base material to clone from the first prop that has a renderer
-        Material baseMat = null;
-        foreach (var prop in propsForBaseMat)
-        {
-            if (prop == null) continue;
-            var mr = prop.GetComponentInChildren<MeshRenderer>(true);
-            if (mr != null && mr.sharedMaterial != null)
-            {
-                // Use the shared material as clone source (don't modify it in place)
-                baseMat = mr.sharedMaterial;
-                break;
-            }
-        }
-
-        if (baseMat == null)
-        {
-            // Fall back to a plain URP/Standard material
-            baseMat = new Material(Shader.Find("Universal Render Pipeline/Lit")
-                       ?? Shader.Find("Standard")
-                       ?? Shader.Find("Diffuse"));
-            if (baseMat == null)
-            {
-                Debug.LogError("[PropPlacementTool] Could not find a base material or shader.");
-                return null;
-            }
-        }
-
-        string prefabName = prefabToSpawn != null ? prefabToSpawn.name : "Prop";
-        Material[] palette = new Material[colorSteps];
-
-        for (int s = 0; s < colorSteps; s++)
-        {
-            float t   = (float)s / (colorSteps - 1);
-            Color col = SampleCyclicGradient(parsedColors, t);
-
-            string assetPath = $"{folder}/{prefabName}_Color_{s:D3}.mat";
-            Material mat = AssetDatabase.LoadAssetAtPath<Material>(assetPath);
-
-            if (mat == null)
-            {
-                mat = new Material(baseMat);
-                AssetDatabase.CreateAsset(mat, assetPath);
-            }
-
-            // Set color on the material
-            if (mat.HasProperty(colorProperty))
-                mat.SetColor(colorProperty, col);
-            // Fallback: also try _Color for Built-in pipelines
-            if (mat.HasProperty("_Color") && colorProperty != "_Color")
-                mat.SetColor("_Color", col);
-
-            EditorUtility.SetDirty(mat);
-            palette[s] = mat;
-        }
-
-        return palette;
-    }
-
-    // ═════════════════════════════════════════════════════════════════════════
-    // Gradient Helpers
-    // ═════════════════════════════════════════════════════════════════════════
-
-    /// <summary>Computes a [0,1] t value for a world position using the configured gradient.</summary>
-    private float ComputeGradientT(Vector3 worldPos, float dirX, float dirZ)
-    {
-        // Linear component: project XZ onto direction vector, normalised by repeat distance
-        float linear = (worldPos.x * dirX + worldPos.z * dirZ) / Mathf.Max(0.01f, gradientRepeatDistance);
-
-        if (noiseBlend <= 0.001f)
-            return Mathf.Repeat(linear, 1f);
-
-        // Perlin noise component
-        float noise = Mathf.PerlinNoise(worldPos.x / Mathf.Max(1f, noiseScale),
-                                         worldPos.z / Mathf.Max(1f, noiseScale));
-
-        // Blend: lerp between linear and noise in [0,1]
-        float blended = Mathf.Lerp(Mathf.Repeat(linear, 1f), noise, noiseBlend);
-        return Mathf.Clamp01(blended);
-    }
-
-    /// <summary>
-    /// Samples the user-defined colour list as a cyclic gradient at t ∈ [0,1].
-    /// t=0 and t=1 both land on parsedColors[0], creating a seamless loop.
-    /// </summary>
-    private static Color SampleCyclicGradient(List<Color> colors, float t)
-    {
-        int   n       = colors.Count;
-        float scaled  = t * n;                           // [0, n)
-        int   idxA    = Mathf.FloorToInt(scaled) % n;
-        int   idxB    = (idxA + 1) % n;
-        float blend   = scaled - Mathf.Floor(scaled);    // fractional part
-        return Color.Lerp(colors[idxA], colors[idxB], blend);
-    }
-
-    // ═════════════════════════════════════════════════════════════════════════
-    // Road Sampling
-    // ═════════════════════════════════════════════════════════════════════════
-
     private class RoadSampler
     {
-        public Vector3[] overlayVertices;
-        public Color[]   overlayColors;
+        public Vector3[] overlayVertices;   // Local-space vertices of the road overlay mesh
+        public Color[]   overlayColors;     // Vertex colors; alpha = road strength [0, 1]
         public bool      hasData;
     }
 
+    /// <summary>
+    /// Builds a RoadSampler for the given chunk by reading its RoadOverlay child.
+    /// Returns null if no overlay exists.
+    /// </summary>
     private static RoadSampler BuildRoadSampler(DesertTerrainChunk chunk)
     {
         Transform overlayT = chunk.transform.Find("RoadOverlay");
         if (overlayT == null) return null;
+
         DesertTerrainRoadOverlay overlay = overlayT.GetComponent<DesertTerrainRoadOverlay>();
         if (overlay == null) return null;
+
         Mesh mesh = overlay.GetMesh();
         if (mesh == null) return null;
-        Color[]   colors = mesh.colors;
-        Vector3[] verts  = mesh.vertices;
-        if (colors == null || colors.Length == 0 || verts == null || verts.Length != colors.Length) return null;
+
+        Color[] colors = mesh.colors;
+        if (colors == null || colors.Length == 0) return null;
+
+        Vector3[] verts = mesh.vertices;
+        if (verts == null || verts.Length != colors.Length) return null;
+
         return new RoadSampler { overlayVertices = verts, overlayColors = colors, hasData = true };
     }
 
+    /// <summary>
+    /// Samples the road strength [0,1] at a local-space point using bilinear interpolation
+    /// on the overlay's vertex grid (same grid as the terrain mesh).
+    /// Then converts road strength to a spawn probability factor [0,1]:
+    ///   • Inside hardClear radius from road edge → always 0
+    ///   • Transition zone → linear ramp from 0 to 1
+    ///   • Far from road → factor = 1 (unaffected)
+    ///   • On the road center → factor = onRoadSpawnProbability
+    /// </summary>
     private float SampleRoadFactor(RoadSampler sampler, Vector3 localPos, DesertTerrainChunk chunk)
     {
+        // Bilinear interpolation in grid space (same as terrain height sampling)
         float gridX = localPos.x / chunk.cellSize;
         float gridZ = localPos.z / chunk.cellSize;
+
         int x0 = Mathf.Clamp(Mathf.FloorToInt(gridX), 0, chunk.width);
         int x1 = Mathf.Clamp(x0 + 1, 0, chunk.width);
         int z0 = Mathf.Clamp(Mathf.FloorToInt(gridZ), 0, chunk.depth);
         int z1 = Mathf.Clamp(z0 + 1, 0, chunk.depth);
-        float tx = gridX - x0, tz = gridZ - z0;
+
+        float tx = gridX - x0;
+        float tz = gridZ - z0;
         int W = chunk.width + 1;
-        int i00 = z0*W+x0, i10 = z0*W+x1, i01 = z1*W+x0, i11 = z1*W+x1;
-        if (i11 >= sampler.overlayColors.Length) return 1f;
 
-        float roadAlpha = Mathf.Lerp(
-            Mathf.Lerp(sampler.overlayColors[i00].a, sampler.overlayColors[i10].a, tx),
-            Mathf.Lerp(sampler.overlayColors[i01].a, sampler.overlayColors[i11].a, tx), tz);
+        int i00 = z0 * W + x0;
+        int i10 = z0 * W + x1;
+        int i01 = z1 * W + x0;
+        int i11 = z1 * W + x1;
 
+        // Safety: overlay may have skirt verts appended beyond the main grid
+        int maxIdx = sampler.overlayColors.Length - 1;
+        if (i11 > maxIdx) return 1f; // No data, don't affect probability
+
+        float a00 = sampler.overlayColors[i00].a;
+        float a10 = sampler.overlayColors[i10].a;
+        float a01 = sampler.overlayColors[i01].a;
+        float a11 = sampler.overlayColors[i11].a;
+        float roadAlpha = Mathf.Lerp(Mathf.Lerp(a00, a10, tx), Mathf.Lerp(a01, a11, tx), tz);
+
+        // If there is no road here at all, don't touch the probability
         if (roadAlpha <= 0.01f) return 1f;
 
-        float total       = roadClearDistance + roadTransitionWidth;
-        float clearAlpha  = total > 0f ? Mathf.Clamp01(roadTransitionWidth / total) : 0.5f;
-        float transAlpha  = total > 0f ? Mathf.Clamp01(roadClearDistance  / total) : 0.1f;
+        // roadAlpha tells us how strongly "on the road" this point is.
+        //
+        // Distance logic is approximated through alpha:
+        //   • alpha ≈ 1 → road centre
+        //   • alpha ≈ 0+ → road edge / fade-out zone from the brush
+        //
+        // We treat roadAlpha directly as a "proximity to road center" signal.
+        // The brush already paints a smooth falloff from centre → edge, so:
+        //   clearThreshold = alpha above which the hard clear zone applies
+        //   The transition is (alpha - clearThreshold) / transitionRange
+
+        // Convert world distances to alpha thresholds using the brush radius concept:
+        // We don't store a global brush radius, so we use normalized fractions of [0,1].
+        // A simpler approach: alpha above clearAlpha → fully cleared; below transAlpha → full density.
+        // clearDistance & transitionWidth are in metres; convert using cellSize as proxy.
+        float totalRoadRadius = roadClearDistance + roadTransitionWidth;   // outer edge of transition
+        float clearAlpha      = totalRoadRadius > 0f ? Mathf.Clamp01(roadTransitionWidth / totalRoadRadius) : 0.5f;
+        float transAlpha      = totalRoadRadius > 0f ? Mathf.Clamp01(roadClearDistance  / totalRoadRadius) : 0.1f;
+        // So: alpha > clearAlpha → inside hard clear zone (factor = 0)
+        //     transAlpha < alpha <= clearAlpha → transition (ramp 0→onRoadProb)
+        //     alpha ≤ transAlpha → lightly painted edge → small probability remaining
+        // Note: because the brush paints soft falloff, high alpha = close to road centre,
+        // and "clearAlpha" marks the inner boundary.
 
         float factor;
         if (roadAlpha >= clearAlpha)
         {
+            // Hard clear zone → interpolate between 0 and onRoadSpawnProbability
+            // (alpha=clearAlpha → factor=0, alpha=1 → factor=onRoadSpawnProbability)
             float t = (roadAlpha - clearAlpha) / Mathf.Max(0.001f, 1f - clearAlpha);
             factor = Mathf.Lerp(0f, onRoadSpawnProbability, t);
         }
         else if (roadAlpha >= transAlpha)
         {
+            // Transition zone → ramp from onRoadSpawnProbability back toward 1
             float t = (roadAlpha - transAlpha) / Mathf.Max(0.001f, clearAlpha - transAlpha);
-            factor = Mathf.Lerp(1f, 0f, t);
+            factor = Mathf.Lerp(1f, 0f, t);   // from far edge (1) to clear edge (0)
         }
         else
         {
+            // Very lightly painted edge: barely affected
             factor = 1f;
         }
 
         return Mathf.Clamp01(factor);
     }
 
-    // ═════════════════════════════════════════════════════════════════════════
-    // Utilities
-    // ═════════════════════════════════════════════════════════════════════════
-
-    private List<Color> GetParsedSpectrumColors()
-    {
-        var result = new List<Color>();
-        foreach (var hex in spectrumHexColors)
-            if (TryParseHex(hex, out Color c))
-                result.Add(c);
-        return result;
-    }
-
-    private static bool TryParseHex(string hex, out Color color)
-    {
-        color = Color.white;
-        if (string.IsNullOrWhiteSpace(hex)) return false;
-        hex = hex.Trim().TrimStart('#');
-        if (hex.Length == 6)  hex = hex + "FF";
-        if (hex.Length != 8)  return false;
-        try
-        {
-            byte r = System.Convert.ToByte(hex.Substring(0, 2), 16);
-            byte g = System.Convert.ToByte(hex.Substring(2, 2), 16);
-            byte b = System.Convert.ToByte(hex.Substring(4, 2), 16);
-            byte a = System.Convert.ToByte(hex.Substring(6, 2), 16);
-            color = new Color32(r, g, b, a);
-            return true;
-        }
-        catch { return false; }
-    }
-
-    // ═════════════════════════════════════════════════════════════════════════
-    // Undo / Clear
-    // ═════════════════════════════════════════════════════════════════════════
+    // ── Undo / Clear ───────────────────────────────────────────────────────────
 
     private void UndoLastPlacement()
     {
@@ -756,9 +542,15 @@ public class DesertPropPlacementTool : EditorWindow
             List<GameObject> lastSpawns = spawnedObjectsHistory.Pop();
             int count = 0;
             foreach (var obj in lastSpawns)
-                if (obj != null) { Undo.DestroyObjectImmediate(obj); count++; }
-
-            foreach (var chunk in FindObjectsOfType<DesertTerrainChunk>())
+            {
+                if (obj != null)
+                {
+                    Undo.DestroyObjectImmediate(obj);
+                    count++;
+                }
+            }
+            DesertTerrainChunk[] chunks = FindObjectsOfType<DesertTerrainChunk>();
+            foreach (var chunk in chunks)
                 EditorSceneManager.MarkSceneDirty(chunk.gameObject.scene);
 
             Debug.Log($"[PropPlacementTool] Undone placement of {count} props.");
@@ -771,8 +563,9 @@ public class DesertPropPlacementTool : EditorWindow
 
     private void ClearAllProps()
     {
+        DesertTerrainChunk[] chunks = FindObjectsOfType<DesertTerrainChunk>();
         int count = 0;
-        foreach (var chunk in FindObjectsOfType<DesertTerrainChunk>())
+        foreach (var chunk in chunks)
         {
             Transform t = chunk.transform.Find("Spawned_Props");
             if (t != null)
