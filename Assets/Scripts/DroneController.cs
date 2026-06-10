@@ -5,7 +5,7 @@ using RVSystem;
 public class DroneController : MonoBehaviour
 {
     [Header("Movement Settings")]
-    public float speed = 5f;
+    public float speed = 12.5f; // 已调整：原5f * 250%
     public float lookSensitivity = 2f;
     
     [Header("Interaction Settings")]
@@ -27,7 +27,6 @@ public class DroneController : MonoBehaviour
         _droneCamera = cam;
         _flowController = flowController;
         
-        // Attach camera to drone
         _droneCamera.transform.SetParent(transform);
         _droneCamera.transform.localPosition = Vector3.zero;
         _droneCamera.transform.localRotation = Quaternion.identity;
@@ -35,12 +34,11 @@ public class DroneController : MonoBehaviour
         _pitch = transform.eulerAngles.x;
         _yaw = transform.eulerAngles.y;
 
-        // Ensure Drone has physical components for RV detection and collisions
         Rigidbody rb = GetComponent<Rigidbody>();
         if (rb == null) rb = gameObject.AddComponent<Rigidbody>();
-        rb.isKinematic = false; // Needs to collide with walls
-        rb.useGravity = false;  // Drone hovers
-        rb.freezeRotation = true; // Prevents spinning out of control on collision
+        rb.isKinematic = false;
+        rb.useGravity = false;
+        rb.freezeRotation = true;
         rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
 
         Collider col = GetComponent<Collider>();
@@ -50,42 +48,15 @@ public class DroneController : MonoBehaviour
             sCol.radius = 0.2f;
             col = sCol;
         }
-        col.isTrigger = false; // Needs to bounce off walls instead of passing through
+        col.isTrigger = false;
 
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
     }
 
-    private float _debugTimer = 0f;
     void Update()
     {
-        if (_droneCamera == null)
-        {
-            _debugTimer += Time.deltaTime;
-            if (_debugTimer >= 1f)
-            {
-                _debugTimer = 0f;
-                Debug.LogWarning("[DroneController] Camera is null! The drone is active but has no bound camera.");
-            }
-            return;
-        }
-
-        _debugTimer += Time.deltaTime;
-        if (_debugTimer >= 1f)
-        {
-            _debugTimer = 0f;
-            Transform parent = _droneCamera.transform.parent;
-            Debug.Log($"[Drone Diagnostics] Drone WorldPos: {transform.position} | Cam Parent: {(parent != null ? parent.name : "null")} | Cam LocalPos: {_droneCamera.transform.localPosition} | Cam WorldPos: {_droneCamera.transform.position}");
-            
-            // 🌟 列出场景中所有处于激活状态的摄像机，揪出到底是哪台相机在占屏渲染
-            Camera[] cams = FindObjectsOfType<Camera>();
-            string camLog = $"[Camera Diagnostics] Found {cams.Length} active cameras in scene:\n";
-            foreach (Camera c in cams)
-            {
-                camLog += $"- '{c.name}' | Tag: '{c.tag}' | Enabled: {c.enabled} | Depth: {c.depth} | TargetTexture: {(c.targetTexture != null ? c.targetTexture.name : "null")} | WorldPos: {c.transform.position}\n";
-            }
-            Debug.Log(camLog);
-        }
+        if (_droneCamera == null) return;
 
         HandleLook();
         HandleMovement();
@@ -101,6 +72,7 @@ public class DroneController : MonoBehaviour
         _pitch -= mouseY;
         _pitch = Mathf.Clamp(_pitch, -89f, 89f);
 
+        // 直接旋转无人机本体，使视角与物理碰撞体绑定
         transform.rotation = Quaternion.Euler(0f, _yaw, 0f);
         _droneCamera.transform.localRotation = Quaternion.Euler(_pitch, 0f, 0f);
     }
@@ -120,10 +92,6 @@ public class DroneController : MonoBehaviour
         if (rb != null)
         {
             rb.velocity = move * speed;
-        }
-        else
-        {
-            transform.position += move * (speed * Time.deltaTime);
         }
     }
 
@@ -147,15 +115,14 @@ public class DroneController : MonoBehaviour
         {
             _holdTimer += Time.deltaTime;
             float progress = Mathf.Clamp01(_holdTimer / requiredHoldTime);
-            UpdateSlider(progress, true); // 🌟 实时把进度同步给玩家新做的 Slider 并显示它！
+            UpdateSlider(progress, true);
 
             if (_holdTimer >= requiredHoldTime)
             {
                 _hasSoul = true;
                 _holdTimer = 0f;
-                UpdateSlider(0f, false); // 🌟 完成吸取，自动隐去 Slider！
+                UpdateSlider(0f, false);
                 
-                // Destroy or hide the corpse once retrieved
                 if (_targetCorpse != null)
                 {
                     if (Application.isPlaying) Destroy(_targetCorpse.gameObject);
@@ -166,57 +133,27 @@ public class DroneController : MonoBehaviour
         else
         {
             _holdTimer = 0f;
-            UpdateSlider(0f, false); // 🌟 没有在长按吸取或没有瞄准，自动隐藏 Slider！
+            UpdateSlider(0f, false);
         }
     }
 
-    void OnCollisionEnter(Collision collision)
-    {
-        CheckHitRV(collision.collider);
-    }
-
-    void OnTriggerEnter(Collider other)
-    {
-        CheckHitRV(other);
-    }
+    void OnCollisionEnter(Collision collision) { CheckHitRV(collision.collider); }
+    void OnTriggerEnter(Collider other) { CheckHitRV(other); }
 
     void CheckHitRV(Collider other)
     {
-        if (!_hasSoul) return;
-        if (other == null) return;
-
-        // 必须碰到的非 isTrigger 的实体碰撞箱！
-        if (other.isTrigger) return;
-
-        // 向上搜寻挂载了 UV/RV 的较高级母物体
+        if (!_hasSoul || other.isTrigger) return;
         Transform current = other.transform;
-        RVController foundRv = null;
-        Transform foundParent = null;
-
         while (current != null)
         {
-            RVController rv = current.GetComponent<RVController>();
-            if (rv != null)
+            if (current.GetComponent<RVController>() != null || 
+                current.name.ToUpperInvariant().Contains("RV") || 
+                current.name.ToUpperInvariant().Contains("UV"))
             {
-                foundRv = rv;
-                foundParent = current;
+                if (_flowController != null) _flowController.CompleteRevive();
+                return;
             }
-
-            string nameUpper = current.name.ToUpperInvariant();
-            if (nameUpper.Contains("RV") || nameUpper.Contains("UV"))
-            {
-                foundParent = current;
-            }
-
             current = current.parent;
-        }
-
-        if (foundRv != null || foundParent != null)
-        {
-            if (_flowController != null)
-            {
-                _flowController.CompleteRevive();
-            }
         }
     }
 
@@ -225,36 +162,22 @@ public class DroneController : MonoBehaviour
     {
         if (_cachedSlider == null)
         {
-            // 自动检索场景 Canvases 中名称带有 Revive/Soul/Progress 关键字的 Slider，或者兜底获取任意 Slider
             Slider[] sliders = Resources.FindObjectsOfTypeAll<Slider>();
             foreach (Slider s in sliders)
             {
-                if (s.gameObject.scene.name == null) continue; // 排除预制体，只搜寻场景实例
-                
+                if (s.gameObject.scene.name == null) continue;
                 string nameUpper = s.name.ToUpperInvariant();
-                if (nameUpper.Contains("REVIVE") || nameUpper.Contains("SOUL") || nameUpper.Contains("PROGRESS") || nameUpper.Contains("DEATH"))
+                if (nameUpper.Contains("REVIVE") || nameUpper.Contains("SOUL") || nameUpper.Contains("PROGRESS"))
                 {
                     _cachedSlider = s;
                     break;
                 }
             }
-            if (_cachedSlider == null && sliders.Length > 0)
-            {
-                // 实在没有关键字匹配，就默认绑定场景中的第一个 Slider 物体
-                _cachedSlider = sliders[0];
-            }
         }
-
         if (_cachedSlider != null)
         {
-            // 在起效时显示，其他时间自动休眠，保证 UI 界面高度整洁
             _cachedSlider.gameObject.SetActive(active);
-            if (active)
-            {
-                _cachedSlider.minValue = 0f;
-                _cachedSlider.maxValue = 1f;
-                _cachedSlider.value = progress;
-            }
+            if (active) _cachedSlider.value = progress;
         }
     }
 }

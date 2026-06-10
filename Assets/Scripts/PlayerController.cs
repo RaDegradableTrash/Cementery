@@ -445,6 +445,7 @@ public class PlayerController : NetworkBehaviour
         GameObject corpse = Instantiate(gameObject, transform.position, transform.rotation);
         corpse.name = "PlayerCorpse";
         
+        // 移除所有活体逻辑组件
         Destroy(corpse.GetComponent<PlayerController>());
         Destroy(corpse.GetComponent<PlayerDeathFlowController>());
         Destroy(corpse.GetComponent<PlayerStamina>());
@@ -458,11 +459,13 @@ public class PlayerController : NetworkBehaviour
         var netObj = corpse.GetComponent<NetworkObject>();
         if (netObj != null) Destroy(netObj);
 
+        // 确保网格碰撞体为凸面
         foreach (MeshCollider mc in corpse.GetComponentsInChildren<MeshCollider>())
         {
             mc.convex = true;
         }
 
+        // 清理摄像机及音频监听
         foreach (Camera cam in corpse.GetComponentsInChildren<Camera>())
             Destroy(cam.gameObject);
         foreach (AudioListener al in corpse.GetComponentsInChildren<AudioListener>())
@@ -470,22 +473,23 @@ public class PlayerController : NetworkBehaviour
         foreach (MouseLook ml in corpse.GetComponentsInChildren<MouseLook>())
             Destroy(ml);
 
+        // 核心修改：强制固定尸体位置，避免物理滚动
         Rigidbody corpseRb = corpse.GetComponent<Rigidbody>();
-        if (corpseRb != null && _rb != null)
+        if (corpseRb != null)
         {
-            corpseRb.isKinematic = false;
-            corpseRb.freezeRotation = false; 
-            corpseRb.velocity = _rb.velocity;
-            corpseRb.angularVelocity = _rb.angularVelocity;
+            corpseRb.isKinematic = true;          // 设置为 Kinematic，使其不受物理力影响
+            corpseRb.velocity = Vector3.zero;     // 清除任何遗留速度
+            corpseRb.angularVelocity = Vector3.zero; // 清除任何旋转动量
         }
 
-        // 🌟 强力修复：因为克隆自活着的玩家（那时是 ShadowsOnly），尸体必须显化出完全实体并投射阴影！
+        // 显化尸体外观及阴影
         foreach (Renderer r in corpse.GetComponentsInChildren<Renderer>())
         {
             r.enabled = true;
             r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
         }
 
+        // 隐藏原始玩家角色
         SetPlayerVisible(false);
         return corpse.transform;
     }
