@@ -9,6 +9,11 @@ public abstract class GearButtonBase : MonoBehaviour, ICockpitInteractable, ICoc
     [SerializeField] private Color highlightEmissionColor = new Color(0.95f, 0.95f, 0.95f, 1f);
     [SerializeField] private float highlightEmissionHdr = -4.5f;
 
+    // ── 🌟 核心新增：音效播放接口的静态引用 ─────────────────────────────────
+    // 使用静态（static）引用，这样全局只需要有一个音效管理者注册进来，所有按钮都能直接调用
+    public static IGearAudioPlayer AudioPlayer { get; set; }
+    // ────────────────────────────────────────────────────────────────────────
+
     private Color inactiveEmissionColor = Color.black;
     private bool hasEmission;
     private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
@@ -60,13 +65,26 @@ public abstract class GearButtonBase : MonoBehaviour, ICockpitInteractable, ICoc
         UpdateVisual(ShouldGlow(carControl));
     }
 
+    // ── 🌟 核心修改：在换挡交互时，调用音效接口 ─────────────────────────────
     public void Interact()
     {
-        if (carControl != null && carControl.EngineOn)
+        if (carControl != null)
         {
-            carControl.SetGear(Gear);
+            if (carControl.EngineOn)
+            {
+                carControl.SetGear(Gear);
+                
+                // 成功时：通知音效器播放成功音效，并把当前的档位传过去（方便你不同档位播不同声音）
+                AudioPlayer?.PlayShiftSuccess(Gear);
+            }
+            else
+            {
+                // 失败时：通知音效器播放失败/警报音效
+                AudioPlayer?.PlayShiftFail(Gear);
+            }
         }
     }
+    // ────────────────────────────────────────────────────────────────────────
 
     private bool ShouldGlow(CarControl control)
     {
