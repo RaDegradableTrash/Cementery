@@ -4,6 +4,7 @@ using UnityEngine.UI;
 /// <summary>
 /// Tracks sprint stamina. Attach to the Player GameObject alongside PlayerController.
 /// </summary>
+[RequireComponent(typeof(Rigidbody))] // 确保安全获取刚体
 public class PlayerStamina : MonoBehaviour
 {
     [Header("Stamina Values")]
@@ -19,18 +20,68 @@ public class PlayerStamina : MonoBehaviour
     [Tooltip("Assign a UI Image (Image Type = Filled, Fill Method = Horizontal) to show the stamina bar.")]
     public Image staminaBarFill;
 
+    [Header("绑定玩家控制器")]
+    [Tooltip("把挂载了 PlayerController 的玩家物体拖到这里，脚本会自动获取组件")]
+    public PlayerController playerController; 
+
     public bool HasStamina => _stamina > 1f;
 
     private float _stamina;
     private float _recoverCooldown;
+    private Rigidbody _rb;
+    
+    // 用于控制淡入淡出的 CanvasGroup
+    private CanvasGroup _uiCanvasGroup; 
 
     void Awake()
     {
         _stamina = maxStamina;
+
+        if (playerController == null)
+        {
+            playerController = GetComponent<PlayerController>();
+        }
+
+        _rb = GetComponent<Rigidbody>();
+
+        // 自动初始化或获取 UI 容器上的 CanvasGroup 组件
+        if (staminaBarFill != null && staminaBarFill.transform.parent != null)
+        {
+            GameObject container = staminaBarFill.transform.parent.gameObject;
+            _uiCanvasGroup = container.GetComponent<CanvasGroup>();
+            if (_uiCanvasGroup == null)
+            {
+                _uiCanvasGroup = container.AddComponent<CanvasGroup>();
+            }
+        }
     }
 
     void Update()
     {
+        bool isPressingSprint = Input.GetKey(KeyCode.LeftShift);
+
+        // 使用刚体速度判断，增加了安全兼容：如果新版本没有 linearVelocity 就自动用旧版的 velocity
+        bool isMoving = false;
+        if (_rb != null)
+        {
+#if UNITY_6000_0_OR_NEWER
+            Vector3 horizontalVelocity = new Vector3(_rb.linearVelocity.x, 0f, _rb.linearVelocity.z);
+#else
+            Vector3 horizontalVelocity = new Vector3(_rb.velocity.x, 0f, _rb.velocity.z);
+#endif
+            isMoving = horizontalVelocity.magnitude > 0.3f; // 略微调高阈值，更加稳健
+        }
+
+        // 状态判定逻辑
+        if (isPressingSprint && isMoving && HasStamina)
+        {
+            Drain(); 
+        }
+        else
+        {
+            Recover(); 
+        }
+
         UpdateUI();
     }
 
@@ -56,11 +107,17 @@ public class PlayerStamina : MonoBehaviour
     {
         if (staminaBarFill == null) return;
 
+        // 1. 实时更新进度条填充度
         staminaBarFill.fillAmount = NormalizedStamina;
 
-        // Hide the whole bar container when stamina is full
-        Transform barRoot = staminaBarFill.transform.parent;
-        if (barRoot != null)
-            barRoot.gameObject.SetActive(NormalizedStamina < 0.99f);
+        // 2. 使用 CanvasGroup 的 alpha 进行平滑淡入淡出，彻底告别 SetActive 带来的物理抽搐
+        if (_uiCanvasGroup != null)
+        {
+            // 如果体力不满 98%，说明在消耗中，目标透明度为 1（显示）；否则满状态目标透明度为 0（隐藏）
+            float targetAlpha = (NormalizedStamina < 0.98f) ? 1f : 0f;
+            
+            // 每帧平滑过渡透明度
+            _uiCanvasGroup.alpha = Mathf.MoveTowards(_uiCanvasGroup.alpha, targetAlpha, Time.deltaTime * 5f);
+        }
     }
 }

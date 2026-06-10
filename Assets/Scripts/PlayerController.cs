@@ -15,6 +15,7 @@ public class PlayerController : NetworkBehaviour
 
     [Header("Health")]
     public int hp = 10;
+    public int maxHp = 10;
 
     [Header("Input")]
     [Tooltip("Use raw axis values for immediate response (recommended for low input latency).")]
@@ -113,6 +114,10 @@ public class PlayerController : NetworkBehaviour
         _col = GetComponent<CapsuleCollider>();
         _stamina = GetComponent<PlayerStamina>();
         _selfColliders = GetComponentsInChildren<Collider>(true);
+
+
+
+        SimpleCircleBar.Instance.UpdateHealthBar(hp, maxHp);
 
         if (_rb != null)
         {
@@ -414,6 +419,9 @@ public class PlayerController : NetworkBehaviour
             hp = 0;
             Die(sourcePos);
         }
+
+        // 每次 hp 发生改变，就通知 UI 刷新
+SimpleCircleBar.Instance.UpdateHealthBar(hp, maxHp);
         Debug.Log($"[PlayerController] Took {amount} damage. Current HP: {hp}");
     }
 
