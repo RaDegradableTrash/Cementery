@@ -14,6 +14,7 @@ public class ItemData : ScriptableObject
     public Material material;
     public GameObject previewPrefab; // 预览用Prefab
     public GameObject worldPrefab; // 真实世界用Prefab（用于爆装备/掉落）
+    [HideInInspector] public Vector3 savedWorldScale = Vector3.zero;
 
     // 旋转后返回所有占用格子的偏移
     public IEnumerable<Vector3Int> GetRotatedOffsets(Quaternion rotation)

@@ -1185,12 +1185,12 @@ public class InteractionSystem : MonoBehaviour
         // 4. 左键松开执行放下或 Tab 放置
         if (Input.GetMouseButtonUp(0) && _carriedRb != null)
         {
-            if (_carriedWo != null && _carriedWo.GetComponent<KelpLeaf>() != null)
+            if (_carriedWo != null && _carriedWo.GetComponent<Kelp>() != null)
             {
                 PlantPot pot = GetLookedAtPot();
                 if (pot != null && pot.CanPlant())
                 {
-                    pot.PlantLeaf(_carriedWo);
+                    pot.PlantKelp(_carriedWo);
                     ExitPlacementMode();
                     ConsumeCarriedObjectSilently();
                     ClearPrompts();
@@ -1458,6 +1458,11 @@ public class InteractionSystem : MonoBehaviour
             }
         }
 #endif
+
+        if (obj.collectItemData != null)
+        {
+            // Removed savedWorldScale assignment completely
+        }
 
         InventoryCameraController camCtrl = GetInventoryCameraController();
         if (camCtrl != null)

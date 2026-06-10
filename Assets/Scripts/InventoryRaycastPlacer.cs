@@ -96,7 +96,18 @@ public class InventoryRaycastPlacer : MonoBehaviour
 
     public bool HasActivePreviewItem => previewItemData != null;
     public List<TempItem> GetTempItems() => _tempItems;
-    public void ClearTempItems() => _tempItems.Clear();
+    public void ClearTempItems()
+    {
+        foreach (var ti in _tempItems)
+        {
+            if (ti != null && ti.transform != null)
+            {
+                if (Application.isPlaying) Destroy(ti.transform.gameObject);
+                else DestroyImmediate(ti.transform.gameObject);
+            }
+        }
+        _tempItems.Clear();
+    }
 
     void Awake()
     {
