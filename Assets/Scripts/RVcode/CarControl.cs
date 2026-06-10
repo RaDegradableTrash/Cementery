@@ -16,6 +16,9 @@ public class CarControl : MonoBehaviour
         L6
     }
 
+    [Header("Camera Bindings")]
+    [SerializeField] private GameObject cockpitCam; // 拖入你的第一人称/座舱相机物体
+
     [Header("Gear")]
     [SerializeField] private GearMode startGear = GearMode.Park;
     [SerializeField] private GearMode currentGear = GearMode.Park;
@@ -663,58 +666,23 @@ public class CarControl : MonoBehaviour
             steeringWheel.localRotation = steeringWheelInitialLocalRotation * Quaternion.AngleAxis(targetAngle, steeringWheelLocalAxis);
         }
 
-        throttleInput = Mathf.Clamp01(Input.GetAxis("Vertical")); 
+// 🌟 修改后：只有当 activeControl 为 true（玩家在车上）时，才获取 W 键输入
+        // 如果玩家下车了（activeControl 为 false），油门强行判定为 0f
+        throttleInput = activeControl ? Mathf.Clamp01(Input.GetAxis("Vertical")) : 0f; 
 
         // ★★★ 燃油消耗管理（会自动熄火）★★★
         HandleFuelConsumption(throttleInput);
-        
-        // 更新上一帧位置用于动能回收
-        lastFramePosition = transform.position;
     }
 
     // ★★★ 燃油系统（新增自动熄火逻辑）★★★
-    private void HandleFuelConsumption(float throttle)
+//--燃油系统（完全基于转速重构版）--
+private void HandleFuelConsumption(float throttle)
+{
+    // 1. 安全边界判断：如果油箱已经没油了，确保强制熄火并退出
+    if (FuelTank.SharedFuel <= 0f)
     {
-        // 如果油箱没油，强制熄火
-        if (FuelTank.SharedFuel <= 0f)
+        if (engineOn)
         {
-            if (engineOn)
-            {
-                engineOn = false;
-                OnEngineStateChanged?.Invoke(false);
-                
-                // 通知 StartProcedure 同步状态
-                if (startProcedure != null && startProcedure.EngineOn)
-                {
-                    startProcedure.ForceShutdownEngine();
-                }
-            }
-            return;
-        }
-        
-        // 引擎没发动或没通电，不消耗燃油
-        if (!engineOn || !electricalPowerOn) return;
-
-        float maxCapacity = 100f;
-        float fullThrottleRatePerSecond = (maxCapacity * 0.5f) / 60f;
-
-        float currentRate = 0f;
-
-        if (throttle > 0.05f)
-        {
-            currentRate = fullThrottleRatePerSecond * throttle;
-        }
-        else
-        {
-            currentRate = fullThrottleRatePerSecond * idleConsumptionFactor;
-        }
-
-        float finalConsumption = currentRate * fuelConsumptionMultiplier * Time.deltaTime;
-        
-        // 防止油量变负数并自动熄火
-        if (finalConsumption >= FuelTank.SharedFuel)
-        {
-            FuelTank.SharedFuel = 0f;
             engineOn = false;
             OnEngineStateChanged?.Invoke(false);
             
@@ -723,11 +691,58 @@ public class CarControl : MonoBehaviour
                 startProcedure.ForceShutdownEngine();
             }
         }
-        else
+        return;
+    }
+    
+    // 2. 状态拦截：如果引擎没发动、没通电，或者当前平滑转速接近0，立刻退出不扣油
+    // 这一步直接杀死了“下车按W扣油”的Bug，因为下车/熄火时转速为0
+    if (!engineOn || !electricalPowerOn || smoothEngineRpm <= 10f) return;
+
+    // 3. 计算燃油消耗率 (基于当前真实的转速 RPM)
+    // 设定：当引擎达到最大转速 2800 RPM 且踩满油门时，达到最大消耗率
+    float maxEngineRpm = 2800f;
+    float maxCapacity = 100f;
+    
+    // 满载最大每秒消耗率 = 50% / 60秒 = 0.8333f (即 2800转且满油门时的消耗)
+    float maxRatePerSecond = (maxCapacity * 0.5f) / 60f; 
+
+    // 计算当前的转速比例 (0f 到 1f)
+    float rpmRatio = Mathf.Clamp01(smoothEngineRpm / maxEngineRpm);
+
+    float currentRate = 0f;
+
+    if (throttle > 0.05f)
+    {
+        // 【有油门状态】：消耗由 “当前转速” 和 “油门深度” 共同决定（高转速大油门狂扣油）
+        currentRate = maxRatePerSecond * rpmRatio * throttle;
+    }
+    else
+    {
+        // 【无油门/怠速/滑行状态】：玩家没踩油门，消耗纯粹由 “当前转速” 决定
+        // 挂空挡轰油门放开后，转速回落的过程中，油会随着转速变低而越扣越少，直到降回怠速线
+        currentRate = maxRatePerSecond * rpmRatio * idleConsumptionFactor;
+    }
+
+    // 4. 应用 Inspector 里的全局速度控制系数与帧时间
+    float finalConsumption = currentRate * fuelConsumptionMultiplier * Time.deltaTime;
+    
+    // 5. 扣除共享燃油，做防负数保护
+    if (finalConsumption >= FuelTank.SharedFuel)
+    {
+        FuelTank.SharedFuel = 0f;
+        engineOn = false;
+        OnEngineStateChanged?.Invoke(false);
+        
+        if (startProcedure != null && startProcedure.EngineOn)
         {
-            FuelTank.SharedFuel -= finalConsumption;
+            startProcedure.ForceShutdownEngine();
         }
     }
+    else
+    {
+        FuelTank.SharedFuel -= finalConsumption;
+    }
+}
     
     // ★★★ 动能回收系统 ★★★
     private void HandleRegenerativeBraking(float brakeInput, bool isHandBraking)
