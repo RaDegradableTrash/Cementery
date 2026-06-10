@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
+
+
 namespace EnvironmentSystem
 {
     /// <summary>
@@ -28,9 +30,22 @@ namespace EnvironmentSystem
         [Tooltip("Hysteresis band to prevent flickering at the boundary.")]
         public float hysteresis = 15f;
 
+        [Header("Frustum Culling")]
+        [Tooltip("Extra margin (metres) expanded around each object's bounds before frustum testing. " +
+                 "Larger = less popping at screen edges, slight performance cost.")]
+        public float frustumExpansion = 8f;
+
+        [Tooltip("Objects closer than this distance are NEVER frustum-culled, regardless of direction. " +
+                 "Prevents any pop-in in the player's immediate surroundings.")]
+        public float neverFrustumCullRadius = 40f;
+
         [Header("Performance")]
-        [Tooltip("How many objects are checked per frame. Lower = smoother, Higher = faster response.")]
-        public int objectsCheckedPerFrame = 300;
+        [Tooltip("How many objects are checked per frame in the normal incremental pass.")]
+        public int objectsCheckedPerFrame = 500;
+
+        [Tooltip("Extra pass: hidden objects that are within range get re-checked this many " +
+                 "times per frame to reduce re-appearance latency. Keep <= objectsCheckedPerFrame.")]
+        public int hiddenObjectFastRecheck = 200;
 
         [Tooltip("Delay (frames) after a scene loads before scanning it, to let Awake/Start settle.")]
         public int scanDelayFrames = 3;
@@ -41,18 +56,19 @@ namespace EnvironmentSystem
 
         // ── Internal state ─────────────────────────────────────────────────────
 
-        private readonly List<OptimizableObject> _managedObjects = new List<OptimizableObject>(512);
+        private readonly List<OptimizableObject> _managedObjects   = new List<OptimizableObject>(512);
+        // Separate bucket of objects that are currently hidden but within load range — checked first.
+        private readonly List<OptimizableObject> _hiddenNearby     = new List<OptimizableObject>(128);
         private int _currentIndex = 0;
 
-        private Camera _mainCamera;
+        private Camera    _mainCamera;
         private Transform _playerTransform;
         private readonly Plane[] _frustumPlanes = new Plane[6];
 
+        private Quaternion _lastCamRot;
+
         // Name of the scene this BetterGameplayManager lives in — objects here are NEVER managed.
         private string _ownSceneName;
-
-        // Objects closer than this are never frustum-culled (prevents pop-in on turn)
-        private const float NeverFrustumCullRadius = 25f;
 
         // ── Unity lifecycle ────────────────────────────────────────────────────
 
@@ -82,55 +98,265 @@ namespace EnvironmentSystem
         private void Start()
         {
             FindPlayerAndCamera();
-            // Scan all scenes that were already loaded before this manager started
-            // (e.g. editor play mode where all scenes are open)
+
+            // Freeze ALL Rigidbodies in every already-loaded scene immediately (frame 0),
+            // before physics runs. This prevents props rolling on slopes during the
+            // scanDelayFrames window before KinematicProp is added by EnsureOptimizableRecursive.
+            FreezeAllRigidbodiesImmediate();
+
+            // Delayed full scan so Awake/Start on scene objects have had time to run.
             for (int i = 0; i < SceneManager.sceneCount; i++)
             {
                 Scene s = SceneManager.GetSceneAt(i);
                 if (s.isLoaded && s.name != _ownSceneName)
-                {
                     StartCoroutine(ScanSceneDelayed(s, 1));
+            }
+        }
+
+        /// <summary>
+        /// Instantly makes every Rigidbody in all loaded non-own scenes kinematic.
+        /// Called on Start() before physics runs. EnsureOptimizableRecursive will later
+        /// attach KinematicProp, which takes over permanent management.
+        /// </summary>
+        private void FreezeAllRigidbodiesImmediate()
+        {
+            for (int i = 0; i < SceneManager.sceneCount; i++)
+            {
+                Scene s = SceneManager.GetSceneAt(i);
+                if (s.isLoaded && s.name != _ownSceneName)
+                    FreezeRigidbodiesInScene(s);
+            }
+        }
+
+        /// <summary>
+        /// Immediately sets every non-terrain Rigidbody in <paramref name="scene"/> to kinematic.
+        /// Called the instant a scene loads (OnSceneLoaded) to prevent any physics tick
+        /// from running on props before KinematicProp is attached by the delayed scan.
+        /// </summary>
+        private void FreezeRigidbodiesInScene(Scene scene)
+        {
+            if (!scene.isLoaded) return;
+            foreach (GameObject root in scene.GetRootGameObjects())
+            {
+                if (ShouldSkipRoot(root)) continue;
+                foreach (Rigidbody rb in root.GetComponentsInChildren<Rigidbody>(true))
+                {
+                    rb.isKinematic = true;
+                    rb.useGravity  = false;
+                    rb.velocity        = Vector3.zero;
+                    rb.angularVelocity = Vector3.zero;
                 }
             }
         }
 
         private void Update()
         {
-            if (_managedObjects.Count == 0) return;
-
-            // Re-find player/camera lazily (handles RV ↔ Player switching)
-            if (_mainCamera == null || _playerTransform == null || !_playerTransform.gameObject.activeInHierarchy)
-            {
-                FindPlayerAndCamera();
-            }
-
             if (_mainCamera != null)
+            {
+                // Recalculate frustum planes every frame (critical — without this objects stay hidden forever).
                 GeometryUtility.CalculateFrustumPlanes(_mainCamera, _frustumPlanes);
 
-            Vector3 playerPos = _playerTransform != null ? _playerTransform.position : Vector3.zero;
+                // On a significant rotation, do a full sweep immediately to avoid edge-popping.
+                float rotDelta = Quaternion.Angle(_mainCamera.transform.rotation, _lastCamRot);
+                if (rotDelta > 8f)
+                {
+                    _lastCamRot = _mainCamera.transform.rotation;
+                    DoFullVisibilitySweep();
+                    return;
+                }
+                _lastCamRot = _mainCamera.transform.rotation;
+            }
 
-            int limit = Mathf.Min(objectsCheckedPerFrame, _managedObjects.Count);
-            float hideDistSq = (defaultVisibilityRadius + hysteresis) * (defaultVisibilityRadius + hysteresis);
-            float showDistSq = defaultVisibilityRadius * defaultVisibilityRadius;
-            float neverCullDistSq = NeverFrustumCullRadius * NeverFrustumCullRadius;
+            // ── Priority fast-recheck: hidden objects that are close ──────────────
+            // These are the ones most likely to suddenly need to appear, so we check
+            // them every frame with a dedicated budget before the normal incremental pass.
+            DoHiddenNearbyRecheck();
+
+            // ── Normal incremental pass ──────────────────────────────────────────
+            DoIncrementalPass(Mathf.Min(objectsCheckedPerFrame, _managedObjects.Count));
+        }
+
+        // ── Visibility passes ──────────────────────────────────────────────────
+
+        /// <summary>
+        /// Full sweep of every managed object. Called when the camera rotates sharply.
+        /// </summary>
+        private void DoFullVisibilitySweep()
+        {
+            if (_managedObjects.Count == 0) return;
+
+            Vector3 playerPos     = PlayerPos();
+            float   showDistSq    = defaultVisibilityRadius * defaultVisibilityRadius;
+            float   hideDistSq    = (defaultVisibilityRadius + hysteresis) * (defaultVisibilityRadius + hysteresis);
+            float   neverCullSq   = neverFrustumCullRadius * neverFrustumCullRadius;
+
+            _hiddenNearby.Clear();
+
+            for (int i = _managedObjects.Count - 1; i >= 0; i--)
+            {
+                OptimizableObject obj = _managedObjects[i];
+                if (obj == null || obj.isDestroyed) { _managedObjects.RemoveAt(i); continue; }
+                ProcessObject(obj, playerPos, showDistSq, hideDistSq, neverCullSq);
+            }
+
+            // Rebuild the hidden-nearby bucket after the full sweep.
+            RebuildHiddenNearbyBucket(playerPos, showDistSq);
+
+            _currentIndex = 0; // Reset incremental pointer after a full sweep.
+        }
+
+        /// <summary>
+        /// Fast-recheck of only the objects that are hidden but within display range.
+        /// These are the most likely candidates to need re-appearing.
+        /// </summary>
+        private void DoHiddenNearbyRecheck()
+        {
+            if (_hiddenNearby.Count == 0) return;
+
+            Vector3 playerPos   = PlayerPos();
+            float   showDistSq  = defaultVisibilityRadius * defaultVisibilityRadius;
+            float   hideDistSq  = (defaultVisibilityRadius + hysteresis) * (defaultVisibilityRadius + hysteresis);
+            float   neverCullSq = neverFrustumCullRadius * neverFrustumCullRadius;
+
+            int limit = Mathf.Min(hiddenObjectFastRecheck, _hiddenNearby.Count);
+
+            for (int i = _hiddenNearby.Count - 1; i >= 0 && limit > 0; i--, limit--)
+            {
+                OptimizableObject obj = _hiddenNearby[i];
+                if (obj == null || obj.isDestroyed || !obj.isHiddenByManager)
+                {
+                    _hiddenNearby.RemoveAt(i);
+                    continue;
+                }
+
+                float sqrDist = (obj.CachedPosition - playerPos).sqrMagnitude;
+                if (sqrDist > hideDistSq)
+                {
+                    // Moved out of range — remove from bucket.
+                    _hiddenNearby.RemoveAt(i);
+                    continue;
+                }
+
+                // Still in range — do full visibility check.
+                ProcessObject(obj, playerPos, showDistSq, hideDistSq, neverCullSq);
+
+                // If ProcessObject made it visible, remove from bucket.
+                if (!obj.isHiddenByManager)
+                    _hiddenNearby.RemoveAt(i);
+            }
+        }
+
+        /// <summary>
+        /// Incremental pass: checks <paramref name="limit"/> objects per frame, cycling through all objects.
+        /// </summary>
+        private void DoIncrementalPass(int limit)
+        {
+            if (_managedObjects.Count == 0) return;
+
+            Vector3 playerPos   = PlayerPos();
+            float   showDistSq  = defaultVisibilityRadius * defaultVisibilityRadius;
+            float   hideDistSq  = (defaultVisibilityRadius + hysteresis) * (defaultVisibilityRadius + hysteresis);
+            float   neverCullSq = neverFrustumCullRadius * neverFrustumCullRadius;
 
             for (int i = 0; i < limit; i++)
             {
-                if (_currentIndex >= _managedObjects.Count)
-                    _currentIndex = 0;
+                if (_currentIndex >= _managedObjects.Count) _currentIndex = 0;
 
                 OptimizableObject obj = _managedObjects[_currentIndex];
                 if (obj == null || obj.isDestroyed)
                 {
-                    // Clean up destroyed references
                     _managedObjects.RemoveAt(_currentIndex);
-                    if (_currentIndex >= _managedObjects.Count)
-                        _currentIndex = 0;
                     continue;
                 }
 
-                ProcessObject(obj, playerPos, showDistSq, hideDistSq, neverCullDistSq);
+                bool wasHidden = obj.isHiddenByManager;
+                ProcessObject(obj, playerPos, showDistSq, hideDistSq, neverCullSq);
+
+                // If this object just got hidden and is within range, add to fast-recheck bucket.
+                if (!wasHidden && obj.isHiddenByManager)
+                {
+                    float sqrDist = (obj.CachedPosition - playerPos).sqrMagnitude;
+                    if (sqrDist <= hideDistSq && !_hiddenNearby.Contains(obj))
+                        _hiddenNearby.Add(obj);
+                }
+
                 _currentIndex++;
+            }
+        }
+
+        // ── Core per-object decision ───────────────────────────────────────────
+
+        private void ProcessObject(OptimizableObject obj, Vector3 playerPos,
+                                   float showDistSq, float hideDistSq, float neverCullSq)
+        {
+            float sqrDist = (obj.CachedPosition - playerPos).sqrMagnitude;
+
+            // Distance gate with hysteresis.
+            bool shouldBeVisible = sqrDist <= (obj.isHiddenByManager ? showDistSq : hideDistSq);
+
+            if (!shouldBeVisible)
+            {
+                if (!obj.isHiddenByManager) obj.SetVisibility(false);
+                return;
+            }
+
+            // Frustum cull — skipped for close objects to prevent near-edge pop-in.
+            if (obj.useFrustumCulling && _mainCamera != null && sqrDist > neverCullSq)
+            {
+                bool inFrustum;
+                if (obj.HasBounds)
+                {
+                    // Expand the bounds by frustumExpansion so objects just off-screen
+                    // aren't culled prematurely. This is the key fix for edge popping.
+                    Bounds expanded = obj.GetBounds();
+                    expanded.Expand(frustumExpansion * 2f);
+                    inFrustum = GeometryUtility.TestPlanesAABB(_frustumPlanes, expanded);
+                }
+                else
+                {
+                    // Point-in-frustum with an extra margin in world space.
+                    inFrustum = IsPointNearFrustum(obj.CachedPosition, frustumExpansion);
+                }
+
+                shouldBeVisible = inFrustum;
+            }
+
+            if (shouldBeVisible != !obj.isHiddenByManager)
+                obj.SetVisibility(shouldBeVisible);
+        }
+
+        // ── Helpers ───────────────────────────────────────────────────────────
+
+        private Vector3 PlayerPos() =>
+            _playerTransform != null ? _playerTransform.position : Vector3.zero;
+
+        /// <summary>
+        /// Returns true when <paramref name="point"/> is inside the frustum OR within
+        /// <paramref name="margin"/> metres of any frustum plane (i.e. just outside).
+        /// This prevents culling objects that sit right at the screen edge.
+        /// </summary>
+        private bool IsPointNearFrustum(Vector3 point, float margin)
+        {
+            for (int i = 0; i < _frustumPlanes.Length; i++)
+            {
+                // GetDistanceToPoint returns negative when outside the plane.
+                // We allow objects to be up to `margin` metres outside.
+                if (_frustumPlanes[i].GetDistanceToPoint(point) < -margin)
+                    return false;
+            }
+            return true;
+        }
+
+        private void RebuildHiddenNearbyBucket(Vector3 playerPos, float showDistSq)
+        {
+            _hiddenNearby.Clear();
+            float hideDistSq = (defaultVisibilityRadius + hysteresis) * (defaultVisibilityRadius + hysteresis);
+            foreach (var obj in _managedObjects)
+            {
+                if (obj == null || !obj.isHiddenByManager) continue;
+                float sqrDist = (obj.CachedPosition - playerPos).sqrMagnitude;
+                if (sqrDist <= hideDistSq)
+                    _hiddenNearby.Add(obj);
             }
         }
 
@@ -139,19 +365,23 @@ namespace EnvironmentSystem
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
             if (scene.name == _ownSceneName) return;
+
+            // Freeze all Rigidbodies in this scene IMMEDIATELY (same frame as load),
+            // before Unity's physics engine runs on them. This prevents props from
+            // rolling on slopes during the scanDelayFrames window.
+            FreezeRigidbodiesInScene(scene);
+
             StartCoroutine(ScanSceneDelayed(scene, scanDelayFrames));
         }
 
         private void OnSceneUnloaded(Scene scene)
         {
-            // OptimizableObject.OnDestroy will unregister itself; nothing extra needed.
-            // But do a fast purge of null entries to keep the list tidy.
             _managedObjects.RemoveAll(o => o == null || o.isDestroyed);
-            if (_currentIndex >= _managedObjects.Count)
-                _currentIndex = 0;
+            _hiddenNearby.RemoveAll(o => o == null || o.isDestroyed);
+            if (_currentIndex >= _managedObjects.Count) _currentIndex = 0;
         }
 
-        // ── Registration (called by OptimizableObject) ─────────────────────────
+        // ── Registration ───────────────────────────────────────────────────────
 
         public void Register(OptimizableObject obj)
         {
@@ -161,16 +391,15 @@ namespace EnvironmentSystem
 
         public void Unregister(OptimizableObject obj)
         {
+            _hiddenNearby.Remove(obj);
+
             int index = _managedObjects.IndexOf(obj);
             if (index == -1) return;
 
             _managedObjects.RemoveAt(index);
 
-            if (index < _currentIndex)
-                _currentIndex--;
-
-            if (_currentIndex >= _managedObjects.Count)
-                _currentIndex = 0;
+            if (index < _currentIndex) _currentIndex--;
+            if (_currentIndex >= _managedObjects.Count) _currentIndex = 0;
         }
 
         // ── Auto-scanning ──────────────────────────────────────────────────────
@@ -180,18 +409,10 @@ namespace EnvironmentSystem
             for (int i = 0; i < delayFrames; i++)
                 yield return null;
 
-            // Scene may have been unloaded during the delay
             if (!scene.isLoaded) yield break;
-
             ScanScene(scene);
         }
 
-        /// <summary>
-        /// Walk every root GameObject in a scene.
-        /// Skip terrain roots (DesertTerrainChunk / Terrain).
-        /// For all others, ensure every child (and the root itself) that has a Renderer
-        /// gets an OptimizableObject so it is distance-culled by this manager.
-        /// </summary>
         private void ScanScene(Scene scene)
         {
             if (!scene.isLoaded) return;
@@ -201,107 +422,51 @@ namespace EnvironmentSystem
 
             foreach (GameObject root in roots)
             {
-                // Skip terrain roots and explicitly excluded objects
                 if (ShouldSkipRoot(root)) continue;
-
-                // Scan all renderable children (including root itself)
                 added += EnsureOptimizableRecursive(root);
             }
 
             if (verboseLogging)
-                Debug.Log($"[BetterGameplayManager] Scanned scene '{scene.name}': {added} objects registered. Total: {_managedObjects.Count}");
+                Debug.Log($"[BetterGameplayManager] Scanned '{scene.name}': {added} added. Total: {_managedObjects.Count}");
         }
 
-        /// <summary>
-        /// Returns true if this root GameObject should be completely excluded from management.
-        /// This covers terrain meshes and any object explicitly marked ExcludeFromOptimization.
-        /// </summary>
         private static bool ShouldSkipRoot(GameObject root)
         {
-            // Unity built-in Terrain component
             if (root.GetComponent<Terrain>() != null) return true;
-            // Our custom procedural terrain chunk
             if (root.GetComponent<DesertTerrainChunk>() != null) return true;
-            // Explicitly excluded objects (player, RV, held items, etc.)
             if (root.GetComponent<ExcludeFromOptimization>() != null) return true;
             return false;
         }
 
-        /// <summary>
-        /// Recursively walk the transform hierarchy.
-        /// Strategy: add ONE OptimizableObject per distinct renderable sub-hierarchy root
-        /// to keep the managed list lean. A "renderable sub-hierarchy root" is any Transform
-        /// that has a Renderer itself OR has Renderer descendants.
-        ///
-        /// For simplicity and correctness we add OptimizableObject directly on the root
-        /// of each scene root (one entry per root object). This is fine because:
-        ///  - The root bounds encapsulate all children for frustum tests.
-        ///  - disableEntireGameObject = true hides the whole hierarchy at once.
-        /// </summary>
         private int EnsureOptimizableRecursive(GameObject root)
         {
-            // Only manage objects that have at least one Renderer somewhere in the hierarchy
             if (root.GetComponentInChildren<Renderer>(true) == null) return 0;
-
-            // Skip if explicitly excluded
             if (root.GetComponent<ExcludeFromOptimization>() != null) return 0;
 
-            // Add OptimizableObject to the root if not already present
             OptimizableObject opt = root.GetComponent<OptimizableObject>();
             if (opt == null)
-            {
                 opt = root.AddComponent<OptimizableObject>();
-            }
 
-            // Default: disable whole GO (cheapest) + frustum culling for static scene props.
-            // Individual objects can override these flags in their own Awake().
-            opt.disableEntireGameObject = true;
+            // Renderer-only culling: keeps Transform/Collider/Rigidbody active at all times.
+            // This prevents the physics-reset jump that occurs with SetActive(false/true).
+            opt.disableEntireGameObject = false;
             opt.useFrustumCulling = true;
 
-            // Force-register now (OnEnable may have already fired before this manager existed)
+            // Auto-attach KinematicProp to any prop that has a Rigidbody.
+            // This covers props that were placed before KinematicProp existed
+            // and ensures they never roll freely from gravity on scene load.
+            Rigidbody rb = root.GetComponent<Rigidbody>();
+            if (rb != null && root.GetComponent<KinematicProp>() == null)
+            {
+                KinematicProp kp = root.AddComponent<KinematicProp>();
+                kp.Sleep(); // Enforce kinematic immediately.
+            }
+
             Register(opt);
             return 1;
         }
 
-        // ── Per-object culling logic ───────────────────────────────────────────
 
-        private void ProcessObject(OptimizableObject obj, Vector3 playerPos,
-                                   float showDistSq, float hideDistSq, float neverCullDistSq)
-        {
-            float sqrDist = (obj.CachedPosition - playerPos).sqrMagnitude;
-            bool withinDistance;
-
-            if (obj.isHiddenByManager)
-                withinDistance = sqrDist <= showDistSq;   // re-show when close enough
-            else
-                withinDistance = sqrDist <= hideDistSq;   // stay visible until far enough
-
-            // Frustum culling — skipped for very close objects and for objects that opt out
-            bool inFrustum = true;
-            if (withinDistance && obj.useFrustumCulling && _mainCamera != null && sqrDist > neverCullDistSq)
-            {
-                inFrustum = obj.HasBounds
-                    ? GeometryUtility.TestPlanesAABB(_frustumPlanes, obj.GetBounds())
-                    : IsPointInFrustum(obj.CachedPosition);
-            }
-
-            bool shouldBeVisible = withinDistance && inFrustum;
-
-            if (shouldBeVisible && obj.isHiddenByManager)
-                obj.SetVisibility(true);
-            else if (!shouldBeVisible && !obj.isHiddenByManager)
-                obj.SetVisibility(false);
-        }
-
-        private bool IsPointInFrustum(Vector3 point)
-        {
-            for (int i = 0; i < _frustumPlanes.Length; i++)
-            {
-                if (_frustumPlanes[i].GetDistanceToPoint(point) < 0)
-                    return false;
-            }
-            return true;
-        }
 
         // ── Player / Camera discovery ──────────────────────────────────────────
 
@@ -327,7 +492,7 @@ namespace EnvironmentSystem
                 _playerTransform = _mainCamera.transform;
         }
 
-        // ── Editor helpers ────────────────────────────────────────────────────
+        // ── Editor gizmos ─────────────────────────────────────────────────────
 
 #if UNITY_EDITOR
         private void OnDrawGizmosSelected()
@@ -337,6 +502,8 @@ namespace EnvironmentSystem
             Gizmos.DrawWireSphere(center, defaultVisibilityRadius);
             Gizmos.color = new Color(1f, 0.9f, 0.2f, 0.15f);
             Gizmos.DrawWireSphere(center, defaultVisibilityRadius + hysteresis);
+            Gizmos.color = new Color(0.4f, 0.7f, 1f, 0.15f);
+            Gizmos.DrawWireSphere(center, neverFrustumCullRadius);
         }
 #endif
     }

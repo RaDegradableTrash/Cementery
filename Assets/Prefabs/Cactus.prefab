@@ -13,6 +13,7 @@ GameObject:
   - component: {fileID: 293793645208054754}
   - component: {fileID: 6662700311328129100}
   - component: {fileID: 8038583280600339791}
+  - component: {fileID: 3591196009753881498}
   m_Layer: 0
   m_Name: BoxCube
   m_TagString: Untagged
@@ -127,6 +128,33 @@ SphereCollider:
   serializedVersion: 3
   m_Radius: 0.49999997
   m_Center: {x: -0.000000067055225, y: 0, z: -0.0000009536743}
+--- !u!54 &3591196009753881498
+Rigidbody:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5750391769271795738}
+  serializedVersion: 4
+  m_Mass: 1
+  m_Drag: 0
+  m_AngularDrag: 0.05
+  m_CenterOfMass: {x: 0, y: 0, z: 0}
+  m_InertiaTensor: {x: 1, y: 1, z: 1}
+  m_InertiaRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ImplicitCom: 1
+  m_ImplicitTensor: 1
+  m_UseGravity: 1
+  m_IsKinematic: 0
+  m_Interpolate: 0
+  m_Constraints: 0
+  m_CollisionDetection: 0
 --- !u!1 &6218945444473106582
 GameObject:
   m_ObjectHideFlags: 0
@@ -140,6 +168,7 @@ GameObject:
   - component: {fileID: 952131472335318562}
   - component: {fileID: 1897168834587600238}
   - component: {fileID: 6355605360781026684}
+  - component: {fileID: 8265334230211642400}
   m_Layer: 0
   m_Name: Cactus
   m_TagString: Untagged
@@ -241,7 +270,7 @@ Rigidbody:
     m_Bits: 0
   m_ImplicitCom: 1
   m_ImplicitTensor: 1
-  m_UseGravity: 1
+  m_UseGravity: 0
   m_IsKinematic: 0
   m_Interpolate: 0
   m_Constraints: 0
@@ -267,3 +296,16 @@ SphereCollider:
   serializedVersion: 3
   m_Radius: 0.5
   m_Center: {x: 0, y: 0, z: 0}
+--- !u!114 &8265334230211642400
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6218945444473106582}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3646bba37643e437d8311acc44e34520, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  wakeImpulseThreshold: 5
