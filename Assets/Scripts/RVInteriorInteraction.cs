@@ -9,24 +9,41 @@ namespace RVSystem
         public Transform playerParent; 
         public string playerTag = "Player";
 
-        private Transform _originalParent;
+        private System.Collections.Generic.Dictionary<Collider, Transform> _originalParents = new System.Collections.Generic.Dictionary<Collider, Transform>();
 
         void OnTriggerEnter(Collider other)
         {
-            if (other.CompareTag(playerTag))
+            WorldObject wo = other.GetComponent<WorldObject>();
+            if (other.CompareTag(playerTag) || wo != null)
             {
-                _originalParent = other.transform.parent;
+                if (!_originalParents.ContainsKey(other))
+                {
+                    _originalParents[other] = other.transform.parent;
+                }
                 other.transform.SetParent(playerParent);
-                Debug.Log("Player entered RV interior");
+                
+                if (wo != null)
+                {
+                    wo.SetInsideVehicle(true);
+                }
             }
         }
 
         void OnTriggerExit(Collider other)
         {
-            if (other.CompareTag(playerTag))
+            WorldObject wo = other.GetComponent<WorldObject>();
+            if (other.CompareTag(playerTag) || wo != null)
             {
-                other.transform.SetParent(_originalParent);
-                Debug.Log("Player exited RV interior");
+                if (_originalParents.TryGetValue(other, out Transform orig))
+                {
+                    other.transform.SetParent(orig);
+                    _originalParents.Remove(other);
+                }
+                
+                if (wo != null)
+                {
+                    wo.SetInsideVehicle(false);
+                }
             }
         }
     }

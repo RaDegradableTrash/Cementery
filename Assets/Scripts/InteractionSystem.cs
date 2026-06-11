@@ -138,6 +138,11 @@ public class InteractionSystem : MonoBehaviour
 
     public static InteractionSystem Instance { get; private set; }
 
+    private void OnEnable()
+    {
+        Instance = this;
+    }
+
     void Awake()
     {
         Instance = this;
@@ -1467,7 +1472,7 @@ public class InteractionSystem : MonoBehaviour
         InventoryCameraController camCtrl = GetInventoryCameraController();
         if (camCtrl != null)
         {
-            camCtrl.EnterInventoryMode(obj.collectItemData);
+            camCtrl.EnterInventoryMode(obj.collectItemData, obj.customColor);
         }
 
         _lookedAt = null;
@@ -2386,7 +2391,10 @@ public ItemData GetCarriedItemData()
         Drop();
         
         if (rb != null)
+        {
+            rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
             rb.AddForce(dir * force, ForceMode.Impulse);
+        }
             
         _isThrowCharging = false;
     }

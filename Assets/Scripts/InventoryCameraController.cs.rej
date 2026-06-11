@@ -1,0 +1,18 @@
+@@ -201,15 +201,15 @@
+         }
+     }
+ 
+-    public void EnterInventoryMode(ItemData item)
++    public void EnterInventoryMode(ItemData item, Color customColor = default)
+     {
+         InventoryCameraController primary = GetPrimaryController();
+         if (primary != null && primary != this)
+         {
+-            primary.EnterInventoryMode(item);
++            primary.EnterInventoryMode(item, customColor);
+             return;
+         }
+ 
+         bool hasExplicitItem = item != null;
+         if (hasExplicitItem)
+         {
