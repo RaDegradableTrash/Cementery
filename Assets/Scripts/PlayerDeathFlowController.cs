@@ -397,6 +397,11 @@ public class PlayerDeathFlowController : MonoBehaviour
                         cam.enabled = true;
                         cam.targetDisplay = 0; // Force main display to fix 'No cameras rendering' if prefab was changed
                         cam.gameObject.tag = "MainCamera";
+                        
+                        // Sync far clip plane to prevent distant terrain cutting
+                        if (mainCamera != null) cam.farClipPlane = mainCamera.farClipPlane;
+                        else cam.farClipPlane = 10000f;
+
                         if (cam.GetComponent<AudioListener>() != null)
                             cam.GetComponent<AudioListener>().enabled = true;
                     }
