@@ -356,18 +356,8 @@ public class PlayerDeathFlowController : MonoBehaviour
                 }
             }
 
-            Debug.Log("[PlayerDeathFlow] Teleporting player...");
-            _playerRoot.SetPositionAndRotation(_spawnPos, _spawnRot);
-            if (_playerRb != null)
-            {
-                _playerRb.position = _spawnPos;
-                _playerRb.rotation = _spawnRot;
-                if (!_playerRb.isKinematic)
-                {
-                    _playerRb.velocity = Vector3.zero;
-                    _playerRb.angularVelocity = Vector3.zero;
-                }
-            }
+            Debug.Log("[PlayerDeathFlow] Disabling player root entirely...");
+            _playerRoot.gameObject.SetActive(false);
 
             Debug.Log("[PlayerDeathFlow] Destroying DeathCamera...");
             if (_deathCamera != null)
@@ -390,14 +380,36 @@ public class PlayerDeathFlowController : MonoBehaviour
                         mainCamera.GetComponent<AudioListener>().enabled = false;
                 }
 
-                // Force enable the drone's cameras
+                // Force enable the drone's cameras, including ensuring their parent chain is active
                 Camera[] droneCams = _activeDrone.GetComponentsInChildren<Camera>(true);
-                foreach (Camera cam in droneCams)
+                if (droneCams.Length > 0)
                 {
-                    cam.enabled = true;
-                    cam.gameObject.SetActive(true);
-                    if (cam.GetComponent<AudioListener>() != null)
-                        cam.GetComponent<AudioListener>().enabled = true;
+                    foreach (Camera cam in droneCams)
+                    {
+                        // Enable the parent hierarchy just in case it was disabled in the prefab
+                        Transform p = cam.transform;
+                        while (p != null && p != _activeDrone.transform.parent)
+                        {
+                            p.gameObject.SetActive(true);
+                            p = p.parent;
+                        }
+
+                        cam.enabled = true;
+                        cam.targetDisplay = 0; // Force main display to fix 'No cameras rendering' if prefab was changed
+                        cam.gameObject.tag = "MainCamera";
+                        if (cam.GetComponent<AudioListener>() != null)
+                            cam.GetComponent<AudioListener>().enabled = true;
+                    }
+                }
+                else
+                {
+                    Debug.LogError("[PlayerDeathFlow] NO CAMERAS FOUND ON DRONE PREFAB! Falling back to Main Camera.");
+                    if (mainCamera != null)
+                    {
+                        mainCamera.enabled = true;
+                        if (mainCamera.GetComponent<AudioListener>() != null)
+                            mainCamera.GetComponent<AudioListener>().enabled = true;
+                    }
                 }
             }
             else
@@ -474,6 +486,7 @@ public class PlayerDeathFlowController : MonoBehaviour
         // 1. Re-enable main camera since the drone camera is going away
         if (mainCamera != null)
         {
+            mainCamera.gameObject.SetActive(true);
             mainCamera.enabled = true;
             if (mainCamera.GetComponent<AudioListener>() != null)
                 mainCamera.GetComponent<AudioListener>().enabled = true;
@@ -482,6 +495,12 @@ public class PlayerDeathFlowController : MonoBehaviour
         // 2. 再销毁 Drone (Safely destroy Drone)
         if (_activeDrone != null)
         {
+            // 1. Move Player to the exact position of the Drone before destroying it
+            if (_playerRoot != null && _activeDrone != null)
+            {
+                _playerRoot.SetPositionAndRotation(_activeDrone.transform.position, Quaternion.Euler(0f, _activeDrone.transform.eulerAngles.y, 0f));
+                _playerRoot.gameObject.SetActive(true);
+            }
             Debug.Log("[CompleteRevive Diagnostics] Destroying Drone...");
             if (Application.isPlaying) Destroy(_activeDrone);
             else UnityEngine.Object.DestroyImmediate(_activeDrone);

@@ -122,6 +122,7 @@ public class DroneControl : MonoBehaviour
         _rb = movementRoot.GetComponent<Rigidbody>();
         
         _rb.useGravity = false; 
+        _rb.isKinematic = false;
         _rb.collisionDetectionMode = CollisionDetectionMode.Continuous; 
 
         if (altitudeRayOrigin == null) altitudeRayOrigin = movementRoot;
@@ -339,8 +340,16 @@ public class DroneControl : MonoBehaviour
 
         // 6. 基础运动推力计算
         Vector3 localInputMove = Vector3.ClampMagnitude(new Vector3(inputX, 0f, inputZ), 1f);
-        // Use gimbalCamera's yaw so WASD is always relative to where the camera is looking
-        float moveYaw = gimbalCamera != null ? gimbalCamera.eulerAngles.y : _yawDeg;
+        float moveYaw = _yawDeg;
+        if (gimbalCamera != null)
+        {
+            Vector3 camForward = gimbalCamera.forward;
+            camForward.y = 0f;
+            if (camForward.sqrMagnitude > 0.001f)
+            {
+                moveYaw = Quaternion.LookRotation(camForward).eulerAngles.y;
+            }
+        }
         Vector3 worldInputMove = Quaternion.Euler(0f, moveYaw, 0f) * localInputMove;
 
         if (worldInputMove.sqrMagnitude > 0.01f)
@@ -481,6 +490,14 @@ public class DroneControl : MonoBehaviour
             if (Input.GetKey(KeyCode.DownArrow)) camPitchInput += 1f;  
             if (Input.GetKey(KeyCode.LeftArrow)) camYawInput -= 1f;   
             if (Input.GetKey(KeyCode.RightArrow)) camYawInput += 1f;  
+
+            // Add Mouse Input
+            float mouseX = Input.GetAxis("Mouse X");
+            float mouseY = Input.GetAxis("Mouse Y");
+            float mouseSensitivity = 3f;
+
+            _gimbalLocalYaw += mouseX * mouseSensitivity;
+            _gimbalLocalPitch -= mouseY * mouseSensitivity;
 
             _gimbalLocalPitch += camPitchInput * gimbalPitchSpeed * dt;
             _gimbalLocalPitch = Mathf.Clamp(_gimbalLocalPitch, minGimbalPitch, maxGimbalPitch);
