@@ -190,6 +190,11 @@ public class PlayerDeathFlowController : MonoBehaviour
 
     private void Update()
     {
+        if (_activeDrone != null && Input.GetKeyDown(KeyCode.R))
+        {
+            CompleteRevive();
+        }
+
         if (_isDead || _playerRoot == null)
             return;
 
@@ -376,17 +381,23 @@ public class PlayerDeathFlowController : MonoBehaviour
             if (proxyDronePrefab != null)
             {
                 _activeDrone = Instantiate(proxyDronePrefab, _spawnPos, _spawnRot);
-                DroneController dc = _activeDrone.GetComponent<DroneController>();
-                if (dc == null) dc = _activeDrone.AddComponent<DroneController>();
                 
-                // Re-enable mainCamera but pass it to Drone
+                // Disable mainCamera so the Drone's built-in camera takes over
                 if (mainCamera != null)
                 {
-                    mainCamera.enabled = true;
+                    mainCamera.enabled = false;
                     if (mainCamera.GetComponent<AudioListener>() != null)
-                        mainCamera.GetComponent<AudioListener>().enabled = true;
-                    
-                    dc.Initialize(mainCamera, this);
+                        mainCamera.GetComponent<AudioListener>().enabled = false;
+                }
+
+                // Force enable the drone's cameras
+                Camera[] droneCams = _activeDrone.GetComponentsInChildren<Camera>(true);
+                foreach (Camera cam in droneCams)
+                {
+                    cam.enabled = true;
+                    cam.gameObject.SetActive(true);
+                    if (cam.GetComponent<AudioListener>() != null)
+                        cam.GetComponent<AudioListener>().enabled = true;
                 }
             }
             else
@@ -460,11 +471,12 @@ public class PlayerDeathFlowController : MonoBehaviour
 
         Debug.Log($"[CompleteRevive Diagnostics] Starting camera detachment and restoration. mainCamera: {(mainCamera != null ? mainCamera.name : "null")}");
 
-        // 1. 先把摄像头分离下来 (Detach camera from Drone completely to root first!)
+        // 1. Re-enable main camera since the drone camera is going away
         if (mainCamera != null)
         {
-            Debug.Log($"[CompleteRevive Diagnostics] Detaching camera. Parent before: {(mainCamera.transform.parent != null ? mainCamera.transform.parent.name : "null")}");
-            mainCamera.transform.SetParent(null);
+            mainCamera.enabled = true;
+            if (mainCamera.GetComponent<AudioListener>() != null)
+                mainCamera.GetComponent<AudioListener>().enabled = true;
         }
 
         // 2. 再销毁 Drone (Safely destroy Drone)

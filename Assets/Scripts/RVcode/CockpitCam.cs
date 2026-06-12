@@ -430,9 +430,8 @@ public class CockpitCam : MonoBehaviour
 			}
 
 			// 4. Reparent the unique Main Camera to our cockpit rotation root so it moves/rotates with the cockpit
-			mainCam.transform.SetParent(rotationRoot);
-			mainCam.transform.localPosition = Vector3.zero;
-			mainCam.transform.localRotation = Quaternion.identity;
+			// 🌟 Start smooth camera transition animation!
+			StartCoroutine(SmoothEnterCockpit(mainCam));
 
 			// Keep reference to main camera as our active cockpit camera
 			cockpitCamera = mainCam;
@@ -452,9 +451,9 @@ public class CockpitCam : MonoBehaviour
 		}
 
 		isDriving = true;
-		yaw = 0f;
+		yaw = 180f; // Face the front of the RV by default!
 		pitch = 0f;
-		rotationRoot.localRotation = Quaternion.identity;
+		rotationRoot.localRotation = Quaternion.Euler(0f, 180f, 0f);
 		SetLook(true);
 	}
 
@@ -602,5 +601,31 @@ public class CockpitCam : MonoBehaviour
 		// 友好兜底
 		name = name.Replace("Button", "").Replace("button", "").Trim();
 		return name;
+	}
+
+	private System.Collections.IEnumerator SmoothEnterCockpit(Camera cam)
+	{
+		Vector3 startPos = cam.transform.position;
+		Quaternion startRot = cam.transform.rotation;
+		
+		cam.transform.SetParent(rotationRoot);
+
+		float duration = 0.5f;
+		float elapsed = 0f;
+
+		while (elapsed < duration)
+		{
+			elapsed += Time.deltaTime;
+			float t = Mathf.SmoothStep(0f, 1f, elapsed / duration);
+			
+			// Interpolate in world space to smoothly reach the current position and rotation of the rotationRoot
+			cam.transform.position = Vector3.Lerp(startPos, rotationRoot.position, t);
+			cam.transform.rotation = Quaternion.Slerp(startRot, rotationRoot.rotation, t);
+			yield return null;
+		}
+
+		cam.transform.localPosition = Vector3.zero;
+		// Initialize the camera's local rotation to exactly match the target 180-degree yaw
+		cam.transform.localRotation = Quaternion.identity;
 	}
 }

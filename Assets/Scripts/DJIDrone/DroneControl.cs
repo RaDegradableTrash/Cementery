@@ -339,7 +339,9 @@ public class DroneControl : MonoBehaviour
 
         // 6. 基础运动推力计算
         Vector3 localInputMove = Vector3.ClampMagnitude(new Vector3(inputX, 0f, inputZ), 1f);
-        Vector3 worldInputMove = Quaternion.Euler(0f, _yawDeg, 0f) * localInputMove;
+        // Use gimbalCamera's yaw so WASD is always relative to where the camera is looking
+        float moveYaw = gimbalCamera != null ? gimbalCamera.eulerAngles.y : _yawDeg;
+        Vector3 worldInputMove = Quaternion.Euler(0f, moveYaw, 0f) * localInputMove;
 
         if (worldInputMove.sqrMagnitude > 0.01f)
         {

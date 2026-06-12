@@ -719,6 +719,13 @@ public class InteractionSystem : MonoBehaviour
         if (_carriedCols == null)
             return;
 
+        if (!ignored)
+        {
+            StartCoroutine(RestorePlayerCollisionDelayed(_carriedCols, _playerCols, _playerCol));
+            _carryPlayerCollisionIgnored = false;
+            return;
+        }
+
         if (_playerCol != null)
         {
             for (int i = 0; i < _carriedCols.Length; i++)
@@ -745,6 +752,33 @@ public class InteractionSystem : MonoBehaviour
         }
 
         _carryPlayerCollisionIgnored = ignored;
+    }
+
+    private System.Collections.IEnumerator RestorePlayerCollisionDelayed(Collider[] cCols, Collider[] pCols, Collider pCol)
+    {
+        // Wait a short moment before restoring collision so the thrown object clears the player's body
+        yield return new WaitForSeconds(0.25f);
+        
+        if (cCols == null) yield break;
+
+        if (pCol != null)
+        {
+            for (int i = 0; i < cCols.Length; i++)
+            {
+                if (cCols[i] != null) Physics.IgnoreCollision(pCol, cCols[i], false);
+            }
+        }
+        if (pCols != null)
+        {
+            for (int p = 0; p < pCols.Length; p++)
+            {
+                if (pCols[p] == null || pCols[p] == pCol) continue;
+                for (int c = 0; c < cCols.Length; c++)
+                {
+                    if (cCols[c] != null) Physics.IgnoreCollision(pCols[p], cCols[c], false);
+                }
+            }
+        }
     }
 
     bool TryRaycastIgnoringPlayer(Ray ray, float range, out RaycastHit bestHit)
@@ -1666,7 +1700,16 @@ public class InteractionSystem : MonoBehaviour
             ExitPlacementMode();
 
         if (_carryPlayerCollisionIgnored)
-            SetCarryPlayerCollisionIgnored(false);
+        {
+            Collider[] cachedPlayerCols = _playerCols;
+            Collider[] cachedCarriedCols = _carriedCols;
+            Collider cachedPlayerCol = _playerCol;
+            if (cachedPlayerCols != null && cachedCarriedCols != null)
+            {
+                StartCoroutine(RestorePlayerCollisionDelayed(cachedCarriedCols, cachedPlayerCols, cachedPlayerCol));
+            }
+            _carryPlayerCollisionIgnored = false;
+        }
 
         RestoreCarryFriction();
 
@@ -1688,6 +1731,13 @@ public class InteractionSystem : MonoBehaviour
             _carriedRb.transform.position += Vector3.up * 0.05f + safetyPushDir * 0.02f;
         }
 
+        // If the object was carried, it should now be fully dynamic and fall/roll.
+        if (_carriedWo != null)
+        {
+            _carriedWo.canBePushed = true;
+            _rbWasKinematic = false; // Override original state so it falls
+        }
+
         // 还原基本物理状态
         _carriedRb.isKinematic = _rbWasKinematic;
         _carriedRb.useGravity = _rbHadGravity;
@@ -1695,6 +1745,11 @@ public class InteractionSystem : MonoBehaviour
         _carriedRb.collisionDetectionMode = _rbCollisionDetectionMode;
         _carriedRb.drag = _rbOriginalDrag;
         _carriedRb.angularDrag = _rbOriginalAngularDrag;
+        
+        if (_carriedWo != null && _carriedWo.canBePushed)
+        {
+            _carriedRb.constraints = RigidbodyConstraints.None;
+        }
 
         // 🌟 再次洗白，确保刚体在脱离手部控制的第一帧拥有绝对干净、安分的初始动力学状态
         if (!_carriedRb.isKinematic)
@@ -2385,6 +2440,7 @@ public ItemData GetCarriedItemData()
         float force = Mathf.Lerp(minThrowForce, maxThrowForce, t);
         
         Rigidbody rb = _carriedRb;
+        WorldObject wo = _carriedWo;
         Vector3 dir = GetInteractionRayDirection(GetInteractionRayOrigin());
         
         if (_isPlacementMode) ExitPlacementMode();
@@ -2392,8 +2448,18 @@ public ItemData GetCarriedItemData()
         
         if (rb != null)
         {
+            if (wo != null)
+            {
+                // Temporarily detach from vehicle so it can fly freely
+                if (wo.isInsideVehicle) wo.SetInsideVehicle(false);
+            }
+            
+            rb.isKinematic = false;
+            rb.constraints = RigidbodyConstraints.None; // Ensure constraints are unlocked for throwing
+            rb.useGravity = true;
             rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
-            rb.AddForce(dir * force, ForceMode.Impulse);
+            // Use VelocityChange so heavy objects like Fuel and Flowerpots can still be thrown with consistent force
+            rb.AddForce(dir * force, ForceMode.VelocityChange);
         }
             
         _isThrowCharging = false;
