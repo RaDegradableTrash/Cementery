@@ -190,6 +190,11 @@ public class PlayerDeathFlowController : MonoBehaviour
 
     private void Update()
     {
+        if (_activeDrone != null && Input.GetKeyDown(KeyCode.R))
+        {
+            CompleteRevive();
+        }
+
         if (_isDead || _playerRoot == null)
             return;
 
@@ -351,18 +356,8 @@ public class PlayerDeathFlowController : MonoBehaviour
                 }
             }
 
-            Debug.Log("[PlayerDeathFlow] Teleporting player...");
-            _playerRoot.SetPositionAndRotation(_spawnPos, _spawnRot);
-            if (_playerRb != null)
-            {
-                _playerRb.position = _spawnPos;
-                _playerRb.rotation = _spawnRot;
-                if (!_playerRb.isKinematic)
-                {
-                    _playerRb.velocity = Vector3.zero;
-                    _playerRb.angularVelocity = Vector3.zero;
-                }
-            }
+            Debug.Log("[PlayerDeathFlow] Disabling player root entirely...");
+            _playerRoot.gameObject.SetActive(false);
 
             Debug.Log("[PlayerDeathFlow] Destroying DeathCamera...");
             if (_deathCamera != null)
@@ -376,17 +371,50 @@ public class PlayerDeathFlowController : MonoBehaviour
             if (proxyDronePrefab != null)
             {
                 _activeDrone = Instantiate(proxyDronePrefab, _spawnPos, _spawnRot);
-                DroneController dc = _activeDrone.GetComponent<DroneController>();
-                if (dc == null) dc = _activeDrone.AddComponent<DroneController>();
                 
-                // Re-enable mainCamera but pass it to Drone
+                // Disable mainCamera so the Drone's built-in camera takes over
                 if (mainCamera != null)
                 {
-                    mainCamera.enabled = true;
+                    mainCamera.enabled = false;
                     if (mainCamera.GetComponent<AudioListener>() != null)
-                        mainCamera.GetComponent<AudioListener>().enabled = true;
-                    
-                    dc.Initialize(mainCamera, this);
+                        mainCamera.GetComponent<AudioListener>().enabled = false;
+                }
+
+                // Force enable the drone's cameras, including ensuring their parent chain is active
+                Camera[] droneCams = _activeDrone.GetComponentsInChildren<Camera>(true);
+                if (droneCams.Length > 0)
+                {
+                    foreach (Camera cam in droneCams)
+                    {
+                        // Enable the parent hierarchy just in case it was disabled in the prefab
+                        Transform p = cam.transform;
+                        while (p != null && p != _activeDrone.transform.parent)
+                        {
+                            p.gameObject.SetActive(true);
+                            p = p.parent;
+                        }
+
+                        cam.enabled = true;
+                        cam.targetDisplay = 0; // Force main display to fix 'No cameras rendering' if prefab was changed
+                        cam.gameObject.tag = "MainCamera";
+                        
+                        // Sync far clip plane to prevent distant terrain cutting
+                        if (mainCamera != null) cam.farClipPlane = mainCamera.farClipPlane;
+                        else cam.farClipPlane = 10000f;
+
+                        if (cam.GetComponent<AudioListener>() != null)
+                            cam.GetComponent<AudioListener>().enabled = true;
+                    }
+                }
+                else
+                {
+                    Debug.LogError("[PlayerDeathFlow] NO CAMERAS FOUND ON DRONE PREFAB! Falling back to Main Camera.");
+                    if (mainCamera != null)
+                    {
+                        mainCamera.enabled = true;
+                        if (mainCamera.GetComponent<AudioListener>() != null)
+                            mainCamera.GetComponent<AudioListener>().enabled = true;
+                    }
                 }
             }
             else
@@ -460,16 +488,24 @@ public class PlayerDeathFlowController : MonoBehaviour
 
         Debug.Log($"[CompleteRevive Diagnostics] Starting camera detachment and restoration. mainCamera: {(mainCamera != null ? mainCamera.name : "null")}");
 
-        // 1. 先把摄像头分离下来 (Detach camera from Drone completely to root first!)
+        // 1. Re-enable main camera since the drone camera is going away
         if (mainCamera != null)
         {
-            Debug.Log($"[CompleteRevive Diagnostics] Detaching camera. Parent before: {(mainCamera.transform.parent != null ? mainCamera.transform.parent.name : "null")}");
-            mainCamera.transform.SetParent(null);
+            mainCamera.gameObject.SetActive(true);
+            mainCamera.enabled = true;
+            if (mainCamera.GetComponent<AudioListener>() != null)
+                mainCamera.GetComponent<AudioListener>().enabled = true;
         }
 
         // 2. 再销毁 Drone (Safely destroy Drone)
         if (_activeDrone != null)
         {
+            // 1. Move Player to the exact position of the Drone before destroying it
+            if (_playerRoot != null && _activeDrone != null)
+            {
+                _playerRoot.SetPositionAndRotation(_activeDrone.transform.position, Quaternion.Euler(0f, _activeDrone.transform.eulerAngles.y, 0f));
+                _playerRoot.gameObject.SetActive(true);
+            }
             Debug.Log("[CompleteRevive Diagnostics] Destroying Drone...");
             if (Application.isPlaying) Destroy(_activeDrone);
             else UnityEngine.Object.DestroyImmediate(_activeDrone);

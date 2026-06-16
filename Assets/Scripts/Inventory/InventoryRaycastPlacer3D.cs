@@ -22,6 +22,7 @@ public class InventoryRaycastPlacer3D : MonoBehaviour
 
     void Start()
     {
+        if (invSystem == null) return;
         GeneratePhysicsGridTriggers();
         if (testingItem != null) CreatePreview(testingItem);
     }

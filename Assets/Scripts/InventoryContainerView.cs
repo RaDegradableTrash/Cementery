@@ -438,11 +438,17 @@ public class InventoryContainerView : MonoBehaviour
         GameObject visual;
         if (instance.item.previewPrefab != null)
         {
-            visual = Instantiate(instance.item.previewPrefab, _placedItemsRoot);
-            visual.name = $"Placed_{instance.item.itemName ?? instance.item.name}";
-            visual.transform.localScale = instance.item.previewPrefab.transform.localScale;
-            visual.transform.localPosition = instance.anchor;
-                        visual.transform.localRotation = instance.rotation;
+            GameObject root = new GameObject($"Placed_{instance.item.itemName ?? instance.item.name}");
+            root.transform.SetParent(_placedItemsRoot, false);
+            root.transform.localPosition = instance.anchor;
+            root.transform.localRotation = instance.rotation;
+
+            GameObject prefabInstance = Instantiate(instance.item.previewPrefab, root.transform);
+            prefabInstance.transform.localScale = instance.item.previewPrefab.transform.localScale;
+            prefabInstance.transform.localPosition = offset;
+            prefabInstance.transform.localRotation = instance.item.previewPrefab.transform.localRotation;
+
+            visual = root;
             
             if (instance.customColor.a > 0)
             {

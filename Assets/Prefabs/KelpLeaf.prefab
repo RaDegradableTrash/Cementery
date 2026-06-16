@@ -11,6 +11,7 @@ GameObject:
   - component: {fileID: 5911140971936519816}
   - component: {fileID: 6709757975467896015}
   - component: {fileID: 2755822568232405151}
+  - component: {fileID: 8676392621161586449}
   m_Layer: 0
   m_Name: Plane
   m_TagString: Untagged
@@ -83,6 +84,27 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!65 &8676392621161586449
+BoxCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4340090515979959725}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Size: {x: 0.020559514, y: 0.10021451, z: 0.0023907009}
+  m_Center: {x: -0.00041996062, y: 0.059891365, z: 0.00081749336}
 --- !u!1 &7153656731474289914
 GameObject:
   m_ObjectHideFlags: 0
@@ -161,6 +183,8 @@ MonoBehaviour:
   carryable: 1
   collectable: 1
   isHeavy: 0
+  carryOffset: {x: 0, y: 0, z: 0}
+  customColor: {r: 0, g: 0, b: 0, a: 0}
   canBePushed: 1
   canBePlacedOnFloor: 1
   canBePlacedOnWall: 0

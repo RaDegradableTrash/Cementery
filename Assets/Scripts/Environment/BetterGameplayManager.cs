@@ -151,6 +151,11 @@ namespace EnvironmentSystem
 
         private void Update()
         {
+            if (_mainCamera == null || !_mainCamera.gameObject.activeInHierarchy || !_mainCamera.enabled)
+            {
+                _mainCamera = Camera.main;
+            }
+
             if (_mainCamera != null)
             {
                 // Recalculate frustum planes every frame (critical — without this objects stay hidden forever).
@@ -327,8 +332,14 @@ namespace EnvironmentSystem
 
         // ── Helpers ───────────────────────────────────────────────────────────
 
-        private Vector3 PlayerPos() =>
-            _playerTransform != null ? _playerTransform.position : Vector3.zero;
+        private Vector3 PlayerPos()
+        {
+            if (_mainCamera != null && _mainCamera.gameObject.activeInHierarchy && _mainCamera.enabled)
+            {
+                return _mainCamera.transform.position;
+            }
+            return _playerTransform != null ? _playerTransform.position : Vector3.zero;
+        }
 
         /// <summary>
         /// Returns true when <paramref name="point"/> is inside the frustum OR within

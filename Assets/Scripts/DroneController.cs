@@ -86,7 +86,17 @@ public class DroneController : MonoBehaviour
         if (Input.GetKey(KeyCode.Space)) up = 1f;
         if (Input.GetKey(KeyCode.LeftShift)) up = -1f;
 
-        Vector3 move = transform.right * h + transform.forward * v + Vector3.up * up;
+        // Use camera's transform for fully relative movement
+        Vector3 forward = _droneCamera.transform.forward;
+        Vector3 right = _droneCamera.transform.right;
+
+        // Flatten the vectors so movement remains perfectly horizontal on WASD
+        forward.y = 0f;
+        forward.Normalize();
+        right.y = 0f;
+        right.Normalize();
+
+        Vector3 move = right * h + forward * v + Vector3.up * up;
         
         Rigidbody rb = GetComponent<Rigidbody>();
         if (rb != null)

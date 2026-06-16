@@ -1193,8 +1193,9 @@ GameObject:
   - component: {fileID: 2876495966909254171}
   - component: {fileID: 8131412146024269836}
   - component: {fileID: 4377334776172746746}
+  - component: {fileID: 3425925373882993330}
   m_Layer: 0
-  m_Name: Camera
+  m_Name: DJInspire3_Camera
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -1208,12 +1209,12 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2137644791707660007}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.7071068, y: -0, z: -0, w: 0.7071067}
-  m_LocalPosition: {x: -0.000069999696, y: -0.009707038, z: -0.011691132}
-  m_LocalScale: {x: 0.01, y: 0.010000002, z: 0.010000002}
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: -0.0069999695, y: -1.2000008, z: 0.85899985}
+  m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 2793471792925327747}
+  m_Father: {fileID: 2542400669279116665}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!20 &2876495966909254171
 Camera:
@@ -1290,6 +1291,50 @@ MonoBehaviour:
   displayNumber: 5
   activateDisplay: 1
   createIfMissing: 0
+--- !u!114 &3425925373882993330
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2137644791707660007}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a79441f348de89743a2939f4d699eac1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_RenderShadows: 1
+  m_RequiresDepthTextureOption: 2
+  m_RequiresOpaqueTextureOption: 2
+  m_CameraType: 0
+  m_Cameras: []
+  m_RendererIndex: -1
+  m_VolumeLayerMask:
+    serializedVersion: 2
+    m_Bits: 1
+  m_VolumeTrigger: {fileID: 0}
+  m_VolumeFrameworkUpdateModeOption: 2
+  m_RenderPostProcessing: 0
+  m_Antialiasing: 0
+  m_AntialiasingQuality: 2
+  m_StopNaN: 0
+  m_Dithering: 0
+  m_ClearDepth: 1
+  m_AllowXRRendering: 1
+  m_AllowHDROutput: 1
+  m_UseScreenCoordOverride: 0
+  m_ScreenSizeOverride: {x: 0, y: 0, z: 0, w: 0}
+  m_ScreenCoordScaleBias: {x: 0, y: 0, z: 0, w: 0}
+  m_RequiresDepthTexture: 0
+  m_RequiresColorTexture: 0
+  m_Version: 2
+  m_TaaSettings:
+    m_Quality: 3
+    m_FrameInfluence: 0.1
+    m_JitterScale: 1
+    m_MipBias: 0
+    m_VarianceClampScale: 0.9
+    m_ContrastAdaptiveSharpening: 0
 --- !u!1 &2191168002843139544
 GameObject:
   m_ObjectHideFlags: 0
@@ -2798,6 +2843,7 @@ Transform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
+  - {fileID: 8011272095202537194}
   - {fileID: 2793471792925327747}
   - {fileID: 4974569369801287008}
   - {fileID: 2853740183405483109}
@@ -2875,6 +2921,9 @@ MonoBehaviour:
   groundCutoffDistance: 0.2
   maxFlightAltitude: 300
   ceilingPushDownSpeed: 4
+  droneEngineSound: {fileID: 0}
+  maxVolume: 0.8
+  pitchChangeRange: 0.3
 --- !u!54 &856747913069932704
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -4015,7 +4064,6 @@ Transform:
   - {fileID: 6197470559657333113}
   - {fileID: 597112705635301521}
   - {fileID: 1022447140864773073}
-  - {fileID: 8011272095202537194}
   m_Father: {fileID: 2542400669279116665}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!33 &5988205453721155212

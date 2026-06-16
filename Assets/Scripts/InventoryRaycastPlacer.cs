@@ -186,11 +186,10 @@ public class InventoryRaycastPlacer : MonoBehaviour
             return;
         }
 
-        // Dragging mode requires holding left click
-        if (Input.GetMouseButton(0))
+        // Always update preview position to follow mouse
+        if (previewObject != null)
         {
-            if (previewObject != null)
-                previewObject.localRotation = previewRotation;
+            previewObject.localRotation = previewRotation;
 
             if (!hasPlaneHit)
             {
@@ -201,84 +200,82 @@ public class InventoryRaycastPlacer : MonoBehaviour
             else
             {
                 SetPreviewVisible(true);
-                if (previewObject != null)
+                Vector3 targetPos = anchorInBounds ? (Vector3)gridPos : (localPlaneHit + _dragOffset);
+                
+                // 限制预览物体的拖拽坐标在网格边界内，确保预览残影不会飞到长方体外
+                targetPos.x = Mathf.Clamp(targetPos.x, 0f, inventorySystem.gridWidth - 1f);
+                targetPos.y = Mathf.Clamp(targetPos.y, 0f, inventorySystem.gridHeight - 1f);
+                targetPos.z = Mathf.Clamp(targetPos.z, 0f, inventorySystem.gridDepth - 1f);
+                
+                if (_snapPreviewNextFrame)
                 {
-                    Vector3 targetPos = anchorInBounds ? (Vector3)gridPos : (localPlaneHit + _dragOffset);
-                    
-                    // 限制预览物体的拖拽坐标在网格边界内，确保预览残影不会飞到长方体外
-                    targetPos.x = Mathf.Clamp(targetPos.x, 0f, inventorySystem.gridWidth - 1f);
-                    targetPos.y = Mathf.Clamp(targetPos.y, 0f, inventorySystem.gridHeight - 1f);
-                    targetPos.z = Mathf.Clamp(targetPos.z, 0f, inventorySystem.gridDepth - 1f);
-                    
-                    if (_snapPreviewNextFrame)
+                    previewObject.localPosition = targetPos;
+                    _snapPreviewNextFrame = false;
+                    _previewVelocity = Vector3.zero;
+                }
+                else
+                {
+                    previewObject.localPosition = Vector3.SmoothDamp(previewObject.localPosition, targetPos, ref _previewVelocity, dragSmoothTime);
+                }
+            }
+        }
+
+        bool canPlaceObj = anchorInBounds && inventorySystem.CanPlace(previewItemData, gridPos, previewRotation);
+        if (hasPlaneHit)
+        {
+            SetPreviewColor(canPlaceObj ? validPreviewColor : invalidPreviewColor);
+        }
+
+        // Try to place or drop on click or release
+        if (Input.GetMouseButtonUp(0) || Input.GetMouseButtonDown(0))
+        {
+            if (!hasPlaneHit)
+            {
+                // Drop to temp storage outside grid bounds
+                Vector3 dropPos = previewObject != null ? previewObject.localPosition : Vector3.zero;
+                ConvertToTempItem(previewObject, previewItemData, dropPos, previewRotation);
+                ClearPreviewReferenceOnly();
+                return;
+            }
+
+            if (!canPlaceObj)
+            {
+                if (anchorInBounds)
+                {
+                    // In bounds but blocked -> Shake
+                    TryTriggerOccupiedFailFlash(gridPos, anchorInBounds);
+                    if (previewObject != null)
                     {
-                        previewObject.localPosition = targetPos;
-                        _snapPreviewNextFrame = false;
-                        _previewVelocity = Vector3.zero;
+                        StartCoroutine(ShakeAndReject(previewObject, previewItemData, (Vector3)gridPos, previewRotation));
                     }
-                    else
-                    {
-                        previewObject.localPosition = Vector3.SmoothDamp(previewObject.localPosition, targetPos, ref _previewVelocity, dragSmoothTime);
-                    }
+                    // Continue holding the item (do not clear reference or convert to TempItem)
+                }
+                else
+                {
+                    // Out of bounds -> Temp Item
+                    ConvertToTempItem(previewObject, previewItemData, localPlaneHit, previewRotation);
+                    ClearPreviewReferenceOnly();
+                }
+                return;
+            }
+
+            // Success Place
+            if (inventorySystem.Place(previewItemData, gridPos, previewRotation))
+            {
+                InteractionSystem interaction = GetInteractionSystem();
+                if (interaction != null)
+                {
+                    interaction.DropCarriedObjectIfAny();
                 }
 
-                bool canPlaceObj = anchorInBounds && inventorySystem.CanPlace(previewItemData, gridPos, previewRotation);
-                SetPreviewColor(canPlaceObj ? validPreviewColor : invalidPreviewColor);
-            }
-            return;
-        }
+                ClearPreview();
 
-        // Released left click (or wasn't holding it)
-        if (!hasPlaneHit)
-        {
-            // Drop to temp storage outside grid bounds
-            Vector3 dropPos = previewObject != null ? previewObject.localPosition : Vector3.zero;
-            ConvertToTempItem(previewObject, previewItemData, dropPos, previewRotation);
-            ClearPreviewReferenceOnly();
-            return;
-        }
-
-        bool canPlace = anchorInBounds && inventorySystem.CanPlace(previewItemData, gridPos, previewRotation);
-        
-        if (!canPlace)
-        {
-            if (anchorInBounds)
-            {
-                // In bounds but blocked -> Shake
-                TryTriggerOccupiedFailFlash(gridPos, anchorInBounds);
-                if (previewObject != null)
+                if (closeInventoryOnPlace)
                 {
-                    Coroutine c = StartCoroutine(ShakeAndReject(previewObject, previewItemData, (Vector3)gridPos, previewRotation));
-                    TempItem ti = ConvertToTempItem(previewObject, previewItemData, (Vector3)gridPos, previewRotation);
-                    if (ti != null) ti.shakeCoroutine = c;
+                    InventoryCameraController camCtrl = GetInventoryCameraController();
+                    if (camCtrl != null)
+                        camCtrl.SetInventoryActive(false);
                 }
-                ClearPreviewReferenceOnly();
-            }
-            else
-            {
-                // Out of bounds -> Temp Item
-                ConvertToTempItem(previewObject, previewItemData, localPlaneHit, previewRotation);
-                ClearPreviewReferenceOnly();
-            }
-            return;
-        }
-
-        // Success Place
-        if (inventorySystem.Place(previewItemData, gridPos, previewRotation))
-        {
-            InteractionSystem interaction = GetInteractionSystem();
-            if (interaction != null)
-            {
-                interaction.DropCarriedObjectIfAny();
-            }
-
-            ClearPreview();
-
-            if (closeInventoryOnPlace)
-            {
-                InventoryCameraController camCtrl = GetInventoryCameraController();
-                if (camCtrl != null)
-                    camCtrl.SetInventoryActive(false);
             }
         }
     }
@@ -304,9 +301,38 @@ public class InventoryRaycastPlacer : MonoBehaviour
         previewItemData = instance.item;
         previewRotation = instance.rotation;
         
-        GameObject previewGo = instance.item.previewPrefab != null
-            ? Instantiate(instance.item.previewPrefab, inventoryRoot)
-            : CreateFallbackPreview(instance.item);
+        GameObject previewGo;
+        if (instance.item.previewPrefab != null)
+        {
+            GameObject root = new GameObject("PreviewRoot");
+            root.transform.SetParent(inventoryRoot, false);
+            GameObject prefabInstance = Instantiate(instance.item.previewPrefab, root.transform);
+            prefabInstance.transform.localScale = instance.item.previewPrefab.transform.localScale;
+            
+            Vector3 offset = Vector3.zero;
+            if (instance.item.localOffsets != null && instance.item.localOffsets.Count > 0)
+            {
+                Vector3Int min = instance.item.localOffsets[0];
+                Vector3Int max = instance.item.localOffsets[0];
+                for (int i = 1; i < instance.item.localOffsets.Count; i++)
+                {
+                    min = Vector3Int.Min(min, instance.item.localOffsets[i]);
+                    max = Vector3Int.Max(max, instance.item.localOffsets[i]);
+                }
+                offset = new Vector3(
+                    (min.x + max.x) * 0.5f,
+                    (min.y + max.y) * 0.5f,
+                    (min.z + max.z) * 0.5f
+                );
+            }
+            prefabInstance.transform.localPosition = offset;
+            prefabInstance.transform.localRotation = instance.item.previewPrefab.transform.localRotation;
+            previewGo = root;
+        }
+        else
+        {
+            previewGo = CreateFallbackPreview(instance.item);
+        }
 
         if (previewGo != null)
         {
@@ -373,9 +399,38 @@ public class InventoryRaycastPlacer : MonoBehaviour
         if (item == null)
             return;
 
-        GameObject previewGo = item.previewPrefab != null
-            ? Instantiate(item.previewPrefab, inventoryRoot)
-            : CreateFallbackPreview(item);
+        GameObject previewGo;
+        if (item.previewPrefab != null)
+        {
+            GameObject root = new GameObject("PreviewRoot");
+            root.transform.SetParent(inventoryRoot, false);
+            GameObject prefabInstance = Instantiate(item.previewPrefab, root.transform);
+            prefabInstance.transform.localScale = item.previewPrefab.transform.localScale;
+            
+            Vector3 offset = Vector3.zero;
+            if (item.localOffsets != null && item.localOffsets.Count > 0)
+            {
+                Vector3Int min = item.localOffsets[0];
+                Vector3Int max = item.localOffsets[0];
+                for (int i = 1; i < item.localOffsets.Count; i++)
+                {
+                    min = Vector3Int.Min(min, item.localOffsets[i]);
+                    max = Vector3Int.Max(max, item.localOffsets[i]);
+                }
+                offset = new Vector3(
+                    (min.x + max.x) * 0.5f,
+                    (min.y + max.y) * 0.5f,
+                    (min.z + max.z) * 0.5f
+                );
+            }
+            prefabInstance.transform.localPosition = offset;
+            prefabInstance.transform.localRotation = item.previewPrefab.transform.localRotation;
+            previewGo = root;
+        }
+        else
+        {
+            previewGo = CreateFallbackPreview(item);
+        }
 
         if (previewGo != null)
         {

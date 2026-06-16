@@ -77,15 +77,22 @@ public class DroneControl : MonoBehaviour
     [SerializeField] private float ceilingPushDownSpeed = 4f;
 
     // ── 🌟 新增：无人机引擎音频配置 ──────────────────────────────────────────
-    [Header("Drone Audio Settings")]
-    [Tooltip("无人机引擎/螺旋桨的循环 MP3 音效")]
+    [Header("Audio Settings")]
+    [Tooltip("无人机的引擎声音文件")]
     [SerializeField] private AudioClip droneEngineSound;
-    [Range(0f, 1f)] [SerializeField] private float maxVolume = 0.8f;
-    [Tooltip("声音随转速变化的敏感度（数值越大，高速飞行时声音越尖锐）")]
-    [SerializeField] private float pitchChangeRange = 0.3f;
+    [Tooltip("最高转速时的最大音量")]
+    [SerializeField] private float maxVolume = 0.8f;
+    [Tooltip("最高转速时音高变化的幅度")]
+    [SerializeField] private float pitchChangeRange = 0.2f;
 
-    private AudioSource _audioSource;
-    // ────────────────────────────────────────────────────────────────────────
+    [Header("Interaction (Soul Collection)")]
+    [SerializeField] private float interactDistance = 8f;
+    [SerializeField] private float requiredHoldTime = 3f;
+    private float _holdTimer = 0f;
+    private bool _hasSoul = false;
+    private UnityEngine.UI.Slider _cachedSlider;
+
+    private float _targetPropellerRotationSpeed = 0f;  // ────────────────────────────────────────────────────────────────────────
 
     public float CurrentAltitude { get; private set; } = float.PositiveInfinity;
     public bool HasAltitudeHit { get; private set; }
@@ -122,6 +129,7 @@ public class DroneControl : MonoBehaviour
         _rb = movementRoot.GetComponent<Rigidbody>();
         
         _rb.useGravity = false; 
+        _rb.isKinematic = false;
         _rb.collisionDetectionMode = CollisionDetectionMode.Continuous; 
 
         if (altitudeRayOrigin == null) altitudeRayOrigin = movementRoot;
@@ -173,6 +181,7 @@ public class DroneControl : MonoBehaviour
     {
         float dt = Time.deltaTime;
 
+        HandleInteraction();
         ReadAltitude();
         GatherInputAndPhysics(dt);
         UpdateInspire3Morph(dt);
@@ -248,6 +257,90 @@ public class DroneControl : MonoBehaviour
         {
             HasAltitudeHit = true;
             CurrentAltitude = best;
+        }
+    }
+
+    private void OnTriggerEnter(Collider other)
+    {
+        if (!_hasSoul) return;
+
+        Transform current = other.transform;
+        while (current != null)
+        {
+            if (current.name.ToUpperInvariant().Contains("RV") || current.name.ToUpperInvariant().Contains("UV"))
+            {
+                PlayerDeathFlowController flow = FindObjectOfType<PlayerDeathFlowController>();
+                if (flow != null) flow.CompleteRevive();
+                return;
+            }
+            current = current.parent;
+        }
+    }
+
+    private void HandleInteraction()
+    {
+        if (_hasSoul) return;
+        if (gimbalCamera == null) return;
+
+        Ray ray = new Ray(gimbalCamera.position, gimbalCamera.forward);
+        bool aimingAtCorpse = false;
+        Transform targetCorpse = null;
+
+        if (Physics.Raycast(ray, out RaycastHit hit, interactDistance))
+        {
+            if (hit.collider.transform.root.name.Contains("PlayerCorpse") || hit.collider.transform.root.name.Contains("Corpse"))
+            {
+                aimingAtCorpse = true;
+                targetCorpse = hit.collider.transform.root;
+            }
+        }
+
+        if (aimingAtCorpse && (Input.GetKey(KeyCode.F) || Input.GetMouseButton(1)))
+        {
+            _holdTimer += Time.deltaTime;
+            float progress = Mathf.Clamp01(_holdTimer / requiredHoldTime);
+            UpdateSlider(progress, true);
+
+            if (_holdTimer >= requiredHoldTime)
+            {
+                _hasSoul = true;
+                _holdTimer = 0f;
+                UpdateSlider(0f, false);
+                
+                if (targetCorpse != null)
+                {
+                    if (Application.isPlaying) Destroy(targetCorpse.gameObject);
+                    else UnityEngine.Object.DestroyImmediate(targetCorpse.gameObject);
+                }
+            }
+        }
+        else
+        {
+            _holdTimer = 0f;
+            UpdateSlider(0f, false);
+        }
+    }
+
+    private void UpdateSlider(float progress, bool active)
+    {
+        if (_cachedSlider == null)
+        {
+            UnityEngine.UI.Slider[] sliders = Resources.FindObjectsOfTypeAll<UnityEngine.UI.Slider>();
+            foreach (UnityEngine.UI.Slider s in sliders)
+            {
+                if (s.gameObject.scene.name == null) continue;
+                string nameUpper = s.name.ToUpperInvariant();
+                if (nameUpper.Contains("REVIVE") || nameUpper.Contains("SOUL") || nameUpper.Contains("PROGRESS"))
+                {
+                    _cachedSlider = s;
+                    break;
+                }
+            }
+        }
+        if (_cachedSlider != null)
+        {
+            _cachedSlider.gameObject.SetActive(active);
+            if (active) _cachedSlider.value = progress;
         }
     }
 
@@ -339,7 +432,17 @@ public class DroneControl : MonoBehaviour
 
         // 6. 基础运动推力计算
         Vector3 localInputMove = Vector3.ClampMagnitude(new Vector3(inputX, 0f, inputZ), 1f);
-        Vector3 worldInputMove = Quaternion.Euler(0f, _yawDeg, 0f) * localInputMove;
+        float moveYaw = _yawDeg;
+        if (gimbalCamera != null)
+        {
+            Vector3 camForward = gimbalCamera.forward;
+            camForward.y = 0f;
+            if (camForward.sqrMagnitude > 0.001f)
+            {
+                moveYaw = Quaternion.LookRotation(camForward).eulerAngles.y;
+            }
+        }
+        Vector3 worldInputMove = Quaternion.Euler(0f, moveYaw, 0f) * localInputMove;
 
         if (worldInputMove.sqrMagnitude > 0.01f)
         {
@@ -480,6 +583,14 @@ public class DroneControl : MonoBehaviour
             if (Input.GetKey(KeyCode.LeftArrow)) camYawInput -= 1f;   
             if (Input.GetKey(KeyCode.RightArrow)) camYawInput += 1f;  
 
+            // Add Mouse Input
+            float mouseX = Input.GetAxis("Mouse X");
+            float mouseY = Input.GetAxis("Mouse Y");
+            float mouseSensitivity = 3f;
+
+            _gimbalLocalYaw += mouseX * mouseSensitivity;
+            _gimbalLocalPitch -= mouseY * mouseSensitivity;
+
             _gimbalLocalPitch += camPitchInput * gimbalPitchSpeed * dt;
             _gimbalLocalPitch = Mathf.Clamp(_gimbalLocalPitch, minGimbalPitch, maxGimbalPitch);
             _gimbalLocalYaw += camYawInput * gimbalYawSpeed * dt;
@@ -498,6 +609,8 @@ public class DroneControl : MonoBehaviour
         gimbalCamera.rotation = targetWorldRotation;
     }
 
+    private AudioSource _audioSource;
+
     private void OnCollisionEnter(Collision collision)
     {
         if (_isFlightControlCutoff) return;
@@ -512,6 +625,21 @@ public class DroneControl : MonoBehaviour
 
         // 碰撞自愈第二步：瞬间强制回正视觉倾斜角，避免物理扭矩在碰撞表面叠加发生连环旋转卡死
         _targetBodyTiltRotation = Quaternion.Euler(0f, _yawDeg, 0f);
+
+        if (!_hasSoul) return;
+
+        // 【如果碰撞到玩家的RV（房车），就执行复活！】
+        Transform current = collision.collider.transform;
+        while (current != null)
+        {
+            if (current.name.ToUpperInvariant().Contains("RV") || current.name.ToUpperInvariant().Contains("UV"))
+            {
+                PlayerDeathFlowController flow = FindObjectOfType<PlayerDeathFlowController>();
+                if (flow != null) flow.CompleteRevive();
+                return;
+            }
+            current = current.parent;
+        }
     }
 
     private void OnCollisionStay(Collision collision)
