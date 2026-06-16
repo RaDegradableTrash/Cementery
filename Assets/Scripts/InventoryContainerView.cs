@@ -442,7 +442,13 @@ public class InventoryContainerView : MonoBehaviour
             visual.name = $"Placed_{instance.item.itemName ?? instance.item.name}";
             visual.transform.localScale = instance.item.previewPrefab.transform.localScale;
             visual.transform.localPosition = instance.anchor;
-            visual.transform.localRotation = instance.rotation;
+                        visual.transform.localRotation = instance.rotation;
+            
+            if (instance.customColor.a > 0)
+            {
+                Renderer[] customRenderers = visual.GetComponentsInChildren<Renderer>();
+                foreach (var r in customRenderers) { r.material.color = instance.customColor; if (r.material.HasProperty("_BaseColor")) r.material.SetColor("_BaseColor", instance.customColor); }
+            }
         }
         else
         {

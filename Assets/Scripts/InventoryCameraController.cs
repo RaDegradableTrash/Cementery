@@ -201,12 +201,12 @@ void Update()
     /// <summary>
     /// 进入背包模式，传入当前收纳物品
     /// </summary>
-    public void EnterInventoryMode(ItemData item)
+    public void EnterInventoryMode(ItemData item, Color customColor = default)
     {
         InventoryCameraController primary = GetPrimaryController();
         if (primary != null && primary != this)
         {
-            primary.EnterInventoryMode(item);
+            primary.EnterInventoryMode(item, customColor);
             return;
         }
 
@@ -221,7 +221,7 @@ void Update()
             return;
 
         if (hasExplicitItem)
-            placer.SetPreviewItem(item);
+            placer.SetPreviewItem(item, customColor);
         else
             placer.ClearPreview();
     }

@@ -35,10 +35,13 @@ public class ItemInstance
     public ItemData item;
     public Vector3Int anchor;
     public Quaternion rotation;
+    public Color customColor;
+
     public ItemInstance(ItemData item, Vector3Int anchor, Quaternion rotation)
     {
         this.item = item;
         this.anchor = anchor;
         this.rotation = rotation;
+        this.customColor = Color.clear;
     }
 }

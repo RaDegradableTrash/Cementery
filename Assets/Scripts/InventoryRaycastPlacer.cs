@@ -72,8 +72,10 @@ public class InventoryRaycastPlacer : MonoBehaviour
     [SerializeField] private float occupiedFailFlashFrequency = 7.5f;
     [SerializeField] private Color occupiedFailFlashColor = new Color(1f, 0.18f, 0.18f, 0.92f);
 
+    [SerializeField] private bool hasHover = false;
     private Transform previewObject;
     private ItemData previewItemData;
+    private Color previewCustomColor = Color.clear;
     private Renderer[] previewRenderers;
     private MaterialPropertyBlock previewColorBlock;
     private MaterialPropertyBlock cellColorBlock;
@@ -351,13 +353,14 @@ public class InventoryRaycastPlacer : MonoBehaviour
         _occupiedFailFlashStartTime = Time.unscaledTime;
     }
 
-    public void SetPreviewItem(ItemData item)
+    public void SetPreviewItem(ItemData item, Color customColor = default)
     {
         ClearOccupiedFailFlash();
         _dragOffset = Vector3.zero;
         _snapPreviewNextFrame = true;
 
         previewItemData = item;
+        previewCustomColor = customColor;
         if (previewObject != null)
         {
             if (Application.isPlaying) Destroy(previewObject.gameObject);

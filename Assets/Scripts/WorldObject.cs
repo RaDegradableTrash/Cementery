@@ -27,6 +27,12 @@ public class WorldObject : MonoBehaviour
     [Tooltip("If true, carrying this object defaults to a heavy dragging mode instead of floating in front of the camera.")]
     public bool isHeavy      = false;
 
+    [Header("Carry Settings")]
+    public Vector3 carryOffset = Vector3.zero;
+
+    [Header("Visuals")]
+    public Color customColor = Color.clear;
+
     // ── Physics ───────────────────────────────────────────────────────────────
     [Header("Physics")]
     [Tooltip("When true, player/carry scripts can actively push this object. " +
@@ -137,6 +143,20 @@ public class WorldObject : MonoBehaviour
         _baseScale = transform.localScale;
         _rb = GetComponent<Rigidbody>();
         ApplyPushabilityState();
+        ApplyCustomColor();
+    }
+
+    public void ApplyCustomColor()
+    {
+        if (customColor.a > 0)
+        {
+            Renderer[] renderers = GetComponentsInChildren<Renderer>();
+            foreach (var r in renderers)
+            {
+                r.material.color = customColor;
+                if (r.material.HasProperty("_BaseColor")) r.material.SetColor("_BaseColor", customColor);
+            }
+        }
     }
 
     void OnValidate() => ApplyPushabilityState();
@@ -147,6 +167,14 @@ public class WorldObject : MonoBehaviour
     internal void SetCarriedState(bool carried)
     {
         _isCarried = carried;
+        ApplyPushabilityState();
+    }
+
+    public bool isInsideVehicle { get; private set; } = false;
+
+    public void SetInsideVehicle(bool inside)
+    {
+        isInsideVehicle = inside;
         ApplyPushabilityState();
     }
 
@@ -171,13 +199,17 @@ public class WorldObject : MonoBehaviour
         if (_rb == null) _rb = GetComponent<Rigidbody>();
         if (_rb == null) return;
 
-        // While carried, placed on wall/ceiling, or actively animating, logic owns RB mode.
-        if (_isCarried || _animationLocks > 0 || isPlacedAndAttached) return;
+        // While carried, placed on wall/ceiling, inside moving vehicle, or actively animating, logic owns RB mode.
+        if (_isCarried || _animationLocks > 0 || isPlacedAndAttached || isInsideVehicle)
+        {
+            if (isInsideVehicle && !_isCarried) _rb.isKinematic = true;
+            return;
+        }
 
         if (canBePushed)
         {
             _rb.isKinematic = false;
-            return;
+            _rb.constraints = RigidbodyConstraints.None;
         }
 
         // Non-pushable objects now preserve their own Rigidbody settings.

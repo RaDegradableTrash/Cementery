@@ -49,7 +49,7 @@ public class PlantPot : MonoBehaviour
             if (InteractionSystem.Instance != null)
             {
                 WorldObject carried = InteractionSystem.Instance.CarriedWorldObject;
-                if (carried != null && carried.GetComponent<Kelp>() != null)
+                if (carried != null && (carried.GetComponent<Kelp>() != null || carried.GetComponent<KelpLeaf>() != null))
                 {
                     holdingKelp = true;
                 }
@@ -143,12 +143,42 @@ public class PlantPot : MonoBehaviour
             if (InteractionSystem.Instance != null)
             {
                 WorldObject carried = InteractionSystem.Instance.CarriedWorldObject;
-                if (carried != null && carried.GetComponent<Kelp>() != null)
+                if (carried != null)
                 {
-                    PlantKelp(carried);
-                    // Consume the carried object from the player's hands since it is now parented to the pot
-                    InteractionSystem.Instance.ConsumeCarriedObjectSilently();
-                    InteractionSystem.Instance.ClearPrompts();
+                    if (carried.GetComponent<Kelp>() != null)
+                    {
+                        PlantKelp(carried);
+                        // Consume the carried object from the player's hands since it is now parented to the pot
+                        InteractionSystem.Instance.ConsumeCarriedObjectSilently();
+                        InteractionSystem.Instance.ClearPrompts();
+                    }
+                    else if (carried.GetComponent<KelpLeaf>() != null)
+                    {
+                        // Plant from leaf
+                        InteractionSystem.Instance.ConsumeCarriedObjectSilently();
+                        if (Application.isPlaying) Destroy(carried.gameObject);
+                        else UnityEngine.Object.DestroyImmediate(carried.gameObject);
+
+                        GameObject prefabToSpawn = kelpPrefab;
+                        if (prefabToSpawn == null || prefabToSpawn.GetComponent<Kelp>() == null)
+                        {
+#if UNITY_EDITOR
+                            prefabToSpawn = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Kelp.prefab");
+#endif
+                        }
+
+                        if (prefabToSpawn != null && prefabToSpawn.GetComponent<Kelp>() != null)
+                        {
+                            GameObject newKelpObj = Instantiate(prefabToSpawn);
+                            WorldObject newKelpWo = newKelpObj.GetComponent<WorldObject>();
+                            PlantKelp(newKelpWo);
+                        }
+                        else
+                        {
+                            Debug.LogError("PlantPot: Valid Kelp prefab (with Kelp script) is missing! Cannot plant from leaf.");
+                        }
+                        InteractionSystem.Instance.ClearPrompts();
+                    }
                 }
             }
             return;
@@ -180,18 +210,12 @@ public class PlantPot : MonoBehaviour
         // Harvest all leaves, spawning 5 KelpLeaf items
         _currentPlant.HarvestLeaves();
 
-        // Destroy the fully grown plant from the pot to free the pot
-        Destroy(_currentPlant.gameObject);
+        // Stem stays intact, growth is retained
 
-        // Reset pot state to empty and ready to be planted again
-        _currentPlant = null;
-        _progress = 0f;
-        _isGrowing = false;
-        _isMature = false;
-
-        if (InteractionSystem.Instance != null)
+        if (_worldObject != null)
         {
-            InteractionSystem.Instance.ShowInfoMessage("Harvested 5 Leaves!");
+            _worldObject.interactable = false;
+            _worldObject.interactMessage = "";
         }
     }
 }
