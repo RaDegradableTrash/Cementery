@@ -1500,7 +1500,7 @@ public class InteractionSystem : MonoBehaviour
 
         if (obj.collectItemData != null)
         {
-            // Removed savedWorldScale assignment completely
+            obj.collectItemData.savedWorldScale = obj.transform.localScale;
         }
 
         InventoryCameraController camCtrl = GetInventoryCameraController();
@@ -1510,10 +1510,8 @@ public class InteractionSystem : MonoBehaviour
         }
 
         _lookedAt = null;
-        obj.PlayCollectAnim(() => {
-            if (Application.isPlaying) Destroy(obj.gameObject);
-            else UnityEngine.Object.DestroyImmediate(obj.gameObject);
-        });
+        if (Application.isPlaying) Destroy(obj.gameObject);
+        else UnityEngine.Object.DestroyImmediate(obj.gameObject);
     }
 
     public bool HasCarriedObject() => _carriedRb != null;

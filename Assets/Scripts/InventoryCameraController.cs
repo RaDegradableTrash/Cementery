@@ -138,6 +138,13 @@ void Update()
     if (!IsPrimaryController())
         return;
 
+    if (PlayerDeathFlowController.IsPlayerDead)
+    {
+        if (inventoryActive)
+            CloseInventoryFromKey();
+        return;
+    }
+
     if (allowToggleInventoryKey && Input.GetKeyDown(toggleInventoryKey))
     {
         InteractionSystem interaction = GetInteractionSystem();
@@ -187,7 +194,7 @@ void Update()
 
         if (placer != null && placer.HasActivePreviewItem)
         {
-            placer.ForceDropPreviewToTemp();
+            placer.ForceDropPreviewToWorld();
         }
 
         SetInventoryActive(false);
@@ -203,6 +210,8 @@ void Update()
     /// </summary>
     public void EnterInventoryMode(ItemData item, Color customColor = default)
     {
+        if (PlayerDeathFlowController.IsPlayerDead) return;
+
         InventoryCameraController primary = GetPrimaryController();
         if (primary != null && primary != this)
         {
@@ -259,40 +268,7 @@ void Update()
             InventoryRaycastPlacer placer = GetInventoryPlacer();
             if (placer != null)
             {
-                var tempItems = placer.GetTempItems();
-                if (tempItems != null && tempItems.Count > 0)
-                {
-                    Vector3 spawnBase = transform.position;
-                    Vector3 spawnFwd = transform.forward;
-                    if (mainCamera != null)
-                    {
-                        spawnBase = mainCamera.transform.position;
-                        spawnFwd = mainCamera.transform.forward;
-                    }
 
-                    for (int i = 0; i < tempItems.Count; i++)
-                    {
-                        var tempItem = tempItems[i];
-                        if (tempItem != null && tempItem.itemData != null && tempItem.itemData.worldPrefab != null)
-                        {
-                            // 散落在玩家前方的地面安全区，高度抬高 0.25米，避免掉入雪中/地下
-                            Vector3 spawnPos = spawnBase + spawnFwd * (1.2f + i * 0.4f) + Vector3.up * 0.25f;
-                            GameObject realWorldObj = Instantiate(tempItem.itemData.worldPrefab, spawnPos, Quaternion.identity);
-                            
-                            Rigidbody rb = realWorldObj.GetComponent<Rigidbody>();
-                            if (rb != null)
-                            {
-                                rb.isKinematic = false;
-                                rb.useGravity = true;
-                                rb.velocity = Vector3.zero;
-                                rb.angularVelocity = Vector3.zero;
-                                // 赋予一个微弱的前向抛物线初速度
-                                rb.AddForce(spawnFwd * 1.5f + Vector3.up * 1.0f, ForceMode.Impulse);
-                            }
-                        }
-                    }
-                    placer.ClearTempItems();
-                }
                 placer.ClearPreview();
             }
         }
