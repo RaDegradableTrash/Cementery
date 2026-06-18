@@ -57,7 +57,7 @@ public class GlobalVolumeController : MonoBehaviour
         if (percentageText != null)
         {
             int percent = Mathf.RoundToInt(value * 100f);
-            percentageText.text = percent + "%";
+            percentageText.text = percent + "";
         }
     }
 
