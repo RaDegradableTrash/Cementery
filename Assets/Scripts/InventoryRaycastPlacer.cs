@@ -550,7 +550,10 @@ public class InventoryRaycastPlacer : MonoBehaviour
 
             Vector3 spawnPos = spawnBase + spawnFwd * 1.2f + Vector3.up * 0.25f;
             GameObject realWorldObj = Instantiate(itemData.worldPrefab, spawnPos, Quaternion.identity);
-            
+            if (itemData.savedWorldScale != Vector3.zero)
+            {
+                realWorldObj.transform.localScale = itemData.savedWorldScale;
+            }
             Rigidbody rb = realWorldObj.GetComponent<Rigidbody>();
             if (rb != null)
             {

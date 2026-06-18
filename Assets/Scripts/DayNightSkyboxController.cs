@@ -104,9 +104,9 @@ public class DayNightSkyboxController : MonoBehaviour
     public Color dayAmbientEquator = new Color(0.40f, 0.45f, 0.50f, 1f);
     public Color dayAmbientGround = new Color(0.30f, 0.32f, 0.35f, 1f);
 
-    public Color nightAmbientSky = new Color(0.20f, 0.25f, 0.35f, 1f);
-    public Color nightAmbientEquator = new Color(0.15f, 0.20f, 0.28f, 1f);
-    public Color nightAmbientGround = new Color(0.10f, 0.12f, 0.15f, 1f);
+    public Color nightAmbientSky = new Color(0.60f, 0.65f, 0.75f, 1f);
+    public Color nightAmbientEquator = new Color(0.55f, 0.60f, 0.68f, 1f);
+    public Color nightAmbientGround = new Color(0.50f, 0.52f, 0.55f, 1f);
 
     [Range(0f, 2f)] public float ambientIntensity = 1.2f;
     public bool controlFog = true;
