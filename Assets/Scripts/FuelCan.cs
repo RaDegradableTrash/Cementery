@@ -34,7 +34,19 @@ public class FuelCan : MonoBehaviour
         worldObject.carryable = true;
         worldObject.interactable = false;
         worldObject.collectable = false;
+        worldObject.canBePushed = true;
         
+        // 强制确保有 Rigidbody 以便能够受到重力落下，防止飘在半空
+        Rigidbody rb = GetComponent<Rigidbody>();
+        if (rb == null)
+        {
+            rb = gameObject.AddComponent<Rigidbody>();
+            rb.mass = 5f;
+            rb.useGravity = true;
+            rb.isKinematic = false;
+            rb.collisionDetectionMode = CollisionDetectionMode.Continuous;
+        }
+
         // 更新显示
         UpdateFuelDisplay();
     }

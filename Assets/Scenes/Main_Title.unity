@@ -15,18 +15,18 @@ RenderSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 9
   m_Fog: 0
-  m_FogColor: {r: 0.5, g: 0.5, b: 0.5, a: 1}
+  m_FogColor: {r: 0.52104735, g: 0.5836341, b: 0.6713482, a: 1.01864}
   m_FogMode: 3
   m_FogDensity: 0.01
   m_LinearFogStart: 0
   m_LinearFogEnd: 300
-  m_AmbientSkyColor: {r: 0.212, g: 0.227, b: 0.259, a: 1}
-  m_AmbientEquatorColor: {r: 0.114, g: 0.125, b: 0.133, a: 1}
-  m_AmbientGroundColor: {r: 0.047, g: 0.043, b: 0.035, a: 1}
+  m_AmbientSkyColor: {r: 0.61849254, g: 0.6788722, b: 0.7463485, a: 1.05825}
+  m_AmbientEquatorColor: {r: 0.5636362, g: 0.5919551, b: 0.6345811, a: 1.03495}
+  m_AmbientGroundColor: {r: 0.44952917, g: 0.45949298, b: 0.46947485, a: 1}
   m_AmbientIntensity: 1
-  m_AmbientMode: 0
+  m_AmbientMode: 1
   m_SubtractiveShadowColor: {r: 0.42, g: 0.478, b: 0.627, a: 1}
-  m_SkyboxMaterial: {fileID: 2100000, guid: aa78c8d403a8547fe86d1f74239e6b03, type: 2}
+  m_SkyboxMaterial: {fileID: 1823765956}
   m_HaloStrength: 0.5
   m_FlareStrength: 1
   m_FlareFadeSpeed: 3
@@ -35,7 +35,7 @@ RenderSettings:
   m_DefaultReflectionMode: 0
   m_DefaultReflectionResolution: 128
   m_ReflectionBounces: 1
-  m_ReflectionIntensity: 1
+  m_ReflectionIntensity: 0.7983703
   m_CustomReflection: {fileID: 0}
   m_Sun: {fileID: 0}
   m_UseRadianceAmbientProbe: 0
@@ -567,6 +567,7 @@ MonoBehaviour:
   - {fileID: 954388212}
   delayBeforeShow: 1.5
   fadeDuration: 0.5
+  initializeOnStart: 1
 --- !u!1 &159263503
 GameObject:
   m_ObjectHideFlags: 0
@@ -1168,6 +1169,7 @@ MonoBehaviour:
   - {fileID: 954388212}
   delayBeforeShow: 1.5
   fadeDuration: 0.5
+  initializeOnStart: 1
 --- !u!114 &345914933
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2218,6 +2220,7 @@ MonoBehaviour:
   - {fileID: 147351393}
   delayBeforeShow: 1.5
   fadeDuration: 0.5
+  initializeOnStart: 1
 --- !u!1 &712242636
 GameObject:
   m_ObjectHideFlags: 0
@@ -3120,6 +3123,7 @@ MonoBehaviour:
   - {fileID: 1946141159}
   delayBeforeShow: 1.5
   fadeDuration: 0.5
+  initializeOnStart: 1
 --- !u!114 &889672740
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3335,6 +3339,7 @@ MonoBehaviour:
   - {fileID: 345914934}
   delayBeforeShow: 1.5
   fadeDuration: 0.5
+  initializeOnStart: 1
 --- !u!114 &954388211
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3703,6 +3708,7 @@ MonoBehaviour:
   - {fileID: 954388212}
   delayBeforeShow: 1.5
   fadeDuration: 0.5
+  initializeOnStart: 1
 --- !u!114 &1106069686
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5348,6 +5354,7 @@ MonoBehaviour:
   - {fileID: 1106069687}
   delayBeforeShow: 1.5
   fadeDuration: 0.5
+  initializeOnStart: 1
 --- !u!114 &1673751218
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5903,6 +5910,46 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 20a8990c07bfd1a4fbcc42a65e3c67ec, type: 3}
+--- !u!21 &1823765956
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Runtime_DayNightSkybox
+  m_Shader: {fileID: 106, guid: 0000000000000000f000000000000000, type: 0}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords:
+  - _SUNDISK_HIGH_QUALITY
+  m_InvalidKeywords: []
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs: []
+    m_Ints: []
+    m_Floats:
+    - _AtmosphereThickness: 0.79811674
+    - _Exposure: 0.9971027
+    - _GodrayPower: 2.6
+    - _GodrayStrength: 0
+    - _SunDisk: 2
+    - _SunSize: 0.035
+    - _SunSizeConvergence: 5
+    - _SunSoftness: 0.0018
+    m_Colors:
+    - _GodrayTint: {r: 1, g: 0.82, b: 0.62, a: 1}
+    - _GroundColor: {r: 0.3002895, g: 0.31697708, b: 0.34797353, a: 1}
+    - _SkyTint: {r: 0.44976765, g: 0.48021322, b: 0.52714026, a: 1}
+    - _SunColor: {r: 1, g: 0.956, b: 0.84, a: 1}
+  m_BuildTextureStacks: []
 --- !u!1 &1839219632
 GameObject:
   m_ObjectHideFlags: 0
@@ -6652,6 +6699,7 @@ MonoBehaviour:
   - {fileID: 889672737}
   delayBeforeShow: 1.5
   fadeDuration: 0.5
+  initializeOnStart: 1
 --- !u!114 &1946141158
 MonoBehaviour:
   m_ObjectHideFlags: 0

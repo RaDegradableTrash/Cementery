@@ -210,12 +210,16 @@ public class WorldObject : MonoBehaviour
         {
             _rb.isKinematic = false;
             _rb.constraints = RigidbodyConstraints.None;
+            _rb.WakeUp();
         }
 
         // Non-pushable objects now preserve their own Rigidbody settings.
         // If gravity is enabled and the body was kinematic, release it so falling looks natural.
         if (_rb.useGravity && _rb.isKinematic)
+        {
             _rb.isKinematic = false;
+            _rb.WakeUp();
+        }
     }
 
     /// <summary>

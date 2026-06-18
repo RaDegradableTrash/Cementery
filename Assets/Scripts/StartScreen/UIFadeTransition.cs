@@ -19,6 +19,10 @@ public class ButtonListFadeTransition : MonoBehaviour
     [Tooltip("淡入淡出动画持续时间")]
     [SerializeField] private float fadeDuration = 0.5f;
 
+    [Header("开局是否强制初始化此按钮组的状态？")]
+    [Tooltip("如果是返回按钮，请取消勾选此项，否则开局主界面会被隐藏。系统会自动尝试识别带有 back 字样的按钮并跳过初始化。")]
+    [SerializeField] private bool initializeOnStart = true;
+
     private Button triggerButton;
     private bool isTransitioning = false;
 
@@ -34,10 +38,42 @@ public class ButtonListFadeTransition : MonoBehaviour
             triggerButton.onClick.AddListener(StartTransition);
         }
 
-        // 初始化隐藏组：动态补上 CanvasGroup，并全部隐形、禁用点按
-        InitButtonGroups(buttonsToHide, hideGroups, 1f, true);
-        // 初始化显示组：开局完全透明、无法点按
-        InitButtonGroups(buttonsToShow, showGroups, 0f, false);
+        // 自动检测是不是返回按钮，如果是，则强制取消开局初始化，避免互相覆盖
+        if (gameObject.name.ToLower().Contains("back"))
+        {
+            initializeOnStart = false;
+        }
+
+        if (initializeOnStart)
+        {
+            // 初始化隐藏组：动态补上 CanvasGroup，并全部隐形、禁用点按
+            InitButtonGroups(buttonsToHide, hideGroups, 1f, true);
+            // 初始化显示组：开局完全透明、无法点按
+            InitButtonGroups(buttonsToShow, showGroups, 0f, false);
+        }
+        else
+        {
+            // 对于返回按钮，我们只获取或添加 CanvasGroup 到字典里备用，但不强行修改它们的 alpha 状态
+            PopulateCanvasGroups(buttonsToHide, hideGroups);
+            PopulateCanvasGroups(buttonsToShow, showGroups);
+        }
+    }
+
+    private void PopulateCanvasGroups(List<Button> btnList, Dictionary<Button, CanvasGroup> dict)
+    {
+        foreach (var btn in btnList)
+        {
+            if (btn == null) continue;
+            CanvasGroup cg = btn.GetComponent<CanvasGroup>();
+            if (cg == null)
+            {
+                cg = btn.gameObject.AddComponent<CanvasGroup>();
+            }
+            if (!dict.ContainsKey(btn))
+            {
+                dict.Add(btn, cg);
+            }
+        }
     }
 
     private void InitButtonGroups(List<Button> btnList, Dictionary<Button, CanvasGroup> dict, float targetAlpha, bool interactable)
@@ -89,7 +125,7 @@ public class ButtonListFadeTransition : MonoBehaviour
         float counter = 0f;
         while (counter < fadeDuration)
         {
-            counter += Time.deltaTime;
+            counter += Time.unscaledDeltaTime;
             float alpha = Mathf.Lerp(1f, 0f, counter / fadeDuration);
             
             foreach (var cg in hideGroups.Values)
@@ -100,13 +136,13 @@ public class ButtonListFadeTransition : MonoBehaviour
         }
 
         // 2. 【延迟等待】
-        yield return new WaitForSeconds(delayBeforeShow);
+        yield return new WaitForSecondsRealtime(delayBeforeShow);
 
         // 3. 【淡入阶段】
         counter = 0f;
         while (counter < fadeDuration)
         {
-            counter += Time.deltaTime;
+            counter += Time.unscaledDeltaTime;
             float alpha = Mathf.Lerp(0f, 1f, counter / fadeDuration);
             
             foreach (var cg in showGroups.Values)

@@ -141,6 +141,10 @@ namespace EnvironmentSystem
                 if (ShouldSkipRoot(root)) continue;
                 foreach (Rigidbody rb in root.GetComponentsInChildren<Rigidbody>(true))
                 {
+                    // Freeze EVERYTHING unconditionally on frame 1.
+                    // This prevents items from falling through the floor while the terrain 
+                    // mesh is being generated asynchronously. 
+                    // The DesertTerrainChunk will wake up dynamic props when its mesh is ready.
                     rb.isKinematic = true;
                     rb.useGravity  = false;
                     rb.velocity        = Vector3.zero;
@@ -469,8 +473,14 @@ namespace EnvironmentSystem
             Rigidbody rb = root.GetComponent<Rigidbody>();
             if (rb != null && root.GetComponent<KinematicProp>() == null)
             {
-                KinematicProp kp = root.AddComponent<KinematicProp>();
-                kp.Sleep(); // Enforce kinematic immediately.
+                WorldObject wo = root.GetComponent<WorldObject>();
+                // Only attach KinematicProp to static environment props (like Cacti)
+                // Carryable/collectable items (like Fuel Cans) should be fully dynamic.
+                if (wo == null || (!wo.carryable && !wo.collectable))
+                {
+                    KinematicProp kp = root.AddComponent<KinematicProp>();
+                    kp.Sleep(); // Enforce kinematic immediately.
+                }
             }
 
             Register(opt);

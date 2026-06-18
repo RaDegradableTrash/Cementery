@@ -154,15 +154,25 @@ namespace EnvironmentSystem
                 range = Mathf.Max(1, loadingRange - 1);
             }
 
+            // Create a list of offsets and sort by distance to center to load center first
+            List<Vector2Int> offsets = new List<Vector2Int>();
             for (int dx = -range; dx <= range; dx++)
             {
                 for (int dz = -range; dz <= range; dz++)
                 {
-                    int gx = centerGridX + dx;
-                    int gz = centerGridZ + dz;
-                    string sceneName = $"{sceneNamePrefix}_{gx}_{gz}";
-                    requiredList.Add(sceneName);
+                    offsets.Add(new Vector2Int(dx, dz));
                 }
+            }
+
+            // Sort by Euclidean distance squared (closest to center first)
+            offsets.Sort((a, b) => (a.x * a.x + a.y * a.y).CompareTo(b.x * b.x + b.y * b.y));
+
+            foreach (var offset in offsets)
+            {
+                int gx = centerGridX + offset.x;
+                int gz = centerGridZ + offset.y;
+                string sceneName = $"{sceneNamePrefix}_{gx}_{gz}";
+                requiredList.Add(sceneName);
             }
 
             int gridSizeDim = range * 2 + 1;

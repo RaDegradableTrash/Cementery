@@ -14,6 +14,11 @@ public class Fuel : MonoBehaviour
         {
             _rb = gameObject.AddComponent<Rigidbody>();
         }
+        
+        // 强制开启重力并关闭运动学，防止原预制体关闭了重力导致漂浮
+        _rb.useGravity = true;
+        _rb.isKinematic = false;
+        _rb.collisionDetectionMode = CollisionDetectionMode.Continuous;
 
         _worldObject = GetComponent<WorldObject>();
         if (_worldObject == null)

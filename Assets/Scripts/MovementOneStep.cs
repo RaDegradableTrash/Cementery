@@ -26,6 +26,8 @@ public class Furniture_SlideDoor : MonoBehaviour
     private bool isAtRight;        // 当前是否在右侧
     private bool isMoving = false; // 是否正在移动中
 
+    public bool IsOpen => startsAtRight ? !isAtRight : isAtRight;
+
     void Awake()
     {
         if (openPositionMarker != null)

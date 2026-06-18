@@ -24,6 +24,13 @@ public class StartButton : MonoBehaviour
             myButton.onClick.AddListener(OnButtonClick);
         }
 
+        // 强制确保开始按钮开局可见，修复被意外隐藏的问题
+        CanvasGroup cg = GetComponent<CanvasGroup>();
+        if (cg == null) cg = gameObject.AddComponent<CanvasGroup>();
+        cg.alpha = 1f;
+        cg.blocksRaycasts = true;
+        cg.interactable = true;
+
         // 动态创建纯黑遮罩
         CreateDynamicMask();
     }
@@ -50,7 +57,7 @@ public class StartButton : MonoBehaviour
         float counter = 0f;
         while (counter < fadeOutDuration)
         {
-            counter += Time.deltaTime;
+            counter += Time.unscaledDeltaTime;
             float t = counter / fadeOutDuration; 
             float alpha = Mathf.SmoothStep(0f, 1f, t); // 平滑渐黑
             

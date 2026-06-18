@@ -1615,6 +1615,32 @@ namespace EnvironmentSystem
             snowMesh.UploadMeshData(false);
 
             UpdateSnowLayer(snowMesh);
+
+            WakeUpDynamicProps();
+        }
+
+        private void WakeUpDynamicProps()
+        {
+            if (gameObject.scene.isLoaded)
+            {
+                foreach (GameObject root in gameObject.scene.GetRootGameObjects())
+                {
+                    if (root == this.gameObject) continue;
+                    foreach (Rigidbody rb in root.GetComponentsInChildren<Rigidbody>(true))
+                    {
+                        WorldObject wo = rb.GetComponent<WorldObject>();
+                        // Unfreeze items that are meant to be dynamic (e.g., Fuel Cans)
+                        // now that the terrain mesh is officially solid.
+                        // Cacti (environment props) will remain frozen.
+                        if (wo != null && (wo.carryable || wo.collectable))
+                        {
+                            rb.isKinematic = false;
+                            rb.useGravity = true;
+                            rb.WakeUp();
+                        }
+                    }
+                }
+            }
         }
 
         // ── Snow Layer Management (Restored for 2D Base) ──────────────────────────

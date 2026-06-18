@@ -12,6 +12,7 @@ public class CyberpunkUIGlitch : MonoBehaviour
     private TextMeshProUGUI _tmp;
     private Vector2 _originalPos;
     private Color _originalColor;
+    private float _originalAlpha;
     
     private float _timer;
     private int _burstFramesRemaining;
@@ -19,8 +20,7 @@ public class CyberpunkUIGlitch : MonoBehaviour
     private void Awake()
     {
         _rt = GetComponent<RectTransform>();
-        if (_rt != null)
-            _originalPos = _rt.anchoredPosition;
+
 
         _cg = GetComponent<CanvasGroup>();
         _tmp = GetComponent<TextMeshProUGUI>();
@@ -33,15 +33,16 @@ public class CyberpunkUIGlitch : MonoBehaviour
 
     private void OnEnable()
     {
-        if (_rt != null) _rt.anchoredPosition = _originalPos;
-        if (_cg != null) _cg.alpha = 1f;
+        if (_cg != null) 
+        {
+            _cg.alpha = 1f;
+            _originalAlpha = 1f;
+        }
         if (_tmp != null) _tmp.color = _originalColor;
     }
 
     private void OnDisable()
     {
-        if (_rt != null) _rt.anchoredPosition = _originalPos;
-        if (_cg != null) _cg.alpha = 1f;
         if (_tmp != null) _tmp.color = _originalColor;
     }
 
@@ -62,9 +63,15 @@ public class CyberpunkUIGlitch : MonoBehaviour
         _timer -= Time.unscaledDeltaTime;
         if (_timer <= 0f)
         {
+            if (_cg == null) _cg = GetComponent<CanvasGroup>();
+            
             // Start a glitch burst
             _burstFramesRemaining = Random.Range(2, 6);
             _timer = baseInterval * Random.Range(0.2f, 1.5f);
+            
+            // Save state just before glitching
+            if (_rt != null) _originalPos = _rt.anchoredPosition;
+            if (_cg != null) _originalAlpha = _cg.alpha;
         }
     }
 
@@ -77,13 +84,11 @@ public class CyberpunkUIGlitch : MonoBehaviour
             _rt.anchoredPosition = _originalPos + new Vector2(offsetX, offsetY);
         }
 
-        if (_cg != null)
+        if (_cg != null && _cg.alpha > 0f)
         {
-            // Occasionally drop alpha drastically
+            // Occasionally drop alpha drastically, but only if it's currently visible
             if (Random.value < 0.3f)
                 _cg.alpha = Random.Range(0.1f, 0.5f);
-            else
-                _cg.alpha = 1f;
         }
 
         if (_tmp != null)
@@ -103,7 +108,7 @@ public class CyberpunkUIGlitch : MonoBehaviour
     private void ResetGlitch()
     {
         if (_rt != null) _rt.anchoredPosition = _originalPos;
-        if (_cg != null) _cg.alpha = 1f;
+        if (_cg != null) _cg.alpha = _originalAlpha;
         if (_tmp != null) _tmp.color = _originalColor;
     }
 }

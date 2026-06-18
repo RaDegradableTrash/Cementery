@@ -21,6 +21,7 @@ public class ForceShowUI : MonoBehaviour
         else
         {
             Debug.LogWarning($"[{gameObject.name}] 已经尝试强制显示 {counter} 次了，停止继续尝试了。");
+            this.enabled = false;
         }
     }
 

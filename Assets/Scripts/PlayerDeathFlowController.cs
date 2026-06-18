@@ -1124,16 +1124,6 @@ public class PlayerDeathFlowController : MonoBehaviour
             if (_reviveButton == null)
                 _reviveButton = FindButtonByAnyName(canvas.transform, "Button");
 
-            // Absolute Bulletproof Fallback: if we still haven't found the button, grab the first button in this Canvas!
-            if (_reviveButton == null)
-            {
-                Button[] buttons = canvas.GetComponentsInChildren<Button>(true);
-                if (buttons.Length > 0)
-                {
-                    _reviveButton = buttons[0];
-                    Debug.Log($"[PlayerDeathFlow] Fallback triggered: bound the first button '{_reviveButton.name}' found on Canvas '{canvas.name}'.");
-                }
-            }
             
             // If we found the revive button, this is the correct canvas!
             if (_reviveButton != null)

@@ -62,6 +62,10 @@ public class CockpitCam : MonoBehaviour
 	private Vector3 originalCameraLocalPos;
 	private Quaternion originalCameraLocalRot;
 
+	private Vector3 originalBoardingLocalPos;
+	private Quaternion originalBoardingLocalRot;
+	private bool isExiting = false;
+
 	private void Awake()
 	{
 		if (cockpitCamera == null)
@@ -112,9 +116,27 @@ public class CockpitCam : MonoBehaviour
 			}
 		}
 
-		if (isDriving && Input.GetKeyDown(KeyCode.BackQuote))
+		if (isDriving && !isExiting && Input.GetKeyDown(KeyCode.BackQuote))
 		{
-			ExitDrivingMode();
+			bool doorIsOpen = false;
+			Furniture_SlideDoor[] allDoors = GetComponentsInParent<Furniture_SlideDoor>();
+			if (allDoors.Length == 0 && transform.parent != null)
+			{
+				allDoors = transform.root.GetComponentsInChildren<Furniture_SlideDoor>();
+			}
+			foreach (var d in allDoors)
+			{
+				if (d.IsOpen)
+				{
+					doorIsOpen = true;
+					break;
+				}
+			}
+
+			if (doorIsOpen)
+			{
+				StartCoroutine(SmoothExitCockpitSequence());
+			}
 		}
 
 		if (isLooking)
@@ -408,9 +430,12 @@ public class CockpitCam : MonoBehaviour
 
 	private void OnPlayerInteract(GameObject actor)
 	{
-		if (isDriving || actor == null) return;
+		if (isDriving || actor == null || isExiting) return;
 
 		activePlayer = actor;
+
+		originalBoardingLocalPos = transform.InverseTransformPoint(actor.transform.position);
+		originalBoardingLocalRot = Quaternion.Inverse(transform.rotation) * actor.transform.rotation;
 
 		// 1. Strictly find the Camera component inside the Player GameObject!
 		Camera mainCam = activePlayer.GetComponentInChildren<Camera>(true);
@@ -491,9 +516,8 @@ public class CockpitCam : MonoBehaviour
 		// 2. Reactivate player and set their position to the vehicle's current position
 		if (activePlayer != null)
 		{
-			activePlayer.transform.rotation = transform.rotation;
-			// Move player slightly back to step out of the driver's seat into the RV living cabin space!
-			activePlayer.transform.position = transform.position - transform.forward * 1.0f + transform.up * 0.1f;
+			activePlayer.transform.rotation = transform.rotation * originalBoardingLocalRot;
+			activePlayer.transform.position = transform.TransformPoint(originalBoardingLocalPos);
 			activePlayer.SetActive(true);
 		}
 
@@ -627,5 +651,45 @@ public class CockpitCam : MonoBehaviour
 		cam.transform.localPosition = Vector3.zero;
 		// Initialize the camera's local rotation to exactly match the target 180-degree yaw
 		cam.transform.localRotation = Quaternion.identity;
+	}
+
+	private System.Collections.IEnumerator SmoothExitCockpitSequence()
+	{
+		isExiting = true;
+
+		// Disable vehicle control early so we don't accidentally drive while exiting
+		if (carControl != null)
+		{
+			carControl.ActiveControl = false;
+		}
+
+		Vector3 targetPlayerWorldPos = transform.TransformPoint(originalBoardingLocalPos);
+		Quaternion targetPlayerWorldRot = transform.rotation * originalBoardingLocalRot;
+
+		// We assume the camera was located at originalCameraLocalPos relative to the player
+		Vector3 targetCamWorldPos = targetPlayerWorldPos + (targetPlayerWorldRot * originalCameraLocalPos);
+		Quaternion targetCamWorldRot = targetPlayerWorldRot * originalCameraLocalRot;
+
+		float duration = 0.5f;
+		float elapsed = 0f;
+
+		Vector3 startPos = cockpitCamera.transform.position;
+		Quaternion startRot = cockpitCamera.transform.rotation;
+
+		// Temporarily unparent camera so it doesn't move weirdly with rotationRoot
+		cockpitCamera.transform.SetParent(null);
+
+		while (elapsed < duration)
+		{
+			elapsed += Time.deltaTime;
+			float t = Mathf.SmoothStep(0f, 1f, elapsed / duration);
+			
+			cockpitCamera.transform.position = Vector3.Lerp(startPos, targetCamWorldPos, t);
+			cockpitCamera.transform.rotation = Quaternion.Slerp(startRot, targetCamWorldRot, t);
+			yield return null;
+		}
+
+		isExiting = false;
+		ExitDrivingMode();
 	}
 }
