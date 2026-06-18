@@ -370,7 +370,13 @@ public class PlayerDeathFlowController : MonoBehaviour
             Debug.Log("[PlayerDeathFlow] Spawning Proxy Drone...");
             if (proxyDronePrefab != null)
             {
-                _activeDrone = Instantiate(proxyDronePrefab, _spawnPos, _spawnRot);
+                Vector3 finalSpawnPos = _spawnPos;
+                var rv = FindObjectOfType<RVSystem.RVController>();
+                if (rv != null)
+                {
+                    finalSpawnPos = rv.transform.position + Vector3.up * 20f;
+                }
+                _activeDrone = Instantiate(proxyDronePrefab, finalSpawnPos, _spawnRot);
                 
                 // Disable mainCamera so the Drone's built-in camera takes over
                 if (mainCamera != null)
