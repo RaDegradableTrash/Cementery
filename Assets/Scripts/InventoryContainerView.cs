@@ -445,7 +445,7 @@ public class InventoryContainerView : MonoBehaviour
 
             GameObject prefabInstance = Instantiate(instance.item.previewPrefab, root.transform);
             prefabInstance.transform.localScale = instance.item.previewPrefab.transform.localScale;
-            prefabInstance.transform.localPosition = offset;
+            prefabInstance.transform.localPosition = offset + instance.item.previewPrefab.transform.localPosition;
             prefabInstance.transform.localRotation = instance.item.previewPrefab.transform.localRotation;
 
             visual = root;

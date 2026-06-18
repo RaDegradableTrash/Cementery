@@ -138,6 +138,13 @@ void Update()
     if (!IsPrimaryController())
         return;
 
+    if (PlayerDeathFlowController.IsPlayerDead)
+    {
+        if (inventoryActive)
+            CloseInventoryFromKey();
+        return;
+    }
+
     if (allowToggleInventoryKey && Input.GetKeyDown(toggleInventoryKey))
     {
         InteractionSystem interaction = GetInteractionSystem();
@@ -203,6 +210,8 @@ void Update()
     /// </summary>
     public void EnterInventoryMode(ItemData item, Color customColor = default)
     {
+        if (PlayerDeathFlowController.IsPlayerDead) return;
+
         InventoryCameraController primary = GetPrimaryController();
         if (primary != null && primary != this)
         {
