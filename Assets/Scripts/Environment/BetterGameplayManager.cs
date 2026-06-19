@@ -97,6 +97,8 @@ namespace EnvironmentSystem
 
         private void Start()
         {
+            var go = new GameObject("DebugPhysics");
+            go.AddComponent<DebugPhysicsState>();
             FindPlayerAndCamera();
 
             // Freeze ALL Rigidbodies in every already-loaded scene immediately (frame 0),
@@ -136,15 +138,17 @@ namespace EnvironmentSystem
         private void FreezeRigidbodiesInScene(Scene scene)
         {
             if (!scene.isLoaded) return;
+            
+            // ONLY freeze rigidbodies in dynamically loaded chunk scenes!
+            // Freezing rigidbodies in StartScreen or Persistent scenes will cause them to hover forever 
+            // since they lack a DesertTerrainChunk to wake them up.
+            if (!scene.name.Contains("Chunk")) return;
+
             foreach (GameObject root in scene.GetRootGameObjects())
             {
                 if (ShouldSkipRoot(root)) continue;
                 foreach (Rigidbody rb in root.GetComponentsInChildren<Rigidbody>(true))
                 {
-                    // Freeze EVERYTHING unconditionally on frame 1.
-                    // This prevents items from falling through the floor while the terrain 
-                    // mesh is being generated asynchronously. 
-                    // The DesertTerrainChunk will wake up dynamic props when its mesh is ready.
                     rb.isKinematic = true;
                     rb.useGravity  = false;
                     rb.velocity        = Vector3.zero;
@@ -467,16 +471,13 @@ namespace EnvironmentSystem
             opt.disableEntireGameObject = false;
             opt.useFrustumCulling = true;
 
-            // Auto-attach KinematicProp to any prop that has a Rigidbody.
-            // This covers props that were placed before KinematicProp existed
-            // and ensures they never roll freely from gravity on scene load.
+            // Auto-attach KinematicProp only to simple rigidbodies that lack a WorldObject.
+            // WorldObjects handle their own kinematic state via ApplyPushabilityState().
             Rigidbody rb = root.GetComponent<Rigidbody>();
             if (rb != null && root.GetComponent<KinematicProp>() == null)
             {
                 WorldObject wo = root.GetComponent<WorldObject>();
-                // Only attach KinematicProp to static environment props (like Cacti)
-                // Carryable/collectable items (like Fuel Cans) should be fully dynamic.
-                if (wo == null || (!wo.carryable && !wo.collectable))
+                if (wo == null)
                 {
                     KinematicProp kp = root.AddComponent<KinematicProp>();
                     kp.Sleep(); // Enforce kinematic immediately.

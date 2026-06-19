@@ -1604,18 +1604,31 @@ namespace EnvironmentSystem
                 col.sharedMesh = mesh;
             }
 
-            Mesh snowMesh = new Mesh { name = "SnowLayerMesh" };
-            if (result.snowMesh.vertices.Length > 65535)
-                snowMesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
-            snowMesh.vertices = result.snowMesh.vertices;
-            snowMesh.uv = result.snowMesh.uvs;
-            snowMesh.normals = result.snowMesh.normals;
-            snowMesh.triangles = result.snowMesh.triangles;
-            snowMesh.RecalculateBounds();
-            snowMesh.UploadMeshData(false);
+            // Build snow layer mesh if data is available
+            if (result.snowMesh.vertices != null && result.snowMesh.vertices.Length > 0)
+            {
+                Mesh snowMesh = new Mesh { name = "SnowLayerMesh" };
+                if (result.snowMesh.vertices.Length > 65535)
+                    snowMesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+                snowMesh.vertices = result.snowMesh.vertices;
+                snowMesh.uv = result.snowMesh.uvs;
+                snowMesh.normals = result.snowMesh.normals;
+                snowMesh.triangles = result.snowMesh.triangles;
+                snowMesh.RecalculateBounds();
+                snowMesh.UploadMeshData(false);
+                UpdateSnowLayer(snowMesh);
+            }
 
-            UpdateSnowLayer(snowMesh);
+            // Always wake up dynamic props after terrain mesh + collider are ready.
+            // Run after one physics frame so MeshCollider bake is complete.
+            StartCoroutine(WakeUpDynamicPropsDelayed());
+        }
 
+        private System.Collections.IEnumerator WakeUpDynamicPropsDelayed()
+        {
+            // Wait one fixed-update so the MeshCollider bake is complete before releasing physics.
+            yield return new WaitForFixedUpdate();
+            yield return new WaitForFixedUpdate();
             WakeUpDynamicProps();
         }
 
@@ -1625,19 +1638,25 @@ namespace EnvironmentSystem
             {
                 foreach (GameObject root in gameObject.scene.GetRootGameObjects())
                 {
-                    if (root == this.gameObject) continue;
+                    // Do not skip this.gameObject just in case props are parented to it
                     foreach (Rigidbody rb in root.GetComponentsInChildren<Rigidbody>(true))
                     {
+                        // Leave Cacti alone
+                        if (rb.gameObject.name.Contains("Cactus")) continue;
+
                         WorldObject wo = rb.GetComponent<WorldObject>();
-                        // Unfreeze items that are meant to be dynamic (e.g., Fuel Cans)
-                        // now that the terrain mesh is officially solid.
-                        // Cacti (environment props) will remain frozen.
-                        if (wo != null && (wo.carryable || wo.collectable))
-                        {
-                            rb.isKinematic = false;
-                            rb.useGravity = true;
-                            rb.WakeUp();
-                        }
+                        
+                        // If it has WorldObject and it explicitly cannot be pushed, leave it frozen
+                        if (wo != null && !wo.canBePushed && !wo.carryable && !wo.collectable) continue;
+
+                        // Unfreeze!
+                        rb.isKinematic = false;
+                        rb.useGravity = true;
+                        rb.WakeUp();
+
+                        // If BetterGameplayManager wrongly added KinematicProp, nuke it
+                        var kp = rb.GetComponent<KinematicProp>();
+                        if (kp != null) Destroy(kp);
                     }
                 }
             }

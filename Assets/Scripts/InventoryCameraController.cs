@@ -166,6 +166,19 @@ void Update()
                 
                 if (carriedItem != null)
                 {
+                    GameObject objToDestroy = null;
+                    if (interaction.CarriedWorldObject != null)
+                    {
+                        objToDestroy = interaction.CarriedWorldObject.gameObject;
+                    }
+
+                    interaction.ConsumeCarriedObjectSilently();
+
+                    if (objToDestroy != null)
+                    {
+                        Destroy(objToDestroy);
+                    }
+
                     EnterInventoryMode(carriedItem);
                     return;
                 }
