@@ -102,6 +102,8 @@ public class FuelTank : MonoBehaviour
     private int _lastFuelTextPercent = int.MinValue;
     private int _lastDashboardPercent = int.MinValue;
     private float _lastDashboardColorRatio = -1f;
+    private float _cachedFuelColorRatio = -1f;
+    private Color _cachedFuelColor;
     private Color[] _displayRendererBaseColors;
     private bool[] _displayRendererHasColor;
     private bool[] _displayRendererHasBaseColor;
@@ -467,10 +469,7 @@ public class FuelTank : MonoBehaviour
 
         if (fuelBarFillRenderer != null)
         {
-            Color targetColor = fullFuelColor;
-            if (_currentRatio < 0.3f) targetColor = Color.Lerp(lowFuelColor, mediumFuelColor, _currentRatio / 0.3f);
-            else targetColor = Color.Lerp(mediumFuelColor, fullFuelColor, (_currentRatio - 0.3f) / 0.7f);
-
+            Color targetColor = GetFuelColorForCurrentRatio();
             Color holoFillColor = targetColor;
             holoFillColor.a = 0.6f * alpha;
 
@@ -483,10 +482,7 @@ public class FuelTank : MonoBehaviour
 
         if (fuelText != null)
         {
-            Color targetColor = fullFuelColor;
-            if (_currentRatio < 0.3f) targetColor = Color.Lerp(lowFuelColor, mediumFuelColor, _currentRatio / 0.3f);
-            else targetColor = Color.Lerp(mediumFuelColor, fullFuelColor, (_currentRatio - 0.3f) / 0.7f);
-
+            Color targetColor = GetFuelColorForCurrentRatio();
             int percent = Mathf.RoundToInt(_currentRatio * 100f);
             if (percent != _lastFuelTextPercent)
             {
@@ -512,9 +508,7 @@ public class FuelTank : MonoBehaviour
 
         string displayText = $"{percent}%";
 
-        Color targetColor = fullFuelColor;
-        if (_currentRatio < 0.3f) targetColor = Color.Lerp(lowFuelColor, mediumFuelColor, _currentRatio / 0.3f);
-        else targetColor = Color.Lerp(mediumFuelColor, fullFuelColor, (_currentRatio - 0.3f) / 0.7f);
+        Color targetColor = GetFuelColorForCurrentRatio();
 
         _lastDashboardPercent = percent;
         _lastDashboardColorRatio = _currentRatio;
@@ -532,6 +526,19 @@ public class FuelTank : MonoBehaviour
             carDashboardFuelText3D.text = displayText;
             carDashboardFuelText3D.color = targetColor;
         }
+    }
+
+    private Color GetFuelColorForCurrentRatio()
+    {
+        if (!Mathf.Approximately(_cachedFuelColorRatio, _currentRatio))
+        {
+            _cachedFuelColorRatio = _currentRatio;
+            _cachedFuelColor = _currentRatio < 0.3f
+                ? Color.Lerp(lowFuelColor, mediumFuelColor, _currentRatio / 0.3f)
+                : Color.Lerp(mediumFuelColor, fullFuelColor, (_currentRatio - 0.3f) / 0.7f);
+        }
+
+        return _cachedFuelColor;
     }
     // ────────────────────────────────────────────────────────────────────────
 
