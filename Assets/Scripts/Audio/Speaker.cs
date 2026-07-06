@@ -59,7 +59,7 @@ public class Speaker : MonoBehaviour
     private int _currentTrackIndex = -1;
     private bool _isPlaying = false;
     private Coroutine _fadeCoroutine;
-    private float _nextTrackEndCheckTime;
+    private Coroutine _trackEndCoroutine;
     private string _lastDisplayString;
     
     // 属性
@@ -72,6 +72,11 @@ public class Speaker : MonoBehaviour
     {
         _audioSource = GetComponent<AudioSource>();
         _worldObject = GetComponent<WorldObject>();
+        if (_worldObject != null)
+        {
+            _worldObject.onInteract.AddListener(OnInteractWithRadio);
+        }
+
         SetupAudioSource();
     }
     
@@ -90,16 +95,7 @@ public class Speaker : MonoBehaviour
         }
     }
     
-    void OnEnable()
-    {
-        // 监听 WorldObject 的交互事件（F键）
-        if (_worldObject != null)
-        {
-            _worldObject.onInteract.AddListener(OnInteractWithRadio);
-        }
-    }
-    
-    void OnDisable()
+    void OnDestroy()
     {
         if (_worldObject != null)
         {
@@ -107,21 +103,18 @@ public class Speaker : MonoBehaviour
         }
     }
     
-    void Update()
+    private System.Collections.IEnumerator TrackEndWatcher()
     {
-        if (!_isPlaying || musicPlaylist.Count == 0 || _audioSource == null)
-            return;
-
-        float now = Time.unscaledTime;
-        if (now < _nextTrackEndCheckTime)
-            return;
-
-        _nextTrackEndCheckTime = now + 0.2f;
-
-        // 自动播放下一首（当前歌曲播放完毕时）
-        if (!_audioSource.isPlaying)
+        while (_isPlaying && musicPlaylist.Count > 0 && _audioSource != null)
         {
-            NextTrack();
+            yield return new WaitForSecondsRealtime(0.2f);
+
+            // 自动播放下一首（当前歌曲播放完毕时）
+            if (_isPlaying && !_audioSource.isPlaying)
+            {
+                NextTrack();
+                yield break;
+            }
         }
     }
     
@@ -219,7 +212,7 @@ public class Speaker : MonoBehaviour
             _audioSource.volume = masterVolume;
             _audioSource.Play();
             _isPlaying = true;
-            _nextTrackEndCheckTime = Time.unscaledTime + 0.2f;
+            StartTrackEndWatcher();
             _fadeCoroutine = StartCoroutine(FadeIn());
         }
         
@@ -273,6 +266,7 @@ public class Speaker : MonoBehaviour
         {
             _audioSource.Pause();
             _isPlaying = false;
+            StopTrackEndWatcher();
             UpdateDisplay();
         }
     }
@@ -284,7 +278,7 @@ public class Speaker : MonoBehaviour
         {
             _audioSource.UnPause();
             _isPlaying = true;
-            _nextTrackEndCheckTime = Time.unscaledTime + 0.2f;
+            StartTrackEndWatcher();
             UpdateDisplay();
         }
     }
@@ -294,6 +288,7 @@ public class Speaker : MonoBehaviour
     {
         _audioSource.Stop();
         _isPlaying = false;
+        StopTrackEndWatcher();
         UpdateDisplay();
     }
     
@@ -368,7 +363,7 @@ public void SetVolume(float volume)
         _audioSource.volume = 0f;
         _audioSource.Play();
         _isPlaying = true;
-        _nextTrackEndCheckTime = Time.unscaledTime + 0.2f;
+        StartTrackEndWatcher();
         
         elapsed = 0f;
         while (elapsed < fadeTime)
@@ -381,6 +376,23 @@ public void SetVolume(float volume)
         _audioSource.volume = masterVolume;
         _fadeCoroutine = null;
         UpdateDisplay();
+    }
+
+    private void StartTrackEndWatcher()
+    {
+        if (_trackEndCoroutine != null)
+            StopCoroutine(_trackEndCoroutine);
+
+        _trackEndCoroutine = StartCoroutine(TrackEndWatcher());
+    }
+
+    private void StopTrackEndWatcher()
+    {
+        if (_trackEndCoroutine == null)
+            return;
+
+        StopCoroutine(_trackEndCoroutine);
+        _trackEndCoroutine = null;
     }
     
     private System.Collections.IEnumerator FadeIn()
