@@ -56,6 +56,8 @@ public class HeartbeatSystem : MonoBehaviour
     private bool animatorConfigured;
     private float nextAnimatorResolveTime;
     private float lastAnimatorSpeed = -1f;
+    private float nextClipLoopingRefreshTime;
+    private bool cachedCurrentClipIsLooping;
     private readonly List<AnimatorClipInfo> clipInfoBuffer = new List<AnimatorClipInfo>(1);
 
     private void Awake()
@@ -117,7 +119,7 @@ public class HeartbeatSystem : MonoBehaviour
         }
 
         AnimatorStateInfo info = animator.GetCurrentAnimatorStateInfo(0);
-        currentClipIsLooping = IsCurrentClipLooping();
+        currentClipIsLooping = IsCurrentClipLoopingCached();
 
         // If clip itself is not looped, force replay near the end.
         if (!currentClipIsLooping && info.normalizedTime >= 0.98f)
@@ -223,6 +225,7 @@ public class HeartbeatSystem : MonoBehaviour
         {
             animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
             animatorConfigured = true;
+            nextClipLoopingRefreshTime = 0f;
         }
 
         animatorLinked = animator != null;
@@ -245,10 +248,12 @@ public class HeartbeatSystem : MonoBehaviour
         if (animator.HasState(0, fullHash))
         {
             animator.Play(fullHash, 0, Mathf.Clamp01(normalizedTime));
+            nextClipLoopingRefreshTime = 0f;
             return;
         }
 
         animator.Play(stateName, 0, Mathf.Clamp01(normalizedTime));
+        nextClipLoopingRefreshTime = 0f;
     }
 
     private string ResolveStateName()
@@ -276,6 +281,18 @@ public class HeartbeatSystem : MonoBehaviour
         int shortHash = Animator.StringToHash(stateName);
         int fullHash = Animator.StringToHash("Base Layer." + stateName);
         return animator.HasState(0, shortHash) || animator.HasState(0, fullHash);
+    }
+
+    private bool IsCurrentClipLoopingCached()
+    {
+        if (Time.unscaledTime < nextClipLoopingRefreshTime)
+        {
+            return cachedCurrentClipIsLooping;
+        }
+
+        nextClipLoopingRefreshTime = Time.unscaledTime + 0.25f;
+        cachedCurrentClipIsLooping = IsCurrentClipLooping();
+        return cachedCurrentClipIsLooping;
     }
 
     private bool IsCurrentClipLooping()
