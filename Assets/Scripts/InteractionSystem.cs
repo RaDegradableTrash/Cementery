@@ -88,6 +88,7 @@ public class InteractionSystem : MonoBehaviour
     private PhysicMaterial[] _carriedOriginalMaterials;
     private PhysicMaterial _carryNoFrictionMaterial;
     private CapsuleCollider _playerCol;
+    private Rigidbody _playerRb;
 
     private bool _rbWasKinematic;
     private bool _rbHadGravity;
@@ -188,6 +189,7 @@ public class InteractionSystem : MonoBehaviour
         _carryNoFrictionMaterial.hideFlags = HideFlags.HideAndDontSave;
 
         _playerCol = GetComponent<CapsuleCollider>();
+        _playerRb = GetComponent<Rigidbody>();
         ResolveAttractAimPointIfNeeded();
         InitializePlacementMaterials();
         AutoBindUI();
@@ -369,7 +371,7 @@ public class InteractionSystem : MonoBehaviour
                     sep.Normalize();
 
                     // Apply gentle continuous push to player (acceleration = mass-independent)
-                    Rigidbody playerRb = _playerCol.attachedRigidbody;
+                    Rigidbody playerRb = _playerRb != null ? _playerRb : _playerCol.attachedRigidbody;
                     if (playerRb != null)
                         playerRb.AddForce(sep * 25f, ForceMode.Acceleration);
                 }
@@ -1804,11 +1806,11 @@ public class InteractionSystem : MonoBehaviour
 
     Vector3 GetPlayerVelocity()
     {
-        if (_playerCol != null)
-            return _playerCol.GetComponent<Rigidbody>().velocity;
+        if (_playerRb != null)
+            return _playerRb.velocity;
 
-        Rigidbody rb = GetComponent<Rigidbody>();
-        return rb != null ? rb.velocity : Vector3.zero;
+        _playerRb = GetComponent<Rigidbody>();
+        return _playerRb != null ? _playerRb.velocity : Vector3.zero;
     }
 
     void UpdatePrompt()
