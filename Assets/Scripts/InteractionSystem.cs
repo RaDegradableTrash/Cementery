@@ -334,18 +334,22 @@ public class InteractionSystem : MonoBehaviour
         {
             Transform playerT = _playerCol != null ? _playerCol.transform : transform;
             Vector3 pPos = playerT.position; pPos.y = 0;
-            Vector3 aPos = _carriedRb.transform.TransformPoint(_dragAnchorLocal); aPos.y = 0;
+            Vector3 anchorWorld = _carriedRb.transform.TransformPoint(_dragAnchorLocal);
+            Vector3 aPos = anchorWorld; aPos.y = 0;
             
-            float currentDist = Vector3.Distance(pPos, aPos);
-            if (currentDist > _carryRayDistance)
+            Vector3 pullDelta = pPos - aPos;
+            float currentDistSqr = pullDelta.sqrMagnitude;
+            float carryRayDistanceSqr = _carryRayDistance * _carryRayDistance;
+            if (currentDistSqr > carryRayDistanceSqr)
             {
-                Vector3 pullForceDir = (pPos - aPos).normalized;
+                float currentDist = Mathf.Sqrt(currentDistSqr);
+                Vector3 pullForceDir = pullDelta / currentDist;
                 float stretch = currentDist - _carryRayDistance;
                 
                 // Soft spring: low constant + clamped max force for gentle, PEAK-like interaction
                 float springForce = Mathf.Min(stretch * 15f, 20f);
                 Vector3 force = pullForceDir * springForce;
-                _carriedRb.AddForceAtPosition(force, _carriedRb.transform.TransformPoint(_dragAnchorLocal), ForceMode.Acceleration);
+                _carriedRb.AddForceAtPosition(force, anchorWorld, ForceMode.Acceleration);
             }
             
             // Strong damping to prevent bouncing and launching
@@ -353,10 +357,12 @@ public class InteractionSystem : MonoBehaviour
             vel.x *= 0.85f;
             vel.z *= 0.85f;
             // Clamp max horizontal speed to prevent objects/player flying off
-            float hSpeed = new Vector2(vel.x, vel.z).magnitude;
-            if (hSpeed > 3f)
+            const float maxHorizontalSpeed = 3f;
+            const float maxHorizontalSpeedSqr = maxHorizontalSpeed * maxHorizontalSpeed;
+            float hSpeedSqr = vel.x * vel.x + vel.z * vel.z;
+            if (hSpeedSqr > maxHorizontalSpeedSqr)
             {
-                float scale = 3f / hSpeed;
+                float scale = maxHorizontalSpeed / Mathf.Sqrt(hSpeedSqr);
                 vel.x *= scale;
                 vel.z *= scale;
             }
