@@ -30,6 +30,7 @@ namespace RVSystem
         private void Awake()
         {
             CacheTransitionReferences();
+            enabled = currentState == RVState.Active;
         }
 
         void Update()
@@ -67,6 +68,7 @@ namespace RVSystem
         public void SetState(RVState newState)
         {
             currentState = newState;
+            enabled = newState == RVState.Active;
             CacheTransitionReferences();
 
             if (newState == RVState.Parked)
