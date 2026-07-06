@@ -35,6 +35,8 @@ public class InventoryContainerView : MonoBehaviour
     private int _cachedWidth = -1;
     private int _cachedDepth = -1;
     private float _cachedInset = -1f;
+    private bool _gridLineVisibilityInitialized;
+    private bool _gridLinesVisible;
 
     private Transform _placedItemsRoot;
     private Dictionary<ItemInstance, GameObject> _placedVisuals = new Dictionary<ItemInstance, GameObject>();
@@ -68,7 +70,8 @@ public class InventoryContainerView : MonoBehaviour
 
     void Update()
     {
-        if (!IsInventoryActive())
+        bool inventoryActive = IsInventoryActive();
+        if (!inventoryActive)
             return;
 
         // 滚轮切换层级
@@ -83,7 +86,7 @@ public class InventoryContainerView : MonoBehaviour
             }
         }
 
-        SetGridLineVisible(showGridLines && IsInventoryActive());
+        SetGridLineVisible(showGridLines && inventoryActive);
     }
 
     void UpdateGridPlane()
@@ -337,12 +340,18 @@ public class InventoryContainerView : MonoBehaviour
 
     void SetGridLineVisible(bool visible)
     {
+        if (_gridLineVisibilityInitialized && _gridLinesVisible == visible)
+            return;
+
         for (int i = 0; i < _gridLines.Count; i++)
         {
             LineRenderer lr = _gridLines[i];
             if (lr != null)
                 lr.enabled = visible;
         }
+
+        _gridLinesVisible = visible;
+        _gridLineVisibilityInitialized = true;
     }
 
     void ClearGridLines()
@@ -360,6 +369,7 @@ public class InventoryContainerView : MonoBehaviour
         }
 
         _gridLines.Clear();
+        _gridLineVisibilityInitialized = false;
     }
 
     void OnDestroy()
