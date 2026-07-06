@@ -50,6 +50,9 @@ namespace EnvironmentSystem
         [Tooltip("Minimum seconds between expensive full visibility sweeps triggered by sharp camera turns.")]
         public float fullSweepCooldown = 0.35f;
 
+        [Tooltip("Maximum objects processed per frame during a camera-turn visibility sweep.")]
+        public int fullSweepObjectsPerFrame = 750;
+
         [Tooltip("Delay (frames) after a scene loads before scanning it, to let Awake/Start settle.")]
         public int scanDelayFrames = 3;
 
@@ -70,6 +73,7 @@ namespace EnvironmentSystem
 
         private Quaternion _lastCamRot;
         private float _nextFullSweepTime;
+        private Coroutine _fullSweepRoutine;
 
         // Name of the scene this BetterGameplayManager lives in — objects here are NEVER managed.
         private string _ownSceneName;
@@ -97,6 +101,11 @@ namespace EnvironmentSystem
         {
             SceneManager.sceneLoaded   -= OnSceneLoaded;
             SceneManager.sceneUnloaded -= OnSceneUnloaded;
+            if (_fullSweepRoutine != null)
+            {
+                StopCoroutine(_fullSweepRoutine);
+                _fullSweepRoutine = null;
+            }
         }
 
         private void Start()
@@ -179,7 +188,7 @@ namespace EnvironmentSystem
                 {
                     _lastCamRot = _mainCamera.transform.rotation;
                     _nextFullSweepTime = Time.time + Mathf.Max(0.05f, fullSweepCooldown);
-                    DoFullVisibilitySweep();
+                    StartBudgetedFullVisibilitySweep();
                     return;
                 }
                 _lastCamRot = _mainCamera.transform.rotation;
@@ -196,31 +205,49 @@ namespace EnvironmentSystem
 
         // ── Visibility passes ──────────────────────────────────────────────────
 
-        /// <summary>
-        /// Full sweep of every managed object. Called when the camera rotates sharply.
-        /// </summary>
-        private void DoFullVisibilitySweep()
+        private void StartBudgetedFullVisibilitySweep()
         {
-            if (_managedObjects.Count == 0) return;
+            if (_fullSweepRoutine != null)
+                return;
 
-            Vector3 playerPos     = PlayerPos();
-            float   showDistSq    = defaultVisibilityRadius * defaultVisibilityRadius;
-            float   hideDistSq    = (defaultVisibilityRadius + hysteresis) * (defaultVisibilityRadius + hysteresis);
-            float   neverCullSq   = neverFrustumCullRadius * neverFrustumCullRadius;
+            _fullSweepRoutine = StartCoroutine(BudgetedFullVisibilitySweep());
+        }
 
+        private IEnumerator BudgetedFullVisibilitySweep()
+        {
             _hiddenNearby.Clear();
 
-            for (int i = _managedObjects.Count - 1; i >= 0; i--)
+            int budget = Mathf.Max(64, fullSweepObjectsPerFrame);
+            int index = 0;
+            while (index < _managedObjects.Count)
             {
-                OptimizableObject obj = _managedObjects[i];
-                if (obj == null || obj.isDestroyed) { _managedObjects.RemoveAt(i); continue; }
-                ProcessObject(obj, playerPos, showDistSq, hideDistSq, neverCullSq);
+                Vector3 playerPos = PlayerPos();
+                float showDistSq = defaultVisibilityRadius * defaultVisibilityRadius;
+                float hideDistSq = (defaultVisibilityRadius + hysteresis) * (defaultVisibilityRadius + hysteresis);
+                float neverCullSq = neverFrustumCullRadius * neverFrustumCullRadius;
+
+                int processed = 0;
+                while (index < _managedObjects.Count && processed < budget)
+                {
+                    OptimizableObject obj = _managedObjects[index];
+                    if (obj == null || obj.isDestroyed)
+                    {
+                        _managedObjects.RemoveAt(index);
+                        continue;
+                    }
+
+                    ProcessObject(obj, playerPos, showDistSq, hideDistSq, neverCullSq);
+                    index++;
+                    processed++;
+                }
+
+                if (index < _managedObjects.Count)
+                    yield return null;
             }
 
-            // Rebuild the hidden-nearby bucket after the full sweep.
-            RebuildHiddenNearbyBucket(playerPos, showDistSq);
-
-            _currentIndex = 0; // Reset incremental pointer after a full sweep.
+            RebuildHiddenNearbyBucket(PlayerPos(), defaultVisibilityRadius * defaultVisibilityRadius);
+            _currentIndex = 0;
+            _fullSweepRoutine = null;
         }
 
         /// <summary>
