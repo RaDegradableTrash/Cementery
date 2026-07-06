@@ -14,10 +14,14 @@ namespace RVSystem
         private bool _hasCameraPair;
         private bool _isInteriorActive;
         private bool _camerasEnabled;
+        private Camera _interiorCameraComponent;
+        private Camera _exteriorCameraComponent;
 
         private void Awake()
         {
             _hasCameraPair = interiorCamera != null && exteriorCamera != null;
+            _interiorCameraComponent = interiorCamera != null ? interiorCamera.GetComponent<Camera>() : null;
+            _exteriorCameraComponent = exteriorCamera != null ? exteriorCamera.GetComponent<Camera>() : null;
         }
 
         void Start()
@@ -79,8 +83,8 @@ namespace RVSystem
             this.enabled = enabled;
             if (!enabled)
             {
-                SetActiveIfChanged(interiorCamera, false);
-                SetActiveIfChanged(exteriorCamera, false);
+                SetActiveIfChanged(interiorCamera, false, _interiorCameraComponent);
+                SetActiveIfChanged(exteriorCamera, false, _exteriorCameraComponent);
                 return;
             }
 
@@ -96,18 +100,17 @@ namespace RVSystem
                 return;
 
             _isInteriorActive = active;
-            SetActiveIfChanged(interiorCamera, active);
-            SetActiveIfChanged(exteriorCamera, !active);
+            SetActiveIfChanged(interiorCamera, active, _interiorCameraComponent);
+            SetActiveIfChanged(exteriorCamera, !active, _exteriorCameraComponent);
         }
 
-        private static void SetActiveIfChanged(GameObject target, bool active)
+        private static void SetActiveIfChanged(GameObject target, bool active, Camera camera = null)
         {
             if (target != null && target.activeSelf != active)
                 target.SetActive(active);
 
             if (target != null && active)
             {
-                Camera camera = target.GetComponent<Camera>();
                 if (camera != null && !camera.enabled)
                     camera.enabled = true;
             }
