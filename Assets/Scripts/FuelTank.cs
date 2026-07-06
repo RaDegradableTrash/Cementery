@@ -97,6 +97,11 @@ public class FuelTank : MonoBehaviour
     private float _currentAlpha = 0f;
     private float _lookAwayTimer = 0f; // 1-second delay buffer when player looks away
     private MaterialPropertyBlock _propBlock;
+    private float _lastAppliedDisplayAlpha = -1f;
+    private float _lastAppliedDisplayRatio = -1f;
+    private int _lastFuelTextPercent = int.MinValue;
+    private int _lastDashboardPercent = int.MinValue;
+    private float _lastDashboardColorRatio = -1f;
 
     private void SetupMaterialTransparent(Material mat)
     {
@@ -352,6 +357,16 @@ public class FuelTank : MonoBehaviour
     {
         if (displayObject == null) return;
 
+        bool displayChanged = Mathf.Abs(_lastAppliedDisplayAlpha - alpha) > 0.001f
+            || Mathf.Abs(_lastAppliedDisplayRatio - _currentRatio) > 0.001f;
+        if (!displayChanged)
+        {
+            return;
+        }
+
+        _lastAppliedDisplayAlpha = alpha;
+        _lastAppliedDisplayRatio = _currentRatio;
+
         if (_displayRenderers == null || _displayRenderers.Length == 0)
         {
             _displayRenderers = displayObject.GetComponentsInChildren<Renderer>(true);
@@ -419,8 +434,14 @@ public class FuelTank : MonoBehaviour
             Color targetColor = fullFuelColor;
             if (_currentRatio < 0.3f) targetColor = Color.Lerp(lowFuelColor, mediumFuelColor, _currentRatio / 0.3f);
             else targetColor = Color.Lerp(mediumFuelColor, fullFuelColor, (_currentRatio - 0.3f) / 0.7f);
-            
-            fuelText.text = $"{(_currentRatio * 100f):F0}%";
+
+            int percent = Mathf.RoundToInt(_currentRatio * 100f);
+            if (percent != _lastFuelTextPercent)
+            {
+                _lastFuelTextPercent = percent;
+                fuelText.text = $"{percent}%";
+            }
+
             fuelText.color = new Color(targetColor.r, targetColor.g, targetColor.b, alpha * 0.5f);
         }
     }
@@ -429,12 +450,22 @@ public class FuelTank : MonoBehaviour
     private void UpdateCarDashboardText()
     {
         // 计算文本和根据油量改变颜色
-        float percent = _currentRatio * 100f;
-        string displayText = $"{percent:F0}%";
+        int percent = Mathf.RoundToInt(_currentRatio * 100f);
+        bool percentChanged = percent != _lastDashboardPercent;
+        bool colorChanged = Mathf.Abs(_lastDashboardColorRatio - _currentRatio) > 0.001f;
+        if (!percentChanged && !colorChanged)
+        {
+            return;
+        }
+
+        string displayText = $"{percent}%";
 
         Color targetColor = fullFuelColor;
         if (_currentRatio < 0.3f) targetColor = Color.Lerp(lowFuelColor, mediumFuelColor, _currentRatio / 0.3f);
         else targetColor = Color.Lerp(mediumFuelColor, fullFuelColor, (_currentRatio - 0.3f) / 0.7f);
+
+        _lastDashboardPercent = percent;
+        _lastDashboardColorRatio = _currentRatio;
 
         // 情况一：如果你拖入的是 UI Canvas 里的 TextMeshPro
         if (carDashboardFuelText != null)
