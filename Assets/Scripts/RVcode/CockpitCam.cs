@@ -60,6 +60,7 @@ public class CockpitCam : MonoBehaviour
 	private readonly System.Collections.Generic.Dictionary<Collider, ICockpitHighlightable> cockpitHighlightCache = new System.Collections.Generic.Dictionary<Collider, ICockpitHighlightable>(64);
 	private readonly System.Collections.Generic.Dictionary<Collider, Furniture_SlideDoor> cockpitDoorCache = new System.Collections.Generic.Dictionary<Collider, Furniture_SlideDoor>(32);
 	private const int MaxCockpitComponentCacheSize = 256;
+	private Furniture_SlideDoor[] exitDoors;
 
 	private GameObject activePlayer;
 	private bool isDriving;
@@ -126,14 +127,11 @@ public class CockpitCam : MonoBehaviour
 		if (isDriving && !isExiting && Input.GetKeyDown(KeyCode.BackQuote))
 		{
 			bool doorIsOpen = false;
-			Furniture_SlideDoor[] allDoors = GetComponentsInParent<Furniture_SlideDoor>();
-			if (allDoors.Length == 0 && transform.parent != null)
+			Furniture_SlideDoor[] allDoors = GetExitDoors();
+			for (int i = 0; i < allDoors.Length; i++)
 			{
-				allDoors = transform.root.GetComponentsInChildren<Furniture_SlideDoor>();
-			}
-			foreach (var d in allDoors)
-			{
-				if (d.IsOpen)
+				Furniture_SlideDoor d = allDoors[i];
+				if (d != null && d.IsOpen)
 				{
 					doorIsOpen = true;
 					break;
@@ -169,6 +167,22 @@ public class CockpitCam : MonoBehaviour
 			// 🌟 车内直接开/关车门！
 			currentDoorTarget.Interact();
 		}
+	}
+
+	private Furniture_SlideDoor[] GetExitDoors()
+	{
+		if (exitDoors != null)
+		{
+			return exitDoors;
+		}
+
+		exitDoors = GetComponentsInParent<Furniture_SlideDoor>();
+		if (exitDoors.Length == 0 && transform.parent != null)
+		{
+			exitDoors = transform.root.GetComponentsInChildren<Furniture_SlideDoor>();
+		}
+
+		return exitDoors;
 	}
 
 	private bool IsCameraActive()
