@@ -25,6 +25,9 @@ public class FuelCan : MonoBehaviour
     private float nextDisplayFacingUpdateTime;
     private int lastDisplayedFuelPercent = int.MinValue;
     private Color lastDisplayColor;
+    private static CarControl[] s_cachedCars;
+    private static float s_nextCarCacheRefreshTime;
+    private const float CarCacheRefreshInterval = 1f;
     
     public float FuelAmount => fuelAmount;
     public bool IsEmpty => fuelAmount <= 0f;
@@ -198,29 +201,45 @@ public class FuelCan : MonoBehaviour
     
     CarControl FindNearestVehicle()
     {
+        float refillDistanceSq = refillDistance * refillDistance;
+
         // 方法1：如果已经有缓存的车辆且在范围内，直接使用
-        if (targetCar != null && Vector3.Distance(transform.position, targetCar.transform.position) <= refillDistance)
+        if (targetCar != null && (transform.position - targetCar.transform.position).sqrMagnitude <= refillDistanceSq)
         {
             return targetCar;
         }
         
-        // 方法2：从场景中查找所有 CarControl
-        CarControl[] cars = FindObjectsOfType<CarControl>();
+        // 方法2：从短期缓存中查找车辆，避免连续加油尝试反复扫描整个场景
+        CarControl[] cars = GetCachedCars();
         CarControl nearest = null;
-        float minDistance = refillDistance;
+        float minDistanceSq = refillDistanceSq;
         
         foreach (CarControl car in cars)
         {
-            float distance = Vector3.Distance(transform.position, car.transform.position);
-            if (distance < minDistance)
+            if (car == null) continue;
+
+            float distanceSq = (transform.position - car.transform.position).sqrMagnitude;
+            if (distanceSq < minDistanceSq)
             {
-                minDistance = distance;
+                minDistanceSq = distanceSq;
                 nearest = car;
             }
         }
         
         targetCar = nearest;
         return nearest;
+    }
+
+    private static CarControl[] GetCachedCars()
+    {
+        if (s_cachedCars != null && Time.time < s_nextCarCacheRefreshTime)
+        {
+            return s_cachedCars;
+        }
+
+        s_nextCarCacheRefreshTime = Time.time + CarCacheRefreshInterval;
+        s_cachedCars = FindObjectsOfType<CarControl>();
+        return s_cachedCars;
     }
     
     void UpdateFuelDisplay()
