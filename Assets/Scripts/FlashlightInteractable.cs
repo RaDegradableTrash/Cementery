@@ -30,21 +30,19 @@ public class FlashlightInteractable : MonoBehaviour
     {
         _worldObject = GetComponent<WorldObject>();
         _rb = GetComponent<Rigidbody>();
-        // 【修改】获取该物体以及所有子物体上的碰撞体，防止部分碰撞体漏网导致物理冲突
-        _colliders = GetComponentsInChildren<Collider>(); 
-        _originalParent = transform.parent;
-        _localRotation = Quaternion.Euler(localRotationEuler);
-    }
-
-    void OnEnable()
-    {
         if (_worldObject != null)
         {
             _worldObject.onInteract.AddListener(OnInteractedWith);
         }
+
+        // 【修改】获取该物体以及所有子物体上的碰撞体，防止部分碰撞体漏网导致物理冲突
+        _colliders = GetComponentsInChildren<Collider>();
+        _originalParent = transform.parent;
+        _localRotation = Quaternion.Euler(localRotationEuler);
+        enabled = false;
     }
 
-    void OnDisable()
+    void OnDestroy()
     {
         if (_worldObject != null)
         {
@@ -101,6 +99,7 @@ if (_rb != null)
 
         _worldObject.interactable = false;
         _isEquipped = true;
+        enabled = true;
     }
 
     /// <summary>
@@ -142,6 +141,7 @@ if (_rb != null)
         _worldObject.TriggerDrop(playerCamera != null ? playerCamera.root.gameObject : null);
 
         _isEquipped = false;
+        enabled = false;
     }
 
     void Update()
