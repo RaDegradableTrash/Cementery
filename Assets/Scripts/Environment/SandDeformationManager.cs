@@ -79,7 +79,10 @@ namespace EnvironmentSystem
             {
                 if (_deformerParams[i].w > 0.05f) // is active
                 {
-                    float distSq = (new Vector3(_deformerPositions[i].x, _deformerPositions[i].y, _deformerPositions[i].z) - position).sqrMagnitude;
+                    float dx = _deformerPositions[i].x - position.x;
+                    float dy = _deformerPositions[i].y - position.y;
+                    float dz = _deformerPositions[i].z - position.z;
+                    float distSq = dx * dx + dy * dy + dz * dz;
                     if (distSq < 0.09f) // 30cm radius square
                     {
                         _deformerPositions[i] = new Vector4(position.x, position.y, position.z, radius);
