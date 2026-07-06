@@ -43,11 +43,7 @@ public class CinematicFilterController : MonoBehaviour
         ColorUtility.TryParseHtmlString("#f78c29ff", out _orangeMidtones);
         CacheProfileComponents();
         SetCinematicLook(true);
-    }
-
-    void Update()
-    {
-        SetCinematicLook(false);
+        enabled = false;
     }
 
     /// <summary>
@@ -57,6 +53,7 @@ public class CinematicFilterController : MonoBehaviour
     public void SetCinematicLook()
     {
         SetCinematicLook(true);
+        enabled = false;
     }
 
     private void CacheProfileComponents()
