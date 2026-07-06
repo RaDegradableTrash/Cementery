@@ -24,6 +24,7 @@ public class FlashlightInteractable : MonoBehaviour
     private Collider[] _colliders; // 【修改】改为数组，支持关闭自身及子物体所有的碰撞体
     private bool _isEquipped = false;
     private Transform _originalParent;
+    private Quaternion _localRotation;
 
     void Awake()
     {
@@ -32,6 +33,7 @@ public class FlashlightInteractable : MonoBehaviour
         // 【修改】获取该物体以及所有子物体上的碰撞体，防止部分碰撞体漏网导致物理冲突
         _colliders = GetComponentsInChildren<Collider>(); 
         _originalParent = transform.parent;
+        _localRotation = Quaternion.Euler(localRotationEuler);
     }
 
     void OnEnable()
@@ -93,7 +95,7 @@ if (_rb != null)
         // 3. 挂载到相机
         transform.SetParent(playerCamera);
         transform.localPosition = localOffset;
-        transform.localRotation = Quaternion.Euler(localRotationEuler);
+        transform.localRotation = _localRotation;
 
         if (flashlightLight != null) flashlightLight.enabled = true;
 
@@ -148,8 +150,15 @@ if (_rb != null)
         {
             if (transform.parent == playerCamera)
             {
-                transform.localPosition = localOffset;
-                transform.localRotation = Quaternion.Euler(localRotationEuler);
+                if ((transform.localPosition - localOffset).sqrMagnitude > 0.000001f)
+                {
+                    transform.localPosition = localOffset;
+                }
+
+                if (Quaternion.Angle(transform.localRotation, _localRotation) > 0.01f)
+                {
+                    transform.localRotation = _localRotation;
+                }
             }
 
             if (Input.GetKeyDown(dropKey))
