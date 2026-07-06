@@ -436,7 +436,13 @@ namespace EnvironmentSystem
             if (obj != null)
                 _hiddenNearbySet.Remove(obj);
 
-            _hiddenNearby.RemoveAt(index);
+            int lastIndex = _hiddenNearby.Count - 1;
+            if (index != lastIndex)
+            {
+                _hiddenNearby[index] = _hiddenNearby[lastIndex];
+            }
+
+            _hiddenNearby.RemoveAt(lastIndex);
         }
 
         // ── Scene event handlers ───────────────────────────────────────────────
