@@ -61,6 +61,7 @@ public class Speaker : MonoBehaviour
     private Coroutine _fadeCoroutine;
     private Coroutine _trackEndCoroutine;
     private string _lastDisplayString;
+    private static readonly WaitForSecondsRealtime TrackEndPollWait = new WaitForSecondsRealtime(0.2f);
     
     // 属性
     public int CurrentTrackIndex => _currentTrackIndex;
@@ -107,7 +108,7 @@ public class Speaker : MonoBehaviour
     {
         while (_isPlaying && musicPlaylist.Count > 0 && _audioSource != null)
         {
-            yield return new WaitForSecondsRealtime(0.2f);
+            yield return TrackEndPollWait;
 
             // 自动播放下一首（当前歌曲播放完毕时）
             if (_isPlaying && !_audioSource.isPlaying)
