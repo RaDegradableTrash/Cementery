@@ -111,6 +111,8 @@ public void SetBaseRotation(Quaternion targetRotation)
     private bool _pendingStartCursorLock;
     private Rigidbody _playerRb;
     private float _yaw;
+    private int _inventoryModeCacheFrame = -1;
+    private bool _cachedInventoryModeActive;
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
     void Start()
@@ -334,12 +336,18 @@ public void SetBaseRotation(Quaternion targetRotation)
 
     bool IsInventoryModeActive()
     {
+        int frame = Time.frameCount;
+        if (_inventoryModeCacheFrame == frame)
+            return _cachedInventoryModeActive;
+
         InventoryCameraController primary = InventoryCameraController.GetPrimaryController();
         if (primary != null)
             inventoryCameraController = primary;
         else if (inventoryCameraController == null)
             inventoryCameraController = FindObjectOfType<InventoryCameraController>();
 
-        return inventoryCameraController != null && inventoryCameraController.IsInventoryActive;
+        _cachedInventoryModeActive = inventoryCameraController != null && inventoryCameraController.IsInventoryActive;
+        _inventoryModeCacheFrame = frame;
+        return _cachedInventoryModeActive;
     }
 }

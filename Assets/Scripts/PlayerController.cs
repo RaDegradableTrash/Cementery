@@ -109,6 +109,8 @@ public class PlayerController : NetworkBehaviour
     private readonly RaycastHit[] _climbHitBuffer = new RaycastHit[ClimbHitBufferSize];
     private bool _hasSetupKinematic = false;
     private float _startupTime;
+    private int _inventoryModeCacheFrame = -1;
+    private bool _cachedInventoryModeActive;
 
     // 🌟 核心新增：控制玩家当前是否因使用家具（躺下/坐下）而全面冻结控制器逻辑
     public bool IsUsingFurniture { get; set; } = false;
@@ -363,10 +365,16 @@ public class PlayerController : NetworkBehaviour
 
     bool IsInventoryModeActive()
     {
+        int frame = Time.frameCount;
+        if (_inventoryModeCacheFrame == frame)
+            return _cachedInventoryModeActive;
+
         if (inventoryCameraController == null)
             inventoryCameraController = InventoryCameraController.GetPrimaryController();
 
-        return inventoryCameraController != null && inventoryCameraController.IsInventoryActive;
+        _cachedInventoryModeActive = inventoryCameraController != null && inventoryCameraController.IsInventoryActive;
+        _inventoryModeCacheFrame = frame;
+        return _cachedInventoryModeActive;
     }
 
     // Movements
