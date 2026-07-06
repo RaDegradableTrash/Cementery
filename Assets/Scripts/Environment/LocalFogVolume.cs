@@ -25,6 +25,15 @@ namespace EnvironmentSystem
         private float _nextLocalFogApplyTime;
         private float _nextContainmentCheckTime;
         private bool _cameraInsideVolume;
+        private Vector3 _cachedColliderCenter;
+        private Vector3 _cachedColliderExtents;
+        private Vector3 _cachedLossyScale;
+        private float _cachedFadeMargin = float.NaN;
+        private float _cachedLocalMargin = 1f;
+        private float _cachedLocalFogRefreshInterval;
+        private float _cachedOutsideVolumeCheckInterval;
+        private float _lastLocalFogRefreshInterval = float.NaN;
+        private float _lastOutsideVolumeCheckInterval = float.NaN;
 
 #if AURA_2_PRESENT
         private Aura2API.AuraVolume _auraVolume;
@@ -37,6 +46,7 @@ namespace EnvironmentSystem
             _mainCamera = Camera.main;
             _cameraTransform = _mainCamera != null ? _mainCamera.transform : null;
             _fogManager = FindFirstObjectByType<AuraFogSystemManager>();
+            RefreshDerivedSettings();
 
 #if AURA_2_PRESENT
             if (!TryGetComponent(out _auraVolume))
@@ -68,16 +78,17 @@ namespace EnvironmentSystem
             Vector3 camPos = _cameraTransform.position;
             bool isInside = _boxCollider.bounds.Contains(camPos);
             _cameraInsideVolume = isInside;
+            RefreshDerivedSettings();
             _nextContainmentCheckTime = now + (isInside
-                ? Mathf.Max(0.02f, localFogRefreshInterval)
-                : Mathf.Max(0.05f, outsideVolumeCheckInterval));
+                ? _cachedLocalFogRefreshInterval
+                : _cachedOutsideVolumeCheckInterval);
 
             if (isInside)
             {
                 if (now < _nextLocalFogApplyTime)
                     return;
 
-                _nextLocalFogApplyTime = now + Mathf.Max(0.02f, localFogRefreshInterval);
+                _nextLocalFogApplyTime = now + _cachedLocalFogRefreshInterval;
 
                 // Calculate fade coefficient based on distance to the closest boundary of the box
                 float fadeFactor = CalculateFadeFactor(camPos);
@@ -98,8 +109,8 @@ namespace EnvironmentSystem
 
             // Compute distance to closest face of local space AABB
             Vector3 localPoint = transform.InverseTransformPoint(point);
-            Vector3 extents = _boxCollider.size * 0.5f;
-            Vector3 center = _boxCollider.center;
+            Vector3 extents = _cachedColliderExtents;
+            Vector3 center = _cachedColliderCenter;
 
             float distToX = Mathf.Min(Mathf.Abs(localPoint.x - (center.x - extents.x)), Mathf.Abs(localPoint.x - (center.x + extents.x)));
             float distToY = Mathf.Min(Mathf.Abs(localPoint.y - (center.y - extents.y)), Mathf.Abs(localPoint.y - (center.y + extents.y)));
@@ -108,10 +119,45 @@ namespace EnvironmentSystem
             float minDist = Mathf.Min(distToX, Mathf.Min(distToY, distToZ));
 
             // Convert world space margin
-            float localMargin = transform.InverseTransformVector(new Vector3(fadeMargin, 0f, 0f)).magnitude;
+            float localMargin = _cachedLocalMargin;
             if (localMargin <= 0.001f) return 1f;
 
             return Mathf.Clamp01(minDist / localMargin);
+        }
+
+        private void RefreshDerivedSettings()
+        {
+            if (_boxCollider == null)
+                return;
+
+            Vector3 size = _boxCollider.size;
+            Vector3 center = _boxCollider.center;
+            Vector3 lossyScale = transform.lossyScale;
+            bool shapeChanged = _cachedColliderCenter != center ||
+                                _cachedColliderExtents != size * 0.5f ||
+                                _cachedLossyScale != lossyScale ||
+                                !Mathf.Approximately(_cachedFadeMargin, fadeMargin);
+
+            if (shapeChanged)
+            {
+                _cachedColliderCenter = center;
+                _cachedColliderExtents = size * 0.5f;
+                _cachedLossyScale = lossyScale;
+                _cachedFadeMargin = fadeMargin;
+                _cachedLocalMargin = transform.InverseTransformVector(new Vector3(fadeMargin, 0f, 0f)).magnitude;
+            }
+
+            if (!Mathf.Approximately(_lastLocalFogRefreshInterval, localFogRefreshInterval))
+            {
+                _lastLocalFogRefreshInterval = localFogRefreshInterval;
+                _cachedLocalFogRefreshInterval = Mathf.Max(0.02f, localFogRefreshInterval);
+            }
+
+            if (!Mathf.Approximately(_lastOutsideVolumeCheckInterval, outsideVolumeCheckInterval))
+            {
+                _lastOutsideVolumeCheckInterval = outsideVolumeCheckInterval;
+                _cachedOutsideVolumeCheckInterval = Mathf.Max(0.05f, outsideVolumeCheckInterval);
+            }
         }
 
         private void ApplyLocalFogDensity(float factor)
