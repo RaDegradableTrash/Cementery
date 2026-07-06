@@ -893,6 +893,18 @@ if (!isBraking)
     void OnAudioFilterRead(float[] data, int channels)
     {
         float rpm = Mathf.Max(0, smoothEngineRpm);
+        float vol = engineMasterVolume;
+        if (data == null || data.Length == 0 || channels <= 0)
+        {
+            return;
+        }
+
+        if (vol <= 0.0001f || (rpm <= 1f && engineLoad <= 0.0001f))
+        {
+            System.Array.Clear(data, 0, data.Length);
+            return;
+        }
+
         float rpmRatio = Mathf.Clamp01(rpm / 2800f);
         
         double freqIncrement = (rpm / 60.0) * 4.0 / samplingRate;
@@ -900,7 +912,6 @@ if (!isBraking)
         double intakeIncrement = (rpm / 60.0) * 8.0 / samplingRate;
         double turboIncrement = (rpm / 60.0) * 24.0 / samplingRate;
         
-        float vol = engineMasterVolume;
         float pWidth = pulseWidth;
         float sharpness = pulseSharpness;
         float exhaustRes = exhaustResonance;
