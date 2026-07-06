@@ -2,6 +2,8 @@ using UnityEngine;
 
 public class LightControl : MonoBehaviour
 {
+    private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
+
     [SerializeField] private StartProcedure startProcedure;
 
     [Header("Brake Light Renderers")]
@@ -38,9 +40,11 @@ public class LightControl : MonoBehaviour
     [SerializeField, Min(0.02f)] private float stablePowerCheckInterval = 0.15f;
 
     private Renderer[] brakeRenderers;
+    private Material[] brakeMaterials;
     private Light[] brakeLights;
     private Color[] baseEmissionColors;
     private Renderer[] headRenderers;
+    private Material[] headMaterials;
     private Light[] headLights;
     private Color[] baseHeadEmissionColors;
     private bool lastPowerState;
@@ -55,15 +59,17 @@ public class LightControl : MonoBehaviour
         }
 
         brakeRenderers = new[] { brakeRenderer1, brakeRenderer2, brakeRenderer3, brakeRenderer4 };
+        brakeMaterials = new Material[brakeRenderers.Length];
         brakeLights = new[] { brakeLight1, brakeLight2, brakeLight3, brakeLight4 };
         baseEmissionColors = new Color[brakeRenderers.Length];
 
         headRenderers = new[] { headRenderer1, headRenderer2 };
+        headMaterials = new Material[headRenderers.Length];
         headLights = new[] { headLight1, headLight2 };
         baseHeadEmissionColors = new Color[headRenderers.Length];
 
-        CacheBaseEmissionColors(brakeRenderers, baseEmissionColors);
-        CacheBaseEmissionColors(headRenderers, baseHeadEmissionColors);
+        CacheBaseEmissionColors(brakeRenderers, brakeMaterials, baseEmissionColors);
+        CacheBaseEmissionColors(headRenderers, headMaterials, baseHeadEmissionColors);
 
         // Turn off shadows to prevent lights from being blocked by the RV's own body/chassis
         foreach (Light light in brakeLights)
@@ -138,7 +144,7 @@ public class LightControl : MonoBehaviour
         }
     }
 
-    private void CacheBaseEmissionColors(Renderer[] renderers, Color[] cache)
+    private void CacheBaseEmissionColors(Renderer[] renderers, Material[] materials, Color[] cache)
     {
         for (int i = 0; i < renderers.Length; i++)
         {
@@ -150,8 +156,9 @@ public class LightControl : MonoBehaviour
             }
 
             Material mat = renderer.material;
+            materials[i] = mat;
             mat.EnableKeyword("_EMISSION");
-            Color emission = mat.HasProperty("_EmissionColor") ? mat.GetColor("_EmissionColor") : Color.white;
+            Color emission = mat.HasProperty(EmissionColorId) ? mat.GetColor(EmissionColorId) : Color.white;
             cache[i] = NormalizeColor(emission);
         }
     }
@@ -163,15 +170,13 @@ public class LightControl : MonoBehaviour
 
         for (int i = 0; i < brakeRenderers.Length; i++)
         {
-            Renderer renderer = brakeRenderers[i];
-            if (renderer == null)
+            Material mat = brakeMaterials[i];
+            if (mat == null)
             {
                 continue;
             }
 
-            Material mat = renderer.material;
-            mat.EnableKeyword("_EMISSION");
-            mat.SetColor("_EmissionColor", baseEmissionColors[i] * intensity);
+            mat.SetColor(EmissionColorId, baseEmissionColors[i] * intensity);
         }
 
         float targetIntensity = hasPower ? (braking ? brakeIntensity : normalIntensity) : 0f;
@@ -192,15 +197,13 @@ public class LightControl : MonoBehaviour
 
         for (int i = 0; i < headRenderers.Length; i++)
         {
-            Renderer renderer = headRenderers[i];
-            if (renderer == null)
+            Material mat = headMaterials[i];
+            if (mat == null)
             {
                 continue;
             }
 
-            Material mat = renderer.material;
-            mat.EnableKeyword("_EMISSION");
-            mat.SetColor("_EmissionColor", baseHeadEmissionColors[i] * intensity);
+            mat.SetColor(EmissionColorId, baseHeadEmissionColors[i] * intensity);
         }
 
         float targetIntensity = hasPower ? headlightIntensity : 0f;
