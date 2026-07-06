@@ -29,6 +29,10 @@ public class Kelp : MonoBehaviour
 
     private Renderer _stemRenderer;
     private Renderer[] _leafRenderers;
+    private Material _stemMaterial;
+    private bool _stemMaterialHasBaseColor;
+    private Material[] _leafMaterials;
+    private bool[] _leafMaterialHasBaseColor;
 
     private Rigidbody _rb;
     private WorldObject _worldObject;
@@ -99,6 +103,11 @@ public class Kelp : MonoBehaviour
         {
             _stemRenderer = stemTransform.GetComponent<Renderer>();
             if (_stemRenderer == null) _stemRenderer = stemTransform.GetComponentInChildren<Renderer>();
+            if (_stemRenderer != null)
+            {
+                _stemMaterial = _stemRenderer.material;
+                _stemMaterialHasBaseColor = _stemMaterial != null && _stemMaterial.HasProperty("_BaseColor");
+            }
         }
         {
             GameObject swayPivot = new GameObject("SwayPivot");
@@ -139,11 +148,18 @@ public class Kelp : MonoBehaviour
             _lastLeafVisualProgress = new float[leafTransforms.Length];
             _lastLeafActive = new bool[leafTransforms.Length];
             _leafRenderers = new Renderer[leafTransforms.Length];
+            _leafMaterials = new Material[leafTransforms.Length];
+            _leafMaterialHasBaseColor = new bool[leafTransforms.Length];
             for (int i = 0; i < leafTransforms.Length; i++)
             {
                 if (leafTransforms[i] != null)
                 {
                     _leafRenderers[i] = leafTransforms[i].GetComponentInChildren<Renderer>();
+                    if (_leafRenderers[i] != null)
+                    {
+                        _leafMaterials[i] = _leafRenderers[i].material;
+                        _leafMaterialHasBaseColor[i] = _leafMaterials[i] != null && _leafMaterials[i].HasProperty("_BaseColor");
+                    }
                     _leafOriginalRotations[i] = leafTransforms[i].localEulerAngles;
                     _leafOriginalScales[i] = leafTransforms[i].localScale;
                     _leafGrowthProgress[i] = 1f; // Default to fully grown
@@ -164,8 +180,7 @@ public class Kelp : MonoBehaviour
 
             if (_stemRenderer != null)
             {
-                _stemRenderer.material.color = matureColor;
-                if (_stemRenderer.material.HasProperty("_BaseColor")) _stemRenderer.material.SetColor("_BaseColor", matureColor);
+                ApplyStemColor(matureColor);
             }
 
             Collider[] colliders = GetComponentsInChildren<Collider>();
@@ -292,16 +307,30 @@ public class Kelp : MonoBehaviour
             leafTransforms[index].localScale = _leafOriginalScales[index] * progress;
         }
 
-        if (!isActive || _leafRenderers == null || index >= _leafRenderers.Length || _leafRenderers[index] == null)
+        if (!isActive || _leafMaterials == null || index >= _leafMaterials.Length || _leafMaterials[index] == null)
         {
             return;
         }
 
         Color lerped = Color.Lerp(sproutColor, matureColor, progress);
-        _leafRenderers[index].material.color = lerped;
-        if (_leafRenderers[index].material.HasProperty("_BaseColor"))
+        _leafMaterials[index].color = lerped;
+        if (_leafMaterialHasBaseColor != null && index < _leafMaterialHasBaseColor.Length && _leafMaterialHasBaseColor[index])
         {
-            _leafRenderers[index].material.SetColor("_BaseColor", lerped);
+            _leafMaterials[index].SetColor("_BaseColor", lerped);
+        }
+    }
+
+    private void ApplyStemColor(Color color)
+    {
+        if (_stemMaterial == null)
+        {
+            return;
+        }
+
+        _stemMaterial.color = color;
+        if (_stemMaterialHasBaseColor)
+        {
+            _stemMaterial.SetColor("_BaseColor", color);
         }
     }
 
@@ -437,8 +466,7 @@ public class Kelp : MonoBehaviour
         if (_stemRenderer != null)
         {
             Color lerped = Color.Lerp(sproutColor, matureColor, progress);
-            _stemRenderer.material.color = lerped;
-            if (_stemRenderer.material.HasProperty("_BaseColor")) _stemRenderer.material.SetColor("_BaseColor", lerped);
+            ApplyStemColor(lerped);
         }
 
         float smoothT = Mathf.SmoothStep(0f, 1f, progress);
