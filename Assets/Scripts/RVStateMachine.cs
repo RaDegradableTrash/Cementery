@@ -69,8 +69,7 @@ namespace RVSystem
                 
                 if (cameraController != null)
                 {
-                    if (cameraController.interiorCamera != null) cameraController.interiorCamera.SetActive(false);
-                    if (cameraController.exteriorCamera != null) cameraController.exteriorCamera.SetActive(false);
+                    cameraController.SetCamerasEnabled(false);
                 }
                 if (player != null)
                 {
@@ -83,12 +82,8 @@ namespace RVSystem
             {
                 if (cameraController != null)
                 {
-                    if (cameraController.interiorCamera != null)
-                    {
-                        cameraController.interiorCamera.SetActive(true);
-                        var camComp = cameraController.interiorCamera.GetComponent<Camera>();
-                        if (camComp != null) camComp.enabled = true;
-                    }
+                    cameraController.SetCamerasEnabled(true);
+                    cameraController.SetInteriorActive(true);
                 }
                 if (player != null)
                 {

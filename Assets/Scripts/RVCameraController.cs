@@ -11,6 +11,15 @@ namespace RVSystem
         [Header("Inputs")]
         public KeyCode switchKey = KeyCode.C;
 
+        private bool _hasCameraPair;
+        private bool _isInteriorActive;
+        private bool _camerasEnabled;
+
+        private void Awake()
+        {
+            _hasCameraPair = interiorCamera != null && exteriorCamera != null;
+        }
+
         void Start()
         {
             var stateMachine = GetComponent<RVStateMachine>();
@@ -18,18 +27,20 @@ namespace RVSystem
 
             if (stateMachine != null && stateMachine.currentState == RVState.Parked)
             {
-                if (interiorCamera != null) interiorCamera.SetActive(false);
-                if (exteriorCamera != null) exteriorCamera.SetActive(false);
+                SetCamerasEnabled(false);
             }
             else
             {
-                if (interiorCamera != null) interiorCamera.SetActive(true);
-                if (exteriorCamera != null) exteriorCamera.SetActive(false);
+                SetCamerasEnabled(true);
+                SetInteriorActive(true);
             }
         }
 
         void Update()
         {
+            if (!_hasCameraPair || !_camerasEnabled)
+                return;
+
             if (Input.GetKeyDown(switchKey))
             {
                 SwitchPerspective();
@@ -38,9 +49,63 @@ namespace RVSystem
 
         public void SwitchPerspective()
         {
-            bool isInterior = interiorCamera.activeSelf;
-            interiorCamera.SetActive(!isInterior);
-            exteriorCamera.SetActive(isInterior);
+            if (!_hasCameraPair)
+                return;
+
+            SetInteriorActive(!_isInteriorActive);
+        }
+
+        public void SetCamerasEnabled(bool enabled)
+        {
+            if (!_hasCameraPair)
+            {
+                if (interiorCamera != null && interiorCamera.activeSelf != enabled)
+                    interiorCamera.SetActive(enabled);
+                if (exteriorCamera != null && exteriorCamera.activeSelf)
+                    exteriorCamera.SetActive(false);
+                _camerasEnabled = enabled;
+                _isInteriorActive = enabled && interiorCamera != null && interiorCamera.activeSelf;
+                return;
+            }
+
+            if (_camerasEnabled == enabled)
+                return;
+
+            _camerasEnabled = enabled;
+            if (!enabled)
+            {
+                SetActiveIfChanged(interiorCamera, false);
+                SetActiveIfChanged(exteriorCamera, false);
+                return;
+            }
+
+            SetInteriorActive(true);
+        }
+
+        public void SetInteriorActive(bool active)
+        {
+            if (!_hasCameraPair)
+                return;
+
+            if (_isInteriorActive == active && interiorCamera.activeSelf == active && exteriorCamera.activeSelf == !active)
+                return;
+
+            _isInteriorActive = active;
+            SetActiveIfChanged(interiorCamera, active);
+            SetActiveIfChanged(exteriorCamera, !active);
+        }
+
+        private static void SetActiveIfChanged(GameObject target, bool active)
+        {
+            if (target != null && target.activeSelf != active)
+                target.SetActive(active);
+
+            if (target != null && active)
+            {
+                Camera camera = target.GetComponent<Camera>();
+                if (camera != null && !camera.enabled)
+                    camera.enabled = true;
+            }
         }
     }
 }
