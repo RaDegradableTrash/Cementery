@@ -147,6 +147,7 @@ public class CarControl : MonoBehaviour
     Rigidbody rigidBody;
     private float currentSteerAngle;
     private float currentSpeedKmh;
+    public float CurrentSpeedKmh => currentSpeedKmh;
     private float l6ThrottleCurrent;
     private readonly HashSet<WheelControl> sixLockWheelSet = new HashSet<WheelControl>();
     private static readonly string[] ForwardGearDisplay = { "D1", "D2", "D3", "D4", "D5", "D6" };

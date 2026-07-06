@@ -43,8 +43,9 @@ public class CockpitCameraJuice : MonoBehaviour
     {
         if (carRigidbody == null) return;
 
-        // 获取当前时速 (km/h)
-        float currentSpeed = carRigidbody.velocity.magnitude * 3.6f;
+        float currentSpeed = carControl != null
+            ? carControl.CurrentSpeedKmh
+            : carRigidbody.velocity.magnitude * 3.6f;
 
         // ------------------ 核心 1：处理前后左右的【惯性摆动】 ------------------
         // 当车向右急转（正X轴加速度），人的头因为惯性会向左偏（负X轴）
