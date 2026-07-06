@@ -75,10 +75,13 @@ namespace EnvironmentSystem
         {
             // 1. Footprint Merging: If an existing footprint is within 30cm, update it in-place instead of allocating a new slot.
             // This ensures standing characters or idling vehicles don't choke the circular buffer!
-            for (int i = 0; i < MaxDeformers; i++)
+            int activeSlotsToCheck = _activeDeformerCount;
+            int checkedActiveSlots = 0;
+            for (int i = 0; i < MaxDeformers && activeSlotsToCheck > 0; i++)
             {
                 if (_deformerParams[i].w > 0.05f) // is active
                 {
+                    checkedActiveSlots++;
                     float dx = _deformerPositions[i].x - position.x;
                     float dy = _deformerPositions[i].y - position.y;
                     float dz = _deformerPositions[i].z - position.z;
@@ -90,6 +93,11 @@ namespace EnvironmentSystem
                         _lifetimes[i] = lifetime;
                         _maxLifetimes[i] = lifetime;
                         return;
+                    }
+
+                    if (checkedActiveSlots >= activeSlotsToCheck)
+                    {
+                        break;
                     }
                 }
             }
@@ -124,12 +132,15 @@ namespace EnvironmentSystem
                 return;
 
             bool hasChanged = false;
+            int activeSlotsToProcess = _activeDeformerCount;
+            int processedActiveSlots = 0;
 
             // Fade lifetimes smoothly over time (simulating granular sand filling back in organically)
             for (int i = 0; i < MaxDeformers; i++)
             {
                 if (_lifetimes[i] > 0f)
                 {
+                    processedActiveSlots++;
                     _lifetimes[i] -= Time.deltaTime;
                     float fade = Mathf.Clamp01(_lifetimes[i] / _maxLifetimes[i]);
                     
@@ -142,6 +153,11 @@ namespace EnvironmentSystem
                         _deformerPositions[i] = Vector4.zero;
                         _deformerParams[i] = Vector4.zero;
                         _activeDeformerCount = Mathf.Max(0, _activeDeformerCount - 1);
+                    }
+
+                    if (processedActiveSlots >= activeSlotsToProcess)
+                    {
+                        break;
                     }
                 }
             }
