@@ -40,7 +40,11 @@ namespace EnvironmentSystem
         private Dictionary<string, Coroutine> _unloadRoutines = new Dictionary<string, Coroutine>();
         // Pending scene load queue for throttling.
         private Queue<string> _loadQueue = new Queue<string>();
+        private HashSet<string> _queuedChunks = new HashSet<string>();
+        private readonly List<string> _requiredChunks = new List<string>(49);
+        private readonly List<Vector2Int> _streamingOffsets = new List<Vector2Int>(49);
         private int _activeLoads = 0;
+        private int _cachedOffsetRange = int.MinValue;
 
         // Cache DesertTerrainChunk size so it is not recalculated every streaming check.
         private float _chunkSizeCacheTime = -99f;
@@ -187,33 +191,22 @@ namespace EnvironmentSystem
 
         private void UpdateGridChunks(int centerGridX, int centerGridZ)
         {
-            List<string> requiredList = new List<string>();
-
             int range = loadingRange;
             if (Application.platform == RuntimePlatform.WebGLPlayer)
             {
                 range = Mathf.Max(1, loadingRange - 1);
             }
 
-            // Create a list of offsets and sort by distance to center to load center first
-            List<Vector2Int> offsets = new List<Vector2Int>();
-            for (int dx = -range; dx <= range; dx++)
-            {
-                for (int dz = -range; dz <= range; dz++)
-                {
-                    offsets.Add(new Vector2Int(dx, dz));
-                }
-            }
+            EnsureStreamingOffsets(range);
 
-            // Sort by Euclidean distance squared (closest to center first)
-            offsets.Sort((a, b) => (a.x * a.x + a.y * a.y).CompareTo(b.x * b.x + b.y * b.y));
-
-            foreach (var offset in offsets)
+            _requiredChunks.Clear();
+            for (int i = 0; i < _streamingOffsets.Count; i++)
             {
+                Vector2Int offset = _streamingOffsets[i];
                 int gx = centerGridX + offset.x;
                 int gz = centerGridZ + offset.y;
                 string sceneName = $"{sceneNamePrefix}_{gx}_{gz}";
-                requiredList.Add(sceneName);
+                _requiredChunks.Add(sceneName);
             }
 
             int gridSizeDim = range * 2 + 1;
@@ -221,7 +214,27 @@ namespace EnvironmentSystem
             {
                 Debug.Log($"<color=#38bdf8><b>[WorldStreamer]</b></color> Grid updated. Center ({centerGridX}, {centerGridZ}). Loading {gridSizeDim}x{gridSizeDim} grid.");
             }
-            RequestChunks(requiredList);
+            RequestChunks(_requiredChunks);
+        }
+
+        private void EnsureStreamingOffsets(int range)
+        {
+            if (_cachedOffsetRange == range)
+                return;
+
+            _cachedOffsetRange = range;
+            _streamingOffsets.Clear();
+
+            for (int dx = -range; dx <= range; dx++)
+            {
+                for (int dz = -range; dz <= range; dz++)
+                {
+                    _streamingOffsets.Add(new Vector2Int(dx, dz));
+                }
+            }
+
+            // Closest chunks are queued first so the playable area fills in before far edges.
+            _streamingOffsets.Sort((a, b) => (a.x * a.x + a.y * a.y).CompareTo(b.x * b.x + b.y * b.y));
         }
 
         public void RequestChunks(List<string> chunkSceneNames)
@@ -260,11 +273,12 @@ namespace EnvironmentSystem
                 _unloadRoutines.Remove(chunkName);
             }
 
-            if (!_loadedChunks.Contains(chunkName) && !_loadQueue.Contains(chunkName))
+            if (!_loadedChunks.Contains(chunkName) && !_queuedChunks.Contains(chunkName))
             {
                 _loadedChunks.Add(chunkName);
                 // Throttle: enqueue, then drain up to MaxConcurrentLoads
                 _loadQueue.Enqueue(chunkName);
+                _queuedChunks.Add(chunkName);
                 DrainLoadQueue();
             }
         }
@@ -275,6 +289,7 @@ namespace EnvironmentSystem
             while (_activeLoads < loadLimit && _loadQueue.Count > 0)
             {
                 string next = _loadQueue.Dequeue();
+                _queuedChunks.Remove(next);
                 if (!_requestedChunks.Contains(next))
                 {
                     _loadedChunks.Remove(next);
