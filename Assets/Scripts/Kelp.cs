@@ -33,6 +33,7 @@ public class Kelp : MonoBehaviour
     private bool _stemMaterialHasBaseColor;
     private Material[] _leafMaterials;
     private bool[] _leafMaterialHasBaseColor;
+    private static readonly Collider[] s_overlapBuffer = new Collider[32];
 
     private Rigidbody _rb;
     private WorldObject _worldObject;
@@ -62,6 +63,7 @@ public class Kelp : MonoBehaviour
     private string _positionKey;
     private bool _lastWorldObjectInteractable;
     private string _lastWorldObjectMessage;
+    private float[] _wildLeafStateBuffer;
 
     public Vector3 InitialWorldScale => _initialWorldScale;
     public bool IsWild => _isWild;
@@ -74,13 +76,16 @@ public class Kelp : MonoBehaviour
         _lastGrowthUpdateTime = Time.time;
         
         // Prevent overlap double-harvesting immediately on awake
-        Collider[] hits = Physics.OverlapSphere(transform.position, 0.5f);
-        foreach (var hit in hits)
+        Vector3 currentPosition = transform.position;
+        int hitCount = Physics.OverlapSphereNonAlloc(currentPosition, 0.5f, s_overlapBuffer);
+        float overlapRadiusSq = 0.5f * 0.5f;
+        for (int i = 0; i < hitCount; i++)
         {
+            Collider hit = s_overlapBuffer[i];
             if (hit.gameObject != gameObject)
             {
                 Kelp other = hit.GetComponentInParent<Kelp>();
-                if (other != null && Vector3.Distance(transform.position, other.transform.position) < 0.5f)
+                if (other != null && (currentPosition - other.transform.position).sqrMagnitude < overlapRadiusSq)
                 {
                     if (other.GetInstanceID() < GetInstanceID())
                     {
@@ -210,6 +215,7 @@ public class Kelp : MonoBehaviour
         {
             if (_wildKelpLeafStates.TryGetValue(_positionKey, out float[] savedStates))
             {
+                _wildLeafStateBuffer = savedStates;
                 for (int i = 0; i < leafTransforms.Length && i < savedStates.Length; i++)
                 {
                     _leafGrowthProgress[i] = savedStates[i];
@@ -217,7 +223,8 @@ public class Kelp : MonoBehaviour
             }
             else
             {
-                _wildKelpLeafStates[_positionKey] = (float[])_leafGrowthProgress.Clone();
+                _wildLeafStateBuffer = (float[])_leafGrowthProgress.Clone();
+                _wildKelpLeafStates[_positionKey] = _wildLeafStateBuffer;
             }
         }
     }
@@ -245,6 +252,7 @@ public class Kelp : MonoBehaviour
         _lastGrowthUpdateTime = now;
         _nextGrowthUpdateTime = now + Mathf.Max(0.001f, growthUpdateInterval);
         bool hasAnyHarvestable = false;
+        float[] wildLeafStates = _isWild ? EnsureWildLeafStateBuffer() : null;
         
         if (leafTransforms != null && _leafGrowthProgress != null)
         {
@@ -259,11 +267,7 @@ public class Kelp : MonoBehaviour
 
                     if (_isWild)
                     {
-                        if (!_wildKelpLeafStates.ContainsKey(_positionKey))
-                        {
-                            _wildKelpLeafStates[_positionKey] = new float[leafTransforms.Length];
-                        }
-                        _wildKelpLeafStates[_positionKey][i] = _leafGrowthProgress[i];
+                        wildLeafStates[i] = _leafGrowthProgress[i];
                     }
                 }
 
@@ -451,6 +455,7 @@ public class Kelp : MonoBehaviour
         _worldObject.carryable = false;
 
         SetGrowthScale(0f);
+        _wildLeafStateBuffer = null;
         
         if (leafTransforms != null && _leafGrowthProgress != null)
         {
@@ -595,11 +600,8 @@ public class Kelp : MonoBehaviour
                     
                     if (_isWild)
                     {
-                        if (!_wildKelpLeafStates.ContainsKey(_positionKey))
-                        {
-                            _wildKelpLeafStates[_positionKey] = new float[leafTransforms.Length];
-                        }
-                        _wildKelpLeafStates[_positionKey][i] = 0f;
+                        float[] wildLeafStates = EnsureWildLeafStateBuffer();
+                        wildLeafStates[i] = 0f;
                     }
                 }
             }
@@ -607,5 +609,28 @@ public class Kelp : MonoBehaviour
         
         if (spawnCount == 0) return;
         Debug.Log($"[Kelp] Spawning {spawnCount} physical KelpLeaf items based on plant's leaf count.");
+    }
+
+    private float[] EnsureWildLeafStateBuffer()
+    {
+        if (_leafGrowthProgress == null)
+        {
+            return null;
+        }
+
+        if (_wildLeafStateBuffer != null && _wildLeafStateBuffer.Length == _leafGrowthProgress.Length)
+        {
+            return _wildLeafStateBuffer;
+        }
+
+        if (!_wildKelpLeafStates.TryGetValue(_positionKey, out _wildLeafStateBuffer) ||
+            _wildLeafStateBuffer == null ||
+            _wildLeafStateBuffer.Length != _leafGrowthProgress.Length)
+        {
+            _wildLeafStateBuffer = (float[])_leafGrowthProgress.Clone();
+            _wildKelpLeafStates[_positionKey] = _wildLeafStateBuffer;
+        }
+
+        return _wildLeafStateBuffer;
     }
 }
