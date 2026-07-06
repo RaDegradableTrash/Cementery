@@ -15,6 +15,7 @@ public class FuelCan : MonoBehaviour
     [Header("Feedback")]
     [SerializeField] private GameObject refillEffect; // 加油特效（可选）
     [SerializeField] private string refillSound = "Refill"; // 加油音效名称（可选）
+    [SerializeField] private bool logRefillDebug = false;
     
     private WorldObject worldObject;
     private CarControl targetCar; // 缓存目标车辆
@@ -141,7 +142,7 @@ public class FuelCan : MonoBehaviour
         
         if (car == null)
         {
-            Debug.Log("没有找到可加油的车辆");
+            LogRefillDebug("没有找到可加油的车辆");
             return;
         }
         
@@ -149,7 +150,7 @@ public class FuelCan : MonoBehaviour
         float distance = Vector3.Distance(transform.position, car.transform.position);
         if (distance > refillDistance)
         {
-            Debug.Log($"距离车辆太远 ({distance:F1}米)，需要靠近到 {refillDistance} 米以内");
+            LogRefillDebug($"距离车辆太远 ({distance:F1}米)，需要靠近到 {refillDistance} 米以内");
             return;
         }
         
@@ -158,13 +159,13 @@ public class FuelCan : MonoBehaviour
         
         if (currentCarFuel >= 100f)
         {
-            Debug.Log("油箱已满，不需要加油");
+            LogRefillDebug("油箱已满，不需要加油");
             return;
         }
         
         if (fuelAmount <= 0f)
         {
-            Debug.Log("油桶已空，无法加油");
+            LogRefillDebug("油桶已空，无法加油");
             return;
         }
         
@@ -181,7 +182,7 @@ public class FuelCan : MonoBehaviour
         UpdateFuelDisplay();
         
         // 加油反馈
-        Debug.Log($"添加了 {fuelToTransfer:F1} 燃油，车辆油量: {car.GetCurrentFuel():F1}%，油桶剩余: {fuelAmount:F1}%");
+        LogRefillDebug($"添加了 {fuelToTransfer:F1} 燃油，车辆油量: {car.GetCurrentFuel():F1}%，油桶剩余: {fuelAmount:F1}%");
         
         // 播放特效
         if (refillEffect != null)
@@ -193,9 +194,17 @@ public class FuelCan : MonoBehaviour
         // 如果油桶空了，可以选择自动丢弃或销毁
         if (fuelAmount <= 0f)
         {
-            Debug.Log("油桶已空");
+            LogRefillDebug("油桶已空");
             // 可选：自动从手中丢弃
             // 可选：播放空桶音效
+        }
+    }
+
+    private void LogRefillDebug(string message)
+    {
+        if (logRefillDebug)
+        {
+            Debug.Log(message);
         }
     }
     
