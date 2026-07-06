@@ -66,7 +66,7 @@ namespace EnvironmentSystem
         // ── Internal state ─────────────────────────────────────────────────────
 
         private readonly List<OptimizableObject> _managedObjects   = new List<OptimizableObject>(512);
-        private readonly HashSet<OptimizableObject> _managedObjectSet = new HashSet<OptimizableObject>();
+        private readonly Dictionary<OptimizableObject, int> _managedObjectIndex = new Dictionary<OptimizableObject, int>(512);
         // Separate bucket of objects that are currently hidden but within load range — checked first.
         private readonly List<OptimizableObject> _hiddenNearby     = new List<OptimizableObject>(128);
         private readonly HashSet<OptimizableObject> _hiddenNearbySet = new HashSet<OptimizableObject>();
@@ -471,7 +471,7 @@ namespace EnvironmentSystem
 
         private void OnSceneUnloaded(Scene scene)
         {
-            RebuildManagedObjectSet();
+            RebuildManagedObjectIndex();
             RebuildHiddenNearbySet();
             if (_currentIndex >= _managedObjects.Count) _currentIndex = 0;
         }
@@ -480,15 +480,18 @@ namespace EnvironmentSystem
 
         public void Register(OptimizableObject obj)
         {
-            if (obj != null && _managedObjectSet.Add(obj))
-                _managedObjects.Add(obj);
+            if (obj == null || _managedObjectIndex.ContainsKey(obj))
+                return;
+
+            _managedObjectIndex[obj] = _managedObjects.Count;
+            _managedObjects.Add(obj);
         }
 
         public void Unregister(OptimizableObject obj)
         {
             RemoveHiddenNearby(obj);
-            int index = _managedObjects.IndexOf(obj);
-            if (index == -1) return;
+            if (obj == null || !_managedObjectIndex.TryGetValue(obj, out int index))
+                return;
 
             RemoveManagedAt(index);
         }
@@ -497,12 +500,15 @@ namespace EnvironmentSystem
         {
             OptimizableObject obj = _managedObjects[index];
             if (obj != null)
-                _managedObjectSet.Remove(obj);
+                _managedObjectIndex.Remove(obj);
 
             int lastIndex = _managedObjects.Count - 1;
             if (index != lastIndex)
             {
-                _managedObjects[index] = _managedObjects[lastIndex];
+                OptimizableObject movedObj = _managedObjects[lastIndex];
+                _managedObjects[index] = movedObj;
+                if (movedObj != null)
+                    _managedObjectIndex[movedObj] = index;
             }
 
             _managedObjects.RemoveAt(lastIndex);
@@ -514,9 +520,9 @@ namespace EnvironmentSystem
                 _currentIndex = 0;
         }
 
-        private void RebuildManagedObjectSet()
+        private void RebuildManagedObjectIndex()
         {
-            _managedObjectSet.Clear();
+            _managedObjectIndex.Clear();
             for (int i = _managedObjects.Count - 1; i >= 0; i--)
             {
                 OptimizableObject obj = _managedObjects[i];
@@ -526,7 +532,7 @@ namespace EnvironmentSystem
                     continue;
                 }
 
-                _managedObjectSet.Add(obj);
+                _managedObjectIndex[obj] = i;
             }
         }
 
