@@ -83,8 +83,10 @@ public class FuelTank : MonoBehaviour
     private MeshFilter _fillMeshFilter;
     private Mesh _proceduralMesh;
     private Vector3[] _baseVertices;
+    private Vector3[] _animatedVertices;
     private int[] _baseTriangles;
     private Vector2[] _baseUVs;
+    private Renderer[] _displayRenderers;
     private float _currentRatio = 0f;
     private float _targetRatio = 0f;
 
@@ -162,7 +164,8 @@ public class FuelTank : MonoBehaviour
 
         if (displayObject != null)
         {
-            foreach (var r in displayObject.GetComponentsInChildren<Renderer>(true))
+            _displayRenderers = displayObject.GetComponentsInChildren<Renderer>(true);
+            foreach (var r in _displayRenderers)
             {
                 if (r.material != null)
                 {
@@ -294,6 +297,7 @@ public class FuelTank : MonoBehaviour
         }
 
         _baseVertices = vertices;
+        _animatedVertices = new Vector3[numVerts];
         _baseUVs = uvs;
         _baseTriangles = triangles;
 
@@ -306,8 +310,12 @@ public class FuelTank : MonoBehaviour
 
     private void AnimateWaveMesh()
     {
-        Vector3[] verts = new Vector3[_baseVertices.Length];
-        System.Array.Copy(_baseVertices, verts, _baseVertices.Length);
+        if (_animatedVertices == null || _animatedVertices.Length != _baseVertices.Length)
+        {
+            _animatedVertices = new Vector3[_baseVertices.Length];
+        }
+
+        System.Array.Copy(_baseVertices, _animatedVertices, _baseVertices.Length);
 
         float timeVal = Time.time * waveSpeed;
 
@@ -324,19 +332,19 @@ public class FuelTank : MonoBehaviour
 
             if (fillHeightAxis == WaveAxis.LocalX)
             {
-                verts[i * 2 + 1].x = fillOffset + wave;
+                _animatedVertices[i * 2 + 1].x = fillOffset + wave;
             }
             else if (fillHeightAxis == WaveAxis.LocalZ)
             {
-                verts[i * 2 + 1].z = fillOffset + wave;
+                _animatedVertices[i * 2 + 1].z = fillOffset + wave;
             }
             else
             {
-                verts[i * 2 + 1].y = fillOffset + wave;
+                _animatedVertices[i * 2 + 1].y = fillOffset + wave;
             }
         }
 
-        _proceduralMesh.vertices = verts;
+        _proceduralMesh.vertices = _animatedVertices;
         _proceduralMesh.RecalculateBounds();
     }
 
@@ -344,9 +352,14 @@ public class FuelTank : MonoBehaviour
     {
         if (displayObject == null) return;
 
-        Renderer[] renderers = displayObject.GetComponentsInChildren<Renderer>(true);
-        foreach (var r in renderers)
+        if (_displayRenderers == null || _displayRenderers.Length == 0)
         {
+            _displayRenderers = displayObject.GetComponentsInChildren<Renderer>(true);
+        }
+
+        foreach (var r in _displayRenderers)
+        {
+            if (r == null) continue;
             if (r == fuelBarFillRenderer) continue;
 
             r.GetPropertyBlock(_propBlock);

@@ -53,6 +53,8 @@ public class CockpitCam : MonoBehaviour
 	private float lastRayDistance;
 	private Vector3 lastRayHitPoint;
 	private ICockpitHighlightable currentHighlight;
+	private const int MaxCockpitRayHits = 32;
+	private readonly RaycastHit[] cockpitRayHits = new RaycastHit[MaxCockpitRayHits];
 
 	private GameObject activePlayer;
 	private bool isDriving;
@@ -239,8 +241,8 @@ public class CockpitCam : MonoBehaviour
 		lastRayHit = false;
 		lastRayHitPoint = ray.origin + ray.direction * interactDistance;
 
-		RaycastHit[] hits = Physics.RaycastAll(ray, interactDistance, interactMask, QueryTriggerInteraction.Collide);
-		if (hits == null || hits.Length == 0)
+		int hitCount = Physics.RaycastNonAlloc(ray, cockpitRayHits, interactDistance, interactMask, QueryTriggerInteraction.Collide);
+		if (hitCount == 0)
 		{
 			return null;
 		}
@@ -249,8 +251,9 @@ public class CockpitCam : MonoBehaviour
 		float bestDistance = float.MaxValue;
 		ICockpitInteractable bestTarget = null;
 
-		foreach (RaycastHit hit in hits)
+		for (int i = 0; i < hitCount; i++)
 		{
+			RaycastHit hit = cockpitRayHits[i];
 			if (hit.collider != null && hit.distance < nearestAnyHit)
 			{
 				nearestAnyHit = hit.distance;
