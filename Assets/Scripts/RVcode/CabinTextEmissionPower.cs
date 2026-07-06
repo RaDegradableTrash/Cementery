@@ -9,6 +9,7 @@ public class CabinTextEmissionPower : MonoBehaviour
     [SerializeField] private float onEmissionHdr = 0f;
     [SerializeField] private float rampUpSeconds = 1.5f;
     [SerializeField] private float rampDownSeconds = 0.5f;
+    [SerializeField, Min(0.02f)] private float stablePowerCheckInterval = 0.15f;
 
     private Color baseEmissionColor = Color.white;
     private Color originalEmissionColor = Color.white;
@@ -18,6 +19,8 @@ public class CabinTextEmissionPower : MonoBehaviour
     private bool hasOriginalEmission;
     private bool hasAppliedEmission;
     private float lastAppliedHdr = float.NaN;
+    private float lastTargetHdr;
+    private float nextStablePowerCheckTime;
     private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
 
     private void Awake()
@@ -34,6 +37,7 @@ public class CabinTextEmissionPower : MonoBehaviour
 
         CacheBaseEmission();
         currentHdr = offEmissionHdr;
+        lastTargetHdr = offEmissionHdr;
         ApplyEmission(currentHdr, true);
     }
 
@@ -59,9 +63,16 @@ public class CabinTextEmissionPower : MonoBehaviour
             return;
         }
 
+        float now = Time.unscaledTime;
+        bool transitionSettled = Mathf.Abs(currentHdr - lastTargetHdr) < 0.001f;
+        if (transitionSettled && now < nextStablePowerCheckTime)
+        {
+            return;
+        }
+
         bool hasPower = startProcedure == null || startProcedure.HasAnyBatteryOn();
-        float onHdr = useMaterialOnEmissionHdr ? baseEmissionHdr : onEmissionHdr;
-        float targetHdr = hasPower ? onHdr : offEmissionHdr;
+        float targetHdr = GetTargetHdr(hasPower);
+        lastTargetHdr = targetHdr;
         float duration = hasPower ? rampUpSeconds : rampDownSeconds;
 
         if (duration <= 0f)
@@ -76,6 +87,17 @@ public class CabinTextEmissionPower : MonoBehaviour
         }
 
         ApplyEmission(currentHdr);
+
+        if (Mathf.Abs(currentHdr - targetHdr) < 0.001f)
+        {
+            nextStablePowerCheckTime = now + Mathf.Max(0.02f, stablePowerCheckInterval);
+        }
+    }
+
+    private float GetTargetHdr(bool hasPower)
+    {
+        float onHdr = useMaterialOnEmissionHdr ? baseEmissionHdr : onEmissionHdr;
+        return hasPower ? onHdr : offEmissionHdr;
     }
 
     private void CacheBaseEmission()
