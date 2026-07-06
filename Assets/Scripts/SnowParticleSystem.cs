@@ -194,26 +194,7 @@ public class SnowParticleSystem : MonoBehaviour
                 mat.SetColor("_BaseColor", new Color(2.0f, 2.0f, 2.0f, 0.8f)); // HDR bright white
                 mat.SetColor("_Color", new Color(2.0f, 2.0f, 2.0f, 0.8f));
                 
-                // 程序化生成柔和的圆形贴图
-                Texture2D circleTex = new Texture2D(32, 32, TextureFormat.RGBA32, false);
-                circleTex.name = "SoftSnowflakeTex";
-                Color[] pixels = new Color[32 * 32];
-                Vector2 center = new Vector2(16, 16);
-                for (int y = 0; y < 32; y++)
-                {
-                    for (int x = 0; x < 32; x++)
-                    {
-                        float dist = Vector2.Distance(new Vector2(x, y), center) / 16f;
-                        float alpha = Mathf.Clamp01(1f - dist);
-                        // 柔和边缘
-                        alpha = alpha * alpha * (3f - 2f * alpha);
-                        pixels[y * 32 + x] = new Color(1f, 1f, 1f, alpha);
-                    }
-                }
-                circleTex.SetPixels(pixels);
-                circleTex.Apply();
-                
-                mat.mainTexture = circleTex;
+                mat.mainTexture = GetSoftSnowflakeTexture();
                 renderer.sharedMaterial = mat;
             }
         }
@@ -221,6 +202,33 @@ public class SnowParticleSystem : MonoBehaviour
 
     private static GameObject snowBlobPrefab;
     private static Queue<GameObject> activeBlobs = new Queue<GameObject>();
+    private static Texture2D s_softSnowflakeTexture;
+
+    private static Texture2D GetSoftSnowflakeTexture()
+    {
+        if (s_softSnowflakeTexture != null)
+            return s_softSnowflakeTexture;
+
+        Texture2D circleTex = new Texture2D(32, 32, TextureFormat.RGBA32, false);
+        circleTex.name = "SoftSnowflakeTex";
+        Color[] pixels = new Color[32 * 32];
+        Vector2 center = new Vector2(16, 16);
+        for (int y = 0; y < 32; y++)
+        {
+            for (int x = 0; x < 32; x++)
+            {
+                float dist = Vector2.Distance(new Vector2(x, y), center) / 16f;
+                float alpha = Mathf.Clamp01(1f - dist);
+                alpha = alpha * alpha * (3f - 2f * alpha);
+                pixels[y * 32 + x] = new Color(1f, 1f, 1f, alpha);
+            }
+        }
+        circleTex.SetPixels(pixels);
+        circleTex.Apply();
+
+        s_softSnowflakeTexture = circleTex;
+        return s_softSnowflakeTexture;
+    }
 
     private void OnParticleCollision(GameObject other)
     {
