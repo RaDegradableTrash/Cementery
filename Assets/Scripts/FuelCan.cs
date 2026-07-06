@@ -18,6 +18,8 @@ public class FuelCan : MonoBehaviour
     
     private WorldObject worldObject;
     private CarControl targetCar; // 缓存目标车辆
+    private Camera cachedMainCamera;
+    private float nextCameraLookupTime;
     
     public float FuelAmount => fuelAmount;
     public bool IsEmpty => fuelAmount <= 0f;
@@ -63,12 +65,30 @@ public class FuelCan : MonoBehaviour
         if (worldObject.IsCarried && fuelDisplay != null)
         {
             // 让文字面向主相机
-            if (Camera.main != null)
+            Camera mainCamera = GetCachedMainCamera();
+            if (mainCamera != null)
             {
-                fuelDisplay.transform.LookAt(Camera.main.transform);
+                fuelDisplay.transform.LookAt(mainCamera.transform);
                 fuelDisplay.transform.Rotate(0, 180, 0);
             }
         }
+    }
+
+    private Camera GetCachedMainCamera()
+    {
+        if (cachedMainCamera != null)
+        {
+            return cachedMainCamera;
+        }
+
+        if (Time.time < nextCameraLookupTime)
+        {
+            return null;
+        }
+
+        nextCameraLookupTime = Time.time + 0.5f;
+        cachedMainCamera = Camera.main;
+        return cachedMainCamera;
     }
     
     void TryRefillVehicle()

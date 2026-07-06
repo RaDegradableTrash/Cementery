@@ -10,6 +10,7 @@ public class DynamicSnowObject : MonoBehaviour
     private Material localSnowMat;
     private Material localModMat;
     private Bounds localBounds;
+    private bool hasLocalSnowMaterial;
 
     void Start()
     {
@@ -42,6 +43,8 @@ public class DynamicSnowObject : MonoBehaviour
             localSnowMat.SetTexture("_LocalSnowHeightMap", localSnowMap);
             localSnowMat.SetVector("_LocalSnowBounds", new Vector4(localBounds.min.x, localBounds.min.z, localBounds.size.x, localBounds.size.z));
             localSnowMat.SetFloat("_Cutoff", cutoff);
+            UpdateSnowMaterialTransform();
+            hasLocalSnowMaterial = true;
         }
         
         Shader modShader = Shader.Find("Hidden/LocalSnowModification");
@@ -87,10 +90,21 @@ public class DynamicSnowObject : MonoBehaviour
 
     void Update()
     {
-        if (localSnowMat != null)
+        if (hasLocalSnowMaterial && transform.hasChanged)
         {
-            localSnowMat.SetMatrix("_RootWorldToLocal", transform.worldToLocalMatrix);
+            UpdateSnowMaterialTransform();
         }
+    }
+
+    private void UpdateSnowMaterialTransform()
+    {
+        if (localSnowMat == null)
+        {
+            return;
+        }
+
+        localSnowMat.SetMatrix("_RootWorldToLocal", transform.worldToLocalMatrix);
+        transform.hasChanged = false;
     }
 
     public void AddSnowLocal(Vector3 worldPos, float radius, float amount)
