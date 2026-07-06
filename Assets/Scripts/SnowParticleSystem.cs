@@ -225,13 +225,16 @@ public class SnowParticleSystem : MonoBehaviour
         Texture2D circleTex = new Texture2D(32, 32, TextureFormat.RGBA32, false);
         circleTex.name = "SoftSnowflakeTex";
         Color[] pixels = new Color[32 * 32];
-        Vector2 center = new Vector2(16, 16);
+        const float center = 16f;
+        const float invRadiusSq = 1f / (16f * 16f);
         for (int y = 0; y < 32; y++)
         {
+            float dy = y - center;
             for (int x = 0; x < 32; x++)
             {
-                float dist = Vector2.Distance(new Vector2(x, y), center) / 16f;
-                float alpha = Mathf.Clamp01(1f - dist);
+                float dx = x - center;
+                float distSq = (dx * dx + dy * dy) * invRadiusSq;
+                float alpha = Mathf.Clamp01(1f - Mathf.Sqrt(distSq));
                 alpha = alpha * alpha * (3f - 2f * alpha);
                 pixels[y * 32 + x] = new Color(1f, 1f, 1f, alpha);
             }
