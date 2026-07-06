@@ -455,9 +455,7 @@ namespace EnvironmentSystem
 
         private void OnSceneUnloaded(Scene scene)
         {
-            _managedObjects.RemoveAll(o => o == null || o.isDestroyed);
             RebuildManagedObjectSet();
-            _hiddenNearby.RemoveAll(o => o == null || o.isDestroyed);
             RebuildHiddenNearbySet();
             if (_currentIndex >= _managedObjects.Count) _currentIndex = 0;
         }
