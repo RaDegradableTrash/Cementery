@@ -31,6 +31,9 @@ public class SimpleLight : MonoBehaviour
     private Color[] baseEmissionColors;
     private bool[] hasEmission;
     private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
+    private static LightControl[] s_cachedLightControls;
+    private static float s_nextLightControlCacheRefreshTime;
+    private const float LightControlCacheRefreshInterval = 1f;
     public event System.Action OnStateChanged;
 
     private void Awake()
@@ -112,7 +115,7 @@ public class SimpleLight : MonoBehaviour
             return;
         }
 
-        LightControl[] lightControls = FindObjectsOfType<LightControl>();
+        LightControl[] lightControls = GetCachedLightControls();
         if (lightControls == null || lightControls.Length == 0)
         {
             return;
@@ -202,7 +205,7 @@ public class SimpleLight : MonoBehaviour
             return GetComponentInChildren<Light>();
         }
 
-        LightControl[] lightControls = FindObjectsOfType<LightControl>();
+        LightControl[] lightControls = GetCachedLightControls();
         if (lightControls == null || lightControls.Length == 0)
         {
             return GetComponentInChildren<Light>();
@@ -228,7 +231,7 @@ public class SimpleLight : MonoBehaviour
             return GetComponentInChildren<Renderer>();
         }
 
-        LightControl[] lightControls = FindObjectsOfType<LightControl>();
+        LightControl[] lightControls = GetCachedLightControls();
         if (lightControls == null || lightControls.Length == 0)
         {
             return GetComponentInChildren<Renderer>();
@@ -245,6 +248,18 @@ public class SimpleLight : MonoBehaviour
         }
 
         return null;
+    }
+
+    private static LightControl[] GetCachedLightControls()
+    {
+        if (s_cachedLightControls != null && Time.time < s_nextLightControlCacheRefreshTime)
+        {
+            return s_cachedLightControls;
+        }
+
+        s_nextLightControlCacheRefreshTime = Time.time + LightControlCacheRefreshInterval;
+        s_cachedLightControls = FindObjectsOfType<LightControl>();
+        return s_cachedLightControls;
     }
 
     private static bool IsControlledByAny(LightControl[] lightControls, Light light)
