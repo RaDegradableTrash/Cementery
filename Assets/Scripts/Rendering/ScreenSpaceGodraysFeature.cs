@@ -208,7 +208,7 @@ public class ScreenSpaceGodraysPass : ScriptableRenderPass
 
         _nextLightSearchTime = Time.time + LightSearchInterval;
         _cachedSunLight = null;
-        Light[] lights = GameObject.FindObjectsOfType<Light>();
+        Light[] lights = Object.FindObjectsByType<Light>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
         foreach (Light light in lights)
         {
             if (light.type == LightType.Directional && light.enabled)
