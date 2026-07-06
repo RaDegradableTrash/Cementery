@@ -56,6 +56,9 @@ namespace EnvironmentSystem
         [Tooltip("Delay (frames) after a scene loads before scanning it, to let Awake/Start settle.")]
         public int scanDelayFrames = 3;
 
+        [Tooltip("Maximum scene roots to scan per frame after a chunk scene loads.")]
+        public int scanRootsPerFrame = 32;
+
         [Header("Debug")]
         [Tooltip("Log scan results to the Console.")]
         public bool verboseLogging = false;
@@ -497,20 +500,25 @@ namespace EnvironmentSystem
                 yield return null;
 
             if (!scene.isLoaded) yield break;
-            ScanScene(scene);
-        }
-
-        private void ScanScene(Scene scene)
-        {
-            if (!scene.isLoaded) return;
 
             GameObject[] roots = scene.GetRootGameObjects();
             int added = 0;
+            int budget = Mathf.Max(1, scanRootsPerFrame);
+            int processedThisFrame = 0;
 
             foreach (GameObject root in roots)
             {
-                if (ShouldSkipRoot(root)) continue;
-                added += EnsureOptimizableRecursive(root);
+                if (!scene.isLoaded) yield break;
+
+                if (!ShouldSkipRoot(root))
+                    added += EnsureOptimizableRecursive(root);
+
+                processedThisFrame++;
+                if (processedThisFrame >= budget)
+                {
+                    processedThisFrame = 0;
+                    yield return null;
+                }
             }
 
             if (verboseLogging)
