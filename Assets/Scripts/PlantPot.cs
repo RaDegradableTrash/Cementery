@@ -28,6 +28,8 @@ public class PlantPot : MonoBehaviour
     private bool _lastInteractable;
     private string _lastInteractMessage;
     private bool _hasAppliedWorldObjectState;
+    private static WorldObject s_cachedCarriedObject;
+    private static bool s_cachedCarriedObjectIsPlantable;
 
     void Awake()
     {
@@ -61,10 +63,7 @@ public class PlantPot : MonoBehaviour
                 if (InteractionSystem.Instance != null)
                 {
                     WorldObject carried = InteractionSystem.Instance.CarriedWorldObject;
-                    if (carried != null && (carried.GetComponent<Kelp>() != null || carried.GetComponent<KelpLeaf>() != null))
-                    {
-                        holdingKelp = true;
-                    }
+                    holdingKelp = IsPlantableCarriedObject(carried);
                 }
                 SetWorldObjectState(holdingKelp, holdingKelp ? "Plant Kelp" : "");
             }
@@ -121,6 +120,25 @@ public class PlantPot : MonoBehaviour
         }
 
         _hasAppliedWorldObjectState = true;
+    }
+
+    private static bool IsPlantableCarriedObject(WorldObject carried)
+    {
+        if (carried == null)
+        {
+            s_cachedCarriedObject = null;
+            s_cachedCarriedObjectIsPlantable = false;
+            return false;
+        }
+
+        if (carried == s_cachedCarriedObject)
+        {
+            return s_cachedCarriedObjectIsPlantable;
+        }
+
+        s_cachedCarriedObject = carried;
+        s_cachedCarriedObjectIsPlantable = carried.GetComponent<Kelp>() != null || carried.GetComponent<KelpLeaf>() != null;
+        return s_cachedCarriedObjectIsPlantable;
     }
 
     public bool HasPlant()
