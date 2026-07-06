@@ -35,6 +35,7 @@ public class LightControl : MonoBehaviour
     [Header("Headlight Settings")]
     [SerializeField] private float headlightEmissionHdr = 0f;
     [SerializeField] private float headlightIntensity = 35f;
+    [SerializeField, Min(0.02f)] private float stablePowerCheckInterval = 0.15f;
 
     private Renderer[] brakeRenderers;
     private Light[] brakeLights;
@@ -44,6 +45,7 @@ public class LightControl : MonoBehaviour
     private Color[] baseHeadEmissionColors;
     private bool lastPowerState;
     private bool lastBrakeState;
+    private float nextPowerCheckTime;
 
     private void Awake()
     {
@@ -111,7 +113,15 @@ public class LightControl : MonoBehaviour
 
     private void Update()
     {
-        bool hasPower = startProcedure == null || startProcedure.HasAnyBatteryOn();
+        float now = Time.unscaledTime;
+        bool hasPower = lastPowerState;
+        bool shouldCheckPower = startProcedure == null || now >= nextPowerCheckTime;
+        if (shouldCheckPower)
+        {
+            hasPower = startProcedure == null || startProcedure.HasAnyBatteryOn();
+            nextPowerCheckTime = now + Mathf.Max(0.02f, stablePowerCheckInterval);
+        }
+
         bool braking = hasPower && Input.GetKey(KeyCode.S);
         bool powerChanged = hasPower != lastPowerState;
 
