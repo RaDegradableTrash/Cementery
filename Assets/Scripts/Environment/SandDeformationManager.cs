@@ -24,6 +24,7 @@ namespace EnvironmentSystem
         private float[] _maxLifetimes = new float[MaxDeformers];
         
         private int _currentIndex = 0;
+        private int _activeDeformerCount;
         private bool _dynamicBindingsStable;
         [Header("Runtime Binding")]
         [Tooltip("Periodically attach deformers to player and vehicle wheels that appear after scene load.")]
@@ -92,10 +93,15 @@ namespace EnvironmentSystem
 
             // 2. Circular allocation for brand new footsteps/tire tracks
             int index = _currentIndex;
+            bool replacingActiveSlot = _lifetimes[index] > 0f || _deformerParams[index].w > 0.05f;
             _deformerPositions[index] = new Vector4(position.x, position.y, position.z, radius);
             _deformerParams[index] = new Vector4(depth, rimWidth, rimHeight, 1f);
             _lifetimes[index] = lifetime;
             _maxLifetimes[index] = lifetime;
+            if (!replacingActiveSlot)
+            {
+                _activeDeformerCount++;
+            }
 
             _currentIndex = (_currentIndex + 1) % MaxDeformers;
         }
@@ -110,6 +116,9 @@ namespace EnvironmentSystem
                 _nextSweepTime = Time.time + interval;
                 _dynamicBindingsStable = AutoBindDynamicDeformers();
             }
+
+            if (_activeDeformerCount <= 0)
+                return;
 
             bool hasChanged = false;
 
@@ -129,6 +138,7 @@ namespace EnvironmentSystem
                     {
                         _deformerPositions[i] = Vector4.zero;
                         _deformerParams[i] = Vector4.zero;
+                        _activeDeformerCount = Mathf.Max(0, _activeDeformerCount - 1);
                     }
                 }
             }
