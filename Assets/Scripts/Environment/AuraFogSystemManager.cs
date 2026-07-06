@@ -33,6 +33,8 @@ namespace EnvironmentSystem
         private float _lastFogStartDistance;
         private float _lastFogEndDistance;
         private float _lastFogDensity;
+        private static readonly int CloudThresholdId = Shader.PropertyToID("_CloudThreshold");
+        private static readonly int CloudDensityScaleId = Shader.PropertyToID("_CloudDensityScale");
 
         private void OnEnable()
         {
@@ -79,8 +81,8 @@ namespace EnvironmentSystem
                 float daylight = Mathf.Clamp01((sunElevation + 0.08f) / 1.08f);
                 daylight = Mathf.SmoothStep(0f, 1f, daylight);
 
-                float cloudThreshold = Shader.GetGlobalFloat("_CloudThreshold");
-                float cloudDensityScale = Shader.GetGlobalFloat("_CloudDensityScale");
+                float cloudThreshold = Shader.GetGlobalFloat(CloudThresholdId);
+                float cloudDensityScale = Shader.GetGlobalFloat(CloudDensityScaleId);
                 float cloudFactor = 0f;
                 if (cloudDensityScale > 0.001f)
                 {
