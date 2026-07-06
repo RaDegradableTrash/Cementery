@@ -29,6 +29,8 @@ public class ButtonCameraMover : MonoBehaviour
         {
             mainCameraTransform = Camera.main.transform;
         }
+
+        enabled = false;
     }
 
     private void StartCameraMove()
@@ -43,6 +45,7 @@ public class ButtonCameraMover : MonoBehaviour
         
         elapsedTime = 0f;
         isMoving = true;
+        enabled = true;
 
         // 【删除了之前的 selfButton.interactable = false】
     }
@@ -61,6 +64,7 @@ public class ButtonCameraMover : MonoBehaviour
         if (t >= 1.0f)
         {
             isMoving = false;
+            enabled = false;
         }
     }
 
