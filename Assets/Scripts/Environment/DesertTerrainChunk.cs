@@ -126,6 +126,12 @@ namespace EnvironmentSystem
         private Material _lodMaterial = null;
         private Material _highQualityMaterial = null;
         private bool _isUsingLOD = false;
+        private Vector3 _lodCenter;
+        private static Camera s_lodCamera;
+        private static float s_nextLodCameraRefreshTime;
+        private const float LodCameraRefreshInterval = 0.75f;
+        private const float LodDistanceThreshold = 220f;
+        private const float LodDistanceThresholdSq = LodDistanceThreshold * LodDistanceThreshold;
 
 
 
@@ -214,16 +220,18 @@ namespace EnvironmentSystem
             MeshRenderer mr = GetComponent<MeshRenderer>();
             if (mr == null) yield break;
 
+            _lodCenter = transform.position + new Vector3(width * cellSize * 0.5f, 0f, depth * cellSize * 0.5f);
+
             while (true)
             {
                 yield return wait;
                 
-                Camera mainCam = Camera.main;
+                Camera mainCam = GetSharedLodCamera();
                 if (mainCam != null)
                 {
-                    float dist = Vector3.Distance(transform.position + new Vector3(width * cellSize * 0.5f, 0, depth * cellSize * 0.5f), mainCam.transform.position);
+                    float distSq = (_lodCenter - mainCam.transform.position).sqrMagnitude;
                     // Standard LOD threshold: 220 meters
-                    if (dist > 220f)
+                    if (distSq > LodDistanceThresholdSq)
                     {
                         if (!_isUsingLOD && _lodMaterial != null)
                         {
@@ -241,6 +249,19 @@ namespace EnvironmentSystem
                     }
                 }
             }
+        }
+
+        private static Camera GetSharedLodCamera()
+        {
+            if (s_lodCamera != null && s_lodCamera.gameObject.activeInHierarchy && s_lodCamera.enabled)
+                return s_lodCamera;
+
+            if (Time.unscaledTime < s_nextLodCameraRefreshTime)
+                return null;
+
+            s_nextLodCameraRefreshTime = Time.unscaledTime + LodCameraRefreshInterval;
+            s_lodCamera = Camera.main;
+            return s_lodCamera;
         }
 
         private void OnDisable()
