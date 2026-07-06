@@ -10,6 +10,7 @@ public class SnowParticleSystem : MonoBehaviour
     public float particleSnowAmount = 0.2f; // Increase accumulation rate so it passes the Cutoff!
     [Header("Performance")]
     public int maxCollisionEventsPerFrame = 24;
+    public int maxSnowMapWritesPerFrame = 6;
     public int skyVisibilityCheckStride = 4;
     public bool enableDynamicObjectSnow = false;
     [Min(0.1f)] public float followRepositionDistance = 1.5f;
@@ -18,6 +19,7 @@ public class SnowParticleSystem : MonoBehaviour
     private List<ParticleCollisionEvent> collisionEvents;
     private int _collisionFrame = -1;
     private int _processedCollisionEventsThisFrame;
+    private int _processedSnowMapWritesThisFrame;
     private int _skyCheckCounter;
     private float _nextTargetSearchTime;
     private RVSystem.RVController _cachedRv;
@@ -255,6 +257,7 @@ public class SnowParticleSystem : MonoBehaviour
         {
             _collisionFrame = Time.frameCount;
             _processedCollisionEventsThisFrame = 0;
+            _processedSnowMapWritesThisFrame = 0;
         }
 
         int remainingBudget = Mathf.Max(0, maxCollisionEventsPerFrame - _processedCollisionEventsThisFrame);
@@ -267,6 +270,7 @@ public class SnowParticleSystem : MonoBehaviour
         CollisionTargetInfo targetInfo = GetCollisionTargetInfo(other, targetCacheKey);
         bool isTerrain = targetInfo.isTerrain;
         int visibilityStride = Mathf.Max(1, skyVisibilityCheckStride);
+        int snowWriteBudget = Mathf.Max(1, maxSnowMapWritesPerFrame);
         SnowAccumulationManager snowManager = SnowAccumulationManager.Instance;
 
         for (int i = 0; i < numCollisionEvents; i++)
@@ -320,8 +324,12 @@ public class SnowParticleSystem : MonoBehaviour
                 
                 if (dynamicObj != null)
                 {
+                    if (_processedSnowMapWritesThisFrame >= snowWriteBudget)
+                        continue;
+
                     // 局部物体（车身等）保持精细的小半径，防止一颗雪把全车刷白
                     dynamicObj.AddSnowLocal(pos, 0.4f, particleSnowAmount * 1.5f);
+                    _processedSnowMapWritesThisFrame++;
                 }
                 continue; // 撞到物体的雪花不会再穿透到地上！
             }
@@ -336,9 +344,13 @@ public class SnowParticleSystem : MonoBehaviour
             
             if (snowManager != null)
             {
+                if (_processedSnowMapWritesThisFrame >= snowWriteBudget)
+                    continue;
+
                 // 【核心修复】：为地形使用超大的柔和笔刷半径（3.5米）！
                 // 这能保证落下的雪花能迅速且均匀地在地面晕染开来并连成一大片，彻底消灭“一块一块的斑秃”感！
                 snowManager.AddSnowAtPoint(pos, 3.5f, particleSnowAmount * 0.6f);
+                _processedSnowMapWritesThisFrame++;
             }
         }
     }
