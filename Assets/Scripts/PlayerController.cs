@@ -107,6 +107,8 @@ public class PlayerController : NetworkBehaviour
     private readonly RaycastHit[] _groundFallbackHitBuffer = new RaycastHit[GroundHitBufferSize];
     private const int ClimbHitBufferSize = 16;
     private readonly RaycastHit[] _climbHitBuffer = new RaycastHit[ClimbHitBufferSize];
+    private const int CollisionContactBufferSize = 32;
+    private readonly ContactPoint[] _collisionContactBuffer = new ContactPoint[CollisionContactBufferSize];
     private bool _hasSetupKinematic = false;
     private float _startupTime;
     private int _inventoryModeCacheFrame = -1;
@@ -798,8 +800,10 @@ SimpleCircleBar.Instance.UpdateHealthBar(hp, maxHp);
         // 🌟 强力拦截 3：如果正在使用家具，绝不处理任何外部碰撞逻辑，避免被家具碰撞体误判为墙壁
         if (IsUsingFurniture) return;
 
-        foreach (ContactPoint cp in collision.contacts)
+        int contactCount = collision.GetContacts(_collisionContactBuffer);
+        for (int i = 0; i < contactCount; i++)
         {
+            ContactPoint cp = _collisionContactBuffer[i];
             float relativeY = cp.point.y - transform.position.y;
             
             if (Mathf.Abs(cp.normal.y) < 0.5f)
@@ -827,8 +831,9 @@ SimpleCircleBar.Instance.UpdateHealthBar(hp, maxHp);
             if (wo != null && wo.canBePushed)
             {
                 Vector3 pushDir = Vector3.zero;
-                foreach (ContactPoint contact in collision.contacts)
+                for (int i = 0; i < contactCount; i++)
                 {
+                    ContactPoint contact = _collisionContactBuffer[i];
                     pushDir -= contact.normal;
                 }
                 pushDir.y = 0f;
