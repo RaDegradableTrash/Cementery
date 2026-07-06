@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -53,6 +54,9 @@ public class HeartbeatSystem : MonoBehaviour
     private bool playedLub;
     private bool playedDub;
     private bool animatorConfigured;
+    private float nextAnimatorResolveTime;
+    private float lastAnimatorSpeed = -1f;
+    private readonly List<AnimatorClipInfo> clipInfoBuffer = new List<AnimatorClipInfo>(1);
 
     private void Awake()
     {
@@ -89,7 +93,12 @@ public class HeartbeatSystem : MonoBehaviour
 
     private void Update()
     {
-        ResolveAnimator();
+        if ((animator == null || !animatorConfigured) && Time.unscaledTime >= nextAnimatorResolveTime)
+        {
+            nextAnimatorResolveTime = Time.unscaledTime + 1f;
+            ResolveAnimator();
+        }
+
         if (animator == null)
         {
             return;
@@ -100,7 +109,12 @@ public class HeartbeatSystem : MonoBehaviour
         state.bpmCurrent = Mathf.RoundToInt(bpm);
         state.bpmDisplay = state.bpmCurrent;
 
-        animator.speed = Mathf.Max(0.01f, state.bpmCurrent / Mathf.Max(1f, baseAnimationBPM));
+        float targetAnimatorSpeed = Mathf.Max(0.01f, state.bpmCurrent / Mathf.Max(1f, baseAnimationBPM));
+        if (!Mathf.Approximately(lastAnimatorSpeed, targetAnimatorSpeed))
+        {
+            animator.speed = targetAnimatorSpeed;
+            lastAnimatorSpeed = targetAnimatorSpeed;
+        }
 
         AnimatorStateInfo info = animator.GetCurrentAnimatorStateInfo(0);
         currentClipIsLooping = IsCurrentClipLooping();
@@ -271,13 +285,14 @@ public class HeartbeatSystem : MonoBehaviour
             return false;
         }
 
-        AnimatorClipInfo[] clips = animator.GetCurrentAnimatorClipInfo(0);
-        if (clips.Length == 0 || clips[0].clip == null)
+        clipInfoBuffer.Clear();
+        animator.GetCurrentAnimatorClipInfo(0, clipInfoBuffer);
+        if (clipInfoBuffer.Count == 0 || clipInfoBuffer[0].clip == null)
         {
             return false;
         }
 
-        return clips[0].clip.isLooping;
+        return clipInfoBuffer[0].clip.isLooping;
     }
 
     private void PlaySfx(AudioClip clip, float scale)
