@@ -59,6 +59,8 @@ public class Speaker : MonoBehaviour
     private int _currentTrackIndex = -1;
     private bool _isPlaying = false;
     private Coroutine _fadeCoroutine;
+    private float _nextTrackEndCheckTime;
+    private string _lastDisplayString;
     
     // 属性
     public int CurrentTrackIndex => _currentTrackIndex;
@@ -107,8 +109,17 @@ public class Speaker : MonoBehaviour
     
     void Update()
     {
+        if (!_isPlaying || musicPlaylist.Count == 0 || _audioSource == null)
+            return;
+
+        float now = Time.unscaledTime;
+        if (now < _nextTrackEndCheckTime)
+            return;
+
+        _nextTrackEndCheckTime = now + 0.2f;
+
         // 自动播放下一首（当前歌曲播放完毕时）
-        if (_audioSource != null && !_audioSource.isPlaying && _isPlaying && musicPlaylist.Count > 0)
+        if (!_audioSource.isPlaying)
         {
             NextTrack();
         }
@@ -208,6 +219,7 @@ public class Speaker : MonoBehaviour
             _audioSource.volume = masterVolume;
             _audioSource.Play();
             _isPlaying = true;
+            _nextTrackEndCheckTime = Time.unscaledTime + 0.2f;
             _fadeCoroutine = StartCoroutine(FadeIn());
         }
         
@@ -272,6 +284,7 @@ public class Speaker : MonoBehaviour
         {
             _audioSource.UnPause();
             _isPlaying = true;
+            _nextTrackEndCheckTime = Time.unscaledTime + 0.2f;
             UpdateDisplay();
         }
     }
@@ -309,6 +322,11 @@ public void SetVolume(float volume)
             displayString = string.Format(displayFormat, songName + statusSuffix, 
                                          _currentTrackIndex + 1, musicPlaylist.Count);
         }
+
+        if (_lastDisplayString == displayString)
+            return;
+
+        _lastDisplayString = displayString;
         
         if (displayTextMeshPro != null)
             displayTextMeshPro.text = displayString;
@@ -350,6 +368,7 @@ public void SetVolume(float volume)
         _audioSource.volume = 0f;
         _audioSource.Play();
         _isPlaying = true;
+        _nextTrackEndCheckTime = Time.unscaledTime + 0.2f;
         
         elapsed = 0f;
         while (elapsed < fadeTime)
