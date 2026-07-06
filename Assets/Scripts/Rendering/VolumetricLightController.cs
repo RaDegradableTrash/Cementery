@@ -27,6 +27,7 @@ namespace RenderingSystem
         private bool _hasCameraSample;
         private List<Light> _allLights = new List<Light>();
         private readonly List<LightDistancePair> _nearestLights = new List<LightDistancePair>(8);
+        private readonly HashSet<Light> _selectedNearestLights = new HashSet<Light>();
         private readonly Dictionary<Light, bool> _volumetricStates = new Dictionary<Light, bool>();
 #if AURA_2_PRESENT
         private readonly Dictionary<Light, Aura2API.AuraLight> _auraLightCache = new Dictionary<Light, Aura2API.AuraLight>();
@@ -114,6 +115,7 @@ namespace RenderingSystem
             float maxDistSqr = maxLightDistance * maxLightDistance;
             int budget = Mathf.Max(0, maxVolumetricLights);
             _nearestLights.Clear();
+            _selectedNearestLights.Clear();
 
             for (int i = _allLights.Count - 1; i >= 0; i--)
             {
@@ -154,7 +156,7 @@ namespace RenderingSystem
                     continue;
                 }
 
-                ToggleVolumetric(light, IsSelectedNearestLight(light));
+                ToggleVolumetric(light, _selectedNearestLights.Contains(light));
             }
         }
 
@@ -177,6 +179,7 @@ namespace RenderingSystem
             }
 
             _nearestLights.Insert(insertAt, pair);
+            _selectedNearestLights.Add(pair.light);
             if (_nearestLights.Count <= budget)
             {
                 return;
@@ -184,19 +187,8 @@ namespace RenderingSystem
 
             LightDistancePair removed = _nearestLights[_nearestLights.Count - 1];
             _nearestLights.RemoveAt(_nearestLights.Count - 1);
+            _selectedNearestLights.Remove(removed.light);
             ToggleVolumetric(removed, false);
-        }
-
-        private bool IsSelectedNearestLight(Light light)
-        {
-            for (int i = 0; i < _nearestLights.Count; i++)
-            {
-                if (_nearestLights[i].light == light)
-                {
-                    return true;
-                }
-            }
-            return false;
         }
 
         private void ToggleVolumetric(Light l, bool enable)
