@@ -47,6 +47,7 @@ namespace EnvironmentSystem
         private HashSet<string> _queuedChunks = new HashSet<string>();
         private readonly List<string> _requiredChunks = new List<string>(49);
         private readonly List<string> _chunksToUnload = new List<string>(49);
+        private readonly List<string> _queuedChunkBuffer = new List<string>(49);
         private readonly List<Vector2Int> _streamingOffsets = new List<Vector2Int>(49);
         private int _activeLoads = 0;
         private int _cachedOffsetRange = int.MinValue;
@@ -254,6 +255,8 @@ namespace EnvironmentSystem
                 LoadChunk(chunk);
             }
 
+            ReprioritizeLoadQueue(chunkSceneNames);
+
             // Unload chunks that are no longer requested.
             _chunksToUnload.Clear();
             foreach (var loaded in _loadedChunks)
@@ -267,6 +270,52 @@ namespace EnvironmentSystem
             for (int i = 0; i < _chunksToUnload.Count; i++)
             {
                 UnloadChunk(_chunksToUnload[i]);
+            }
+        }
+
+        private void ReprioritizeLoadQueue(List<string> priorityOrder)
+        {
+            if (_loadQueue.Count <= 1)
+            {
+                return;
+            }
+
+            _queuedChunkBuffer.Clear();
+            while (_loadQueue.Count > 0)
+            {
+                _queuedChunkBuffer.Add(_loadQueue.Dequeue());
+            }
+
+            _queuedChunks.Clear();
+            for (int i = 0; i < priorityOrder.Count; i++)
+            {
+                string chunkName = priorityOrder[i];
+                if (!_queuedChunkBuffer.Contains(chunkName))
+                {
+                    continue;
+                }
+
+                _loadQueue.Enqueue(chunkName);
+                _queuedChunks.Add(chunkName);
+            }
+
+            for (int i = 0; i < _queuedChunkBuffer.Count; i++)
+            {
+                string chunkName = _queuedChunkBuffer[i];
+                if (_queuedChunks.Contains(chunkName))
+                {
+                    continue;
+                }
+
+                if (_requestedChunks.Contains(chunkName))
+                {
+                    _loadQueue.Enqueue(chunkName);
+                    _queuedChunks.Add(chunkName);
+                }
+                else
+                {
+                    _loadedChunks.Remove(chunkName);
+                }
             }
         }
 
