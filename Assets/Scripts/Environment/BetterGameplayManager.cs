@@ -242,8 +242,7 @@ namespace EnvironmentSystem
                     OptimizableObject obj = _managedObjects[index];
                     if (obj == null || obj.isDestroyed)
                     {
-                        _managedObjectSet.Remove(obj);
-                        _managedObjects.RemoveAt(index);
+                        RemoveManagedAt(index);
                         continue;
                     }
 
@@ -321,8 +320,7 @@ namespace EnvironmentSystem
                 OptimizableObject obj = _managedObjects[_currentIndex];
                 if (obj == null || obj.isDestroyed)
                 {
-                    _managedObjectSet.Remove(obj);
-                    _managedObjects.RemoveAt(_currentIndex);
+                    RemoveManagedAt(_currentIndex);
                     continue;
                 }
 
@@ -445,6 +443,18 @@ namespace EnvironmentSystem
             _hiddenNearby.RemoveAt(lastIndex);
         }
 
+        private void RemoveHiddenNearby(OptimizableObject obj)
+        {
+            if (obj == null || !_hiddenNearbySet.Contains(obj))
+                return;
+
+            int index = _hiddenNearby.IndexOf(obj);
+            if (index >= 0)
+                RemoveHiddenNearbyAt(index);
+            else
+                _hiddenNearbySet.Remove(obj);
+        }
+
         // ── Scene event handlers ───────────────────────────────────────────────
 
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
@@ -476,17 +486,32 @@ namespace EnvironmentSystem
 
         public void Unregister(OptimizableObject obj)
         {
-            if (_hiddenNearbySet.Remove(obj))
-                _hiddenNearby.Remove(obj);
-
-            _managedObjectSet.Remove(obj);
+            RemoveHiddenNearby(obj);
             int index = _managedObjects.IndexOf(obj);
             if (index == -1) return;
 
-            _managedObjects.RemoveAt(index);
+            RemoveManagedAt(index);
+        }
 
-            if (index < _currentIndex) _currentIndex--;
-            if (_currentIndex >= _managedObjects.Count) _currentIndex = 0;
+        private void RemoveManagedAt(int index)
+        {
+            OptimizableObject obj = _managedObjects[index];
+            if (obj != null)
+                _managedObjectSet.Remove(obj);
+
+            int lastIndex = _managedObjects.Count - 1;
+            if (index != lastIndex)
+            {
+                _managedObjects[index] = _managedObjects[lastIndex];
+            }
+
+            _managedObjects.RemoveAt(lastIndex);
+
+            if (index < _currentIndex)
+                _currentIndex--;
+
+            if (_currentIndex >= _managedObjects.Count)
+                _currentIndex = 0;
         }
 
         private void RebuildManagedObjectSet()
@@ -497,7 +522,7 @@ namespace EnvironmentSystem
                 OptimizableObject obj = _managedObjects[i];
                 if (obj == null || obj.isDestroyed)
                 {
-                    _managedObjects.RemoveAt(i);
+                    RemoveManagedAt(i);
                     continue;
                 }
 
@@ -513,7 +538,7 @@ namespace EnvironmentSystem
                 OptimizableObject obj = _hiddenNearby[i];
                 if (obj == null || obj.isDestroyed)
                 {
-                    _hiddenNearby.RemoveAt(i);
+                    RemoveHiddenNearbyAt(i);
                     continue;
                 }
 
