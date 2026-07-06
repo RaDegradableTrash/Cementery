@@ -27,6 +27,10 @@ namespace EnvironmentSystem
         private bool _cameraInsideVolume;
         private Vector3 _cachedColliderCenter;
         private Vector3 _cachedColliderExtents;
+        private Vector3 _cachedWorldCenter;
+        private float _cachedBroadPhaseRadiusSq;
+        private Vector3 _cachedTransformPosition;
+        private Quaternion _cachedTransformRotation = Quaternion.identity;
         private Vector3 _cachedLossyScale;
         private float _cachedFadeMargin = float.NaN;
         private float _cachedLocalMargin = 1f;
@@ -75,10 +79,11 @@ namespace EnvironmentSystem
             if (_cameraTransform == null)
                 _cameraTransform = _mainCamera.transform;
 
-            Vector3 camPos = _cameraTransform.position;
-            bool isInside = _boxCollider.bounds.Contains(camPos);
-            _cameraInsideVolume = isInside;
             RefreshDerivedSettings();
+
+            Vector3 camPos = _cameraTransform.position;
+            bool isInside = IsCameraInsideVolume(camPos);
+            _cameraInsideVolume = isInside;
             _nextContainmentCheckTime = now + (isInside
                 ? _cachedLocalFogRefreshInterval
                 : _cachedOutsideVolumeCheckInterval);
@@ -125,6 +130,15 @@ namespace EnvironmentSystem
             return Mathf.Clamp01(minDist / localMargin);
         }
 
+        private bool IsCameraInsideVolume(Vector3 camPos)
+        {
+            Vector3 toCamera = camPos - _cachedWorldCenter;
+            if (toCamera.sqrMagnitude > _cachedBroadPhaseRadiusSq)
+                return false;
+
+            return _boxCollider.bounds.Contains(camPos);
+        }
+
         private void RefreshDerivedSettings()
         {
             if (_boxCollider == null)
@@ -133,8 +147,12 @@ namespace EnvironmentSystem
             Vector3 size = _boxCollider.size;
             Vector3 center = _boxCollider.center;
             Vector3 lossyScale = transform.lossyScale;
+            Vector3 position = transform.position;
+            Quaternion rotation = transform.rotation;
             bool shapeChanged = _cachedColliderCenter != center ||
                                 _cachedColliderExtents != size * 0.5f ||
+                                _cachedTransformPosition != position ||
+                                _cachedTransformRotation != rotation ||
                                 _cachedLossyScale != lossyScale ||
                                 !Mathf.Approximately(_cachedFadeMargin, fadeMargin);
 
@@ -142,9 +160,15 @@ namespace EnvironmentSystem
             {
                 _cachedColliderCenter = center;
                 _cachedColliderExtents = size * 0.5f;
+                _cachedTransformPosition = position;
+                _cachedTransformRotation = rotation;
                 _cachedLossyScale = lossyScale;
                 _cachedFadeMargin = fadeMargin;
                 _cachedLocalMargin = transform.InverseTransformVector(new Vector3(fadeMargin, 0f, 0f)).magnitude;
+                _cachedWorldCenter = transform.TransformPoint(center);
+                Vector3 scaledExtents = Vector3.Scale(_cachedColliderExtents, Abs(lossyScale));
+                float broadPhaseRadius = scaledExtents.magnitude;
+                _cachedBroadPhaseRadiusSq = broadPhaseRadius * broadPhaseRadius;
             }
 
             if (!Mathf.Approximately(_lastLocalFogRefreshInterval, localFogRefreshInterval))
@@ -158,6 +182,11 @@ namespace EnvironmentSystem
                 _lastOutsideVolumeCheckInterval = outsideVolumeCheckInterval;
                 _cachedOutsideVolumeCheckInterval = Mathf.Max(0.05f, outsideVolumeCheckInterval);
             }
+        }
+
+        private static Vector3 Abs(Vector3 value)
+        {
+            return new Vector3(Mathf.Abs(value.x), Mathf.Abs(value.y), Mathf.Abs(value.z));
         }
 
         private void ApplyLocalFogDensity(float factor)
