@@ -20,6 +20,10 @@ public class NetworkUI : MonoBehaviour
 
     private string generatedJoinCode = "";
     private GameObject cachedPlayerPrefab;
+    private bool _hasCachedUiState;
+    private bool _lastConnected;
+    private bool _lastHost;
+    private string _lastDisplayedJoinCode = "";
 
     async void Start()
     {
@@ -76,57 +80,86 @@ public class NetworkUI : MonoBehaviour
                 await AuthenticationService.Instance.SignInAnonymouslyAsync();
             }
             
-            if (statusText != null) statusText.text = "Services ready";
+            SetTextIfChanged(statusText, "Services ready");
         }
         catch (System.Exception e)
         {
-            if (statusText != null) statusText.text = "Services init failed";
+            SetTextIfChanged(statusText, "Services init failed");
             Debug.LogError(e);
         }
     }
 
     private void Update()
     {
+        if (NetworkManager.Singleton == null)
+            return;
+
         // 实时检测连接状态更新UI
         bool isConnected = NetworkManager.Singleton.IsClient || NetworkManager.Singleton.IsServer;
+        bool isHost = NetworkManager.Singleton.IsHost;
+
+        if (_hasCachedUiState && _lastConnected == isConnected && _lastHost == isHost && _lastDisplayedJoinCode == generatedJoinCode)
+            return;
+
         UpdateUIState(isConnected);
     }
 
     private void UpdateUIState(bool isConnected)
     {
-        hostButton.gameObject.SetActive(!isConnected);
-        joinButton.gameObject.SetActive(!isConnected);
-        joinCodeInputField.gameObject.SetActive(!isConnected);
-        
-        disconnectButton.gameObject.SetActive(isConnected);
-        joinCodeDisplayText.gameObject.SetActive(isConnected && NetworkManager.Singleton.IsHost);
-        
-        if (isConnected && NetworkManager.Singleton.IsHost)
+        bool isHost = NetworkManager.Singleton != null && NetworkManager.Singleton.IsHost;
+
+        SetActiveIfChanged(hostButton != null ? hostButton.gameObject : null, !isConnected);
+        SetActiveIfChanged(joinButton != null ? joinButton.gameObject : null, !isConnected);
+        SetActiveIfChanged(joinCodeInputField != null ? joinCodeInputField.gameObject : null, !isConnected);
+
+        SetActiveIfChanged(disconnectButton != null ? disconnectButton.gameObject : null, isConnected);
+        SetActiveIfChanged(joinCodeDisplayText != null ? joinCodeDisplayText.gameObject : null, isConnected && isHost);
+
+        if (isConnected && isHost)
         {
-            joinCodeDisplayText.text = "Room code: " + generatedJoinCode;
+            SetTextIfChanged(joinCodeDisplayText, "Room code: " + generatedJoinCode);
         }
+
+        _lastConnected = isConnected;
+        _lastHost = isHost;
+        _lastDisplayedJoinCode = generatedJoinCode;
+        _hasCachedUiState = true;
+    }
+
+    private static void SetActiveIfChanged(GameObject target, bool active)
+    {
+        if (target != null && target.activeSelf != active)
+            target.SetActive(active);
+    }
+
+    private static void SetTextIfChanged(TextMeshProUGUI target, string value)
+    {
+        if (target != null && target.text != value)
+            target.text = value;
     }
 
     public async void UI_CreateHost()
     {
-        statusText.text = "Now creating room...";
+        SetTextIfChanged(statusText, "Now creating room...");
         try
         {
             Allocation allocation = await RelayService.Instance.CreateAllocationAsync(3);
             generatedJoinCode = await RelayService.Instance.GetJoinCodeAsync(allocation.AllocationId);
+            _hasCachedUiState = false;
             
             RelayServerData relayServerData = new RelayServerData(allocation, "dtls");
             NetworkManager.Singleton.GetComponent<UnityTransport>().SetRelayServerData(relayServerData);
 
             NetworkManager.Singleton.StartHost();
-            statusText.text = "Now start host";
+            SetTextIfChanged(statusText, "Now start host");
+            UpdateUIState(true);
             
             // 成功后自动关闭菜单
             FindObjectOfType<GameMenuManager>()?.CloseMenu();
         }
         catch (RelayServiceException e)
         {
-            statusText.text = "Failed to create room";
+            SetTextIfChanged(statusText, "Failed to create room");
             Debug.LogError(e);
         }
     }
@@ -136,11 +169,11 @@ public class NetworkUI : MonoBehaviour
         string code = joinCodeInputField.text.Trim();
         if (string.IsNullOrEmpty(code))
         {
-            statusText.text = "Please enter room code";
+            SetTextIfChanged(statusText, "Please enter room code");
             return;
         }
 
-        statusText.text = "Now join room...";
+        SetTextIfChanged(statusText, "Now join room...");
         try
         {
             JoinAllocation joinAllocation = await RelayService.Instance.JoinAllocationAsync(code);
@@ -148,14 +181,16 @@ public class NetworkUI : MonoBehaviour
             NetworkManager.Singleton.GetComponent<UnityTransport>().SetRelayServerData(relayServerData);
 
             NetworkManager.Singleton.StartClient();
-            statusText.text = "Now creating room...";
+            SetTextIfChanged(statusText, "Now creating room...");
+            _hasCachedUiState = false;
+            UpdateUIState(true);
             
             // 成功后自动关闭菜单
             FindObjectOfType<GameMenuManager>()?.CloseMenu();
         }
         catch (RelayServiceException e)
         {
-            statusText.text = "Failed to join";
+            SetTextIfChanged(statusText, "Failed to join");
             Debug.LogError(e);
         }
     }
@@ -164,7 +199,15 @@ public class NetworkUI : MonoBehaviour
     {
         NetworkManager.Singleton.Shutdown();
         generatedJoinCode = "";
-        statusText.text = "Connection down";
+        _hasCachedUiState = false;
+        SetTextIfChanged(statusText, "Connection down");
+        UpdateUIState(false);
+    }
+
+    private void OnDestroy()
+    {
+        if (NetworkManager.Singleton != null)
+            NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
     }
 
     private void OnClientConnected(ulong clientId)
