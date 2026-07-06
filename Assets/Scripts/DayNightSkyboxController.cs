@@ -145,9 +145,21 @@ public class DayNightSkyboxController : MonoBehaviour
     private static readonly int GodrayPowerId = Shader.PropertyToID("_GodrayPower");
     private static readonly int GodrayTintId = Shader.PropertyToID("_GodrayTint");
     private static readonly int AlbedoColorId = Shader.PropertyToID("_Color");
+    private static readonly int CloudThresholdId = Shader.PropertyToID("_CloudThreshold");
+    private static readonly int CloudDensityScaleId = Shader.PropertyToID("_CloudDensityScale");
 
     private Material _runtimeSkybox;
     private bool _ownsSkyboxMaterial;
+    private bool _skyboxHasSkyTint;
+    private bool _skyboxHasGroundColor;
+    private bool _skyboxHasSunColor;
+    private bool _skyboxHasExposure;
+    private bool _skyboxHasAtmosphereThickness;
+    private bool _skyboxHasSunSize;
+    private bool _skyboxHasSunSoftness;
+    private bool _skyboxHasGodrayStrength;
+    private bool _skyboxHasGodrayPower;
+    private bool _skyboxHasGodrayTint;
     private float _reflectionTimer;
     private float _probeSyncTimer;
     private float _probeCacheRefreshTimer;
@@ -431,9 +443,24 @@ public class DayNightSkyboxController : MonoBehaviour
         {
             name = "Runtime_DayNightSkybox"
         };
+        CacheSkyboxProperties();
 
         RenderSettings.skybox = _runtimeSkybox;
         _ownsSkyboxMaterial = true;
+    }
+
+    private void CacheSkyboxProperties()
+    {
+        _skyboxHasSkyTint = _runtimeSkybox != null && _runtimeSkybox.HasProperty(SkyTintId);
+        _skyboxHasGroundColor = _runtimeSkybox != null && _runtimeSkybox.HasProperty(GroundColorId);
+        _skyboxHasSunColor = _runtimeSkybox != null && _runtimeSkybox.HasProperty(SunColorId);
+        _skyboxHasExposure = _runtimeSkybox != null && _runtimeSkybox.HasProperty(ExposureId);
+        _skyboxHasAtmosphereThickness = _runtimeSkybox != null && _runtimeSkybox.HasProperty(AtmosphereThicknessId);
+        _skyboxHasSunSize = _runtimeSkybox != null && _runtimeSkybox.HasProperty(SunSizeId);
+        _skyboxHasSunSoftness = _runtimeSkybox != null && _runtimeSkybox.HasProperty(SunSoftnessId);
+        _skyboxHasGodrayStrength = _runtimeSkybox != null && _runtimeSkybox.HasProperty(GodrayStrengthId);
+        _skyboxHasGodrayPower = _runtimeSkybox != null && _runtimeSkybox.HasProperty(GodrayPowerId);
+        _skyboxHasGodrayTint = _runtimeSkybox != null && _runtimeSkybox.HasProperty(GodrayTintId);
     }
 
     private void ApplyCycle(float deltaTime, bool forceReflectionUpdate)
@@ -481,8 +508,8 @@ public class DayNightSkyboxController : MonoBehaviour
         float cloudLightOcclusion = 1.0f;
         float cloudCoverageFactor = 0.0f;
         
-        float globalThreshold = Shader.GetGlobalFloat("_CloudThreshold");
-        float globalDensityScale = Shader.GetGlobalFloat("_CloudDensityScale");
+        float globalThreshold = Shader.GetGlobalFloat(CloudThresholdId);
+        float globalDensityScale = Shader.GetGlobalFloat(CloudDensityScaleId);
         if (globalDensityScale > 0.001f)
         {
             // High coverage corresponds to low threshold settings (0 = overcast, 1 = clear)
@@ -629,36 +656,36 @@ public class DayNightSkyboxController : MonoBehaviour
         float exposure = Mathf.Lerp(nightExposure, dayExposure, daylight);
         float atmosphere = Mathf.Lerp(nightAtmosphereThickness, dayAtmosphereThickness, daylight);
 
-        if (_runtimeSkybox.HasProperty(SkyTintId))
+        if (_skyboxHasSkyTint)
             _runtimeSkybox.SetColor(SkyTintId, skyColor);
-        if (_runtimeSkybox.HasProperty(GroundColorId))
+        if (_skyboxHasGroundColor)
             _runtimeSkybox.SetColor(GroundColorId, groundColor);
-        if (_runtimeSkybox.HasProperty(SunColorId))
+        if (_skyboxHasSunColor)
             _runtimeSkybox.SetColor(SunColorId, sunLight != null ? sunLight.color : Color.white);
-        if (_runtimeSkybox.HasProperty(ExposureId))
+        if (_skyboxHasExposure)
             _runtimeSkybox.SetFloat(ExposureId, exposure);
-        if (_runtimeSkybox.HasProperty(AtmosphereThicknessId))
+        if (_skyboxHasAtmosphereThickness)
             _runtimeSkybox.SetFloat(AtmosphereThicknessId, atmosphere);
-        if (_runtimeSkybox.HasProperty(SunSizeId))
+        if (_skyboxHasSunSize)
             _runtimeSkybox.SetFloat(SunSizeId, sunDiskSize);
-        if (_runtimeSkybox.HasProperty(SunSoftnessId))
+        if (_skyboxHasSunSoftness)
             _runtimeSkybox.SetFloat(SunSoftnessId, sunDiskSoftness);
-        if (_runtimeSkybox.HasProperty(GodrayStrengthId))
+        if (_skyboxHasGodrayStrength)
         {
             float strength = enableUrpSkyboxGodray ? godrayBlend * urpGodrayMaxStrength : 0f;
             _runtimeSkybox.SetFloat(GodrayStrengthId, strength);
         }
-        if (_runtimeSkybox.HasProperty(GodrayPowerId))
+        if (_skyboxHasGodrayPower)
             _runtimeSkybox.SetFloat(GodrayPowerId, urpGodrayPower);
-        if (_runtimeSkybox.HasProperty(GodrayTintId))
+        if (_skyboxHasGodrayTint)
             _runtimeSkybox.SetColor(GodrayTintId, urpGodrayTint);
     }
 
     private void ApplyAmbientAndFog(float daylight)
     {
         // Query global cloud parameters for dynamic ambient/shadow adjustments
-        float globalThreshold = Shader.GetGlobalFloat("_CloudThreshold");
-        float globalDensityScale = Shader.GetGlobalFloat("_CloudDensityScale");
+        float globalThreshold = Shader.GetGlobalFloat(CloudThresholdId);
+        float globalDensityScale = Shader.GetGlobalFloat(CloudDensityScaleId);
         float cloudCoverageFactor = 0f;
         if (globalDensityScale > 0.001f)
         {
