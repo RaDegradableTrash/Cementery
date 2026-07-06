@@ -26,11 +26,13 @@ namespace HP
         public float waveOffset = 0f;    // 液体波动偏移量
         public Color color2;             // 中间/顶层液体颜色
         private float _meshRefreshTimer;
+        private float _lastRenderedFillAmount = -1f;
 
         protected override void OnEnable()
         {
             base.OnEnable();
             _meshRefreshTimer = 0f;
+            _lastRenderedFillAmount = -1f;
             SetVerticesDirty();
         }
 
@@ -39,14 +41,28 @@ namespace HP
             if (canvasRenderer == null || canvasRenderer.GetAlpha() <= 0.001f)
                 return;
 
+            float clampedFill = Mathf.Clamp01(fillAmount);
+            bool fillChanged = Mathf.Abs(_lastRenderedFillAmount - clampedFill) > 0.001f;
+            bool waveCanAnimate = Mathf.Abs(waveSpeed) > 0.001f &&
+                Mathf.Abs(waveHeight) > 0.0001f &&
+                clampedFill > 0.01f &&
+                clampedFill < 0.99f;
+
+            if (!fillChanged && !waveCanAnimate)
+                return;
+
             _meshRefreshTimer += Time.deltaTime;
             float interval = Mathf.Max(0.02f, meshRefreshInterval);
-            if (_meshRefreshTimer < interval)
+            if (!fillChanged && _meshRefreshTimer < interval)
                 return;
 
             float elapsed = _meshRefreshTimer;
             _meshRefreshTimer = 0f;
-            waveTime += elapsed * waveSpeed;
+            if (waveCanAnimate)
+            {
+                waveTime += elapsed * waveSpeed;
+            }
+            _lastRenderedFillAmount = clampedFill;
             SetVerticesDirty();
         }
 
