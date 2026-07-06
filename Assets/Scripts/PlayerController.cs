@@ -105,6 +105,8 @@ public class PlayerController : NetworkBehaviour
     private const int GroundHitBufferSize = 16;
     private readonly RaycastHit[] _groundHitBuffer = new RaycastHit[GroundHitBufferSize];
     private readonly RaycastHit[] _groundFallbackHitBuffer = new RaycastHit[GroundHitBufferSize];
+    private const int ClimbHitBufferSize = 16;
+    private readonly RaycastHit[] _climbHitBuffer = new RaycastHit[ClimbHitBufferSize];
     private bool _hasSetupKinematic = false;
     private float _startupTime;
 
@@ -724,11 +726,12 @@ SimpleCircleBar.Instance.UpdateHealthBar(hp, maxHp);
             Vector3 rayOrigin = new Vector3(scanPos.x, scanLimitY, scanPos.z);
             
             float targetHeightY = transform.position.y;
-            RaycastHit[] hits = Physics.RaycastAll(rayOrigin, Vector3.down, climbMaxHeight + 2.0f, climbObstacleMask);
+            int hitCount = Physics.RaycastNonAlloc(rayOrigin, Vector3.down, _climbHitBuffer, climbMaxHeight + 2.0f, climbObstacleMask, QueryTriggerInteraction.UseGlobal);
             
             bool foundLedge = false;
-            foreach (var hit in hits)
+            for (int i = 0; i < hitCount; i++)
             {
+                RaycastHit hit = _climbHitBuffer[i];
                 if (hit.transform.root == transform.root) continue;
 
                 if (hit.point.y > targetHeightY)
