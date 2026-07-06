@@ -203,6 +203,7 @@ public class FuelTank : MonoBehaviour
         }
         UpdateUI();
         _currentRatio = _targetRatio;
+        enabled = false;
     }
 
     private void Update()
@@ -257,6 +258,18 @@ public class FuelTank : MonoBehaviour
         // ── 🌟 核心新增：确保车内中控屏文本的每一帧动画和色彩变化同步 ───────
         UpdateCarDashboardText();
         // ────────────────────────────────────────────────────────────────────────
+
+        if (IsIdle())
+        {
+            enabled = false;
+        }
+    }
+
+    private bool IsIdle()
+    {
+        bool ratioSettled = Mathf.Abs(_currentRatio - _targetRatio) <= 0.001f;
+        bool displayHidden = displayObject == null || !displayObject.activeSelf;
+        return ratioSettled && !_isLookingAt && _lookAwayTimer <= 0f && displayHidden;
     }
 
     private void BuildBaseWaveMesh()
@@ -524,6 +537,7 @@ public class FuelTank : MonoBehaviour
 
     public void ShowUI(bool isLooking)
     {
+        enabled = true;
         if (isLooking)
         {
             _lookAwayTimer = 0f;
@@ -548,5 +562,6 @@ public class FuelTank : MonoBehaviour
     {
         float ratio = maxCapacity > 0f ? Mathf.Clamp01(currentFuel / maxCapacity) : 0f;
         _targetRatio = ratio;
+        enabled = true;
     }
 }
