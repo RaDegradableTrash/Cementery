@@ -39,17 +39,6 @@ public class CategorizedAudioController : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// 根据玩家选择的分类和按键，返回 Unity 实际识别的 KeyCode
-    /// </summary>
-    private KeyCode GetActualKeyCode()
-    {
-        // 这里提供双重保险：如果你在对应的分类里选错了键（比如在数字分类里选了Space），
-        // 脚本会自动帮你纠正或者直接使用 selectedKey。
-        // 为了防呆和灵活性，我们直接返回 selectedKey，但通过 Inspector 上的分类来引导用户选择。
-        return selectedKey;
-    }
-
     private void PlaySound()
     {
         audioSource.PlayOneShot(soundEffect);

@@ -30,6 +30,8 @@ public class PlayerFootstepAudio : MonoBehaviour
     private bool _cachedInventoryActive;
     private AudioClip _lastAssignedClip;
     private float _lastAssignedVolume = -1f;
+    private float _cachedSpeedThreshold = -1f;
+    private float _cachedSpeedThresholdSqr;
 
     void Awake()
     {
@@ -79,7 +81,7 @@ public class PlayerFootstepAudio : MonoBehaviour
         if (playerController == null || _playerRb == null || walkSound == null) return;
 
         // 1. 从 PlayerController 的核心状态中判断玩家目前是否能走、想走
-        float thresholdSqr = speedThreshold * speedThreshold;
+        float thresholdSqr = GetSpeedThresholdSqr();
         bool isMoving = _playerRb.velocity.sqrMagnitude > thresholdSqr;
         
         // 联动 PlayerController 里的各种状态拦截
@@ -140,5 +142,16 @@ public class PlayerFootstepAudio : MonoBehaviour
 
         _cachedInventoryActive = _inventoryCameraController != null && _inventoryCameraController.IsInventoryActive;
         return _cachedInventoryActive;
+    }
+
+    private float GetSpeedThresholdSqr()
+    {
+        if (!Mathf.Approximately(_cachedSpeedThreshold, speedThreshold))
+        {
+            _cachedSpeedThreshold = speedThreshold;
+            _cachedSpeedThresholdSqr = speedThreshold * speedThreshold;
+        }
+
+        return _cachedSpeedThresholdSqr;
     }
 }
