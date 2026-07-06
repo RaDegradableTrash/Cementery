@@ -102,6 +102,11 @@ public class FuelTank : MonoBehaviour
     private int _lastFuelTextPercent = int.MinValue;
     private int _lastDashboardPercent = int.MinValue;
     private float _lastDashboardColorRatio = -1f;
+    private Color[] _displayRendererBaseColors;
+    private bool[] _displayRendererHasColor;
+    private bool[] _displayRendererHasBaseColor;
+    private bool _fuelBarHasColor;
+    private bool _fuelBarHasBaseColor;
 
     private void SetupMaterialTransparent(Material mat)
     {
@@ -165,6 +170,7 @@ public class FuelTank : MonoBehaviour
 
             fuelBarFillRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             fuelBarFillRenderer.receiveShadows = false;
+            CacheFuelBarMaterialProperties();
         }
 
         if (displayObject != null)
@@ -180,6 +186,7 @@ public class FuelTank : MonoBehaviour
                 r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                 r.receiveShadows = false;
             }
+            CacheDisplayRendererMaterialProperties();
         }
     }
 
@@ -353,6 +360,57 @@ public class FuelTank : MonoBehaviour
         _proceduralMesh.RecalculateBounds();
     }
 
+    private void CacheDisplayRendererMaterialProperties()
+    {
+        if (_displayRenderers == null)
+        {
+            _displayRendererBaseColors = null;
+            _displayRendererHasColor = null;
+            _displayRendererHasBaseColor = null;
+            return;
+        }
+
+        _displayRendererBaseColors = new Color[_displayRenderers.Length];
+        _displayRendererHasColor = new bool[_displayRenderers.Length];
+        _displayRendererHasBaseColor = new bool[_displayRenderers.Length];
+
+        for (int i = 0; i < _displayRenderers.Length; i++)
+        {
+            Renderer renderer = _displayRenderers[i];
+            Color baseColor = Color.cyan;
+            if (renderer != null)
+            {
+                Material mat = renderer.sharedMaterial;
+                if (mat != null)
+                {
+                    _displayRendererHasBaseColor[i] = mat.HasProperty("_BaseColor");
+                    _displayRendererHasColor[i] = mat.HasProperty("_Color");
+                    if (_displayRendererHasBaseColor[i])
+                        baseColor = mat.GetColor("_BaseColor");
+                    else if (_displayRendererHasColor[i])
+                        baseColor = mat.GetColor("_Color");
+                }
+            }
+            _displayRendererBaseColors[i] = baseColor;
+        }
+    }
+
+    private void CacheFuelBarMaterialProperties()
+    {
+        _fuelBarHasColor = false;
+        _fuelBarHasBaseColor = false;
+
+        if (fuelBarFillRenderer == null)
+            return;
+
+        Material mat = fuelBarFillRenderer.sharedMaterial;
+        if (mat == null)
+            return;
+
+        _fuelBarHasColor = mat.HasProperty("_Color");
+        _fuelBarHasBaseColor = mat.HasProperty("_BaseColor");
+    }
+
     private void SetDisplayAlpha(float alpha)
     {
         if (displayObject == null) return;
@@ -370,39 +428,28 @@ public class FuelTank : MonoBehaviour
         if (_displayRenderers == null || _displayRenderers.Length == 0)
         {
             _displayRenderers = displayObject.GetComponentsInChildren<Renderer>(true);
+            CacheDisplayRendererMaterialProperties();
         }
 
-        foreach (var r in _displayRenderers)
+        for (int i = 0; i < _displayRenderers.Length; i++)
         {
+            Renderer r = _displayRenderers[i];
             if (r == null) continue;
             if (r == fuelBarFillRenderer) continue;
 
             r.GetPropertyBlock(_propBlock);
             
-            Color baseCol = Color.white;
-            if (r.material != null)
-            {
-                if (r.material.HasProperty("_BaseColor"))
-                    baseCol = r.material.GetColor("_BaseColor");
-                else if (r.material.HasProperty("_Color"))
-                    baseCol = r.material.GetColor("_Color");
-                else
-                    baseCol = Color.cyan;
-            }
+            Color baseCol = (_displayRendererBaseColors != null && i < _displayRendererBaseColors.Length)
+                ? _displayRendererBaseColors[i]
+                : Color.cyan;
             baseCol.a = alpha * 0.3f;
             
-            _propBlock.SetColor("_Color", baseCol);
-            _propBlock.SetColor("_BaseColor", baseCol);
+            bool hasColor = _displayRendererHasColor != null && i < _displayRendererHasColor.Length && _displayRendererHasColor[i];
+            bool hasBaseColor = _displayRendererHasBaseColor != null && i < _displayRendererHasBaseColor.Length && _displayRendererHasBaseColor[i];
+            if (hasColor) _propBlock.SetColor("_Color", baseCol);
+            if (hasBaseColor) _propBlock.SetColor("_BaseColor", baseCol);
             _propBlock.SetFloat("_Alpha", alpha);
             r.SetPropertyBlock(_propBlock);
-
-            if (r.material != null)
-            {
-                if (r.material.HasProperty("_Color"))
-                    r.material.SetColor("_Color", baseCol);
-                if (r.material.HasProperty("_BaseColor"))
-                    r.material.SetColor("_BaseColor", baseCol);
-            }
         }
 
         if (fuelBarFillRenderer != null)
@@ -415,18 +462,10 @@ public class FuelTank : MonoBehaviour
             holoFillColor.a = 0.6f * alpha;
 
             fuelBarFillRenderer.GetPropertyBlock(_propBlock);
-            _propBlock.SetColor("_Color", holoFillColor);
-            _propBlock.SetColor("_BaseColor", holoFillColor);
+            if (_fuelBarHasColor) _propBlock.SetColor("_Color", holoFillColor);
+            if (_fuelBarHasBaseColor) _propBlock.SetColor("_BaseColor", holoFillColor);
             _propBlock.SetFloat("_Alpha", alpha);
             fuelBarFillRenderer.SetPropertyBlock(_propBlock);
-
-            if (fuelBarFillRenderer.material != null)
-            {
-                if (fuelBarFillRenderer.material.HasProperty("_Color"))
-                    fuelBarFillRenderer.material.SetColor("_Color", holoFillColor);
-                if (fuelBarFillRenderer.material.HasProperty("_BaseColor"))
-                    fuelBarFillRenderer.material.SetColor("_BaseColor", holoFillColor);
-            }
         }
 
         if (fuelText != null)
