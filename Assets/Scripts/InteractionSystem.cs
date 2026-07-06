@@ -152,8 +152,10 @@ public class InteractionSystem : MonoBehaviour
     private float _timeRButtonPressed;
     private float _placementRotationOffset = 0f;
     private const int InteractionHitBufferSize = 48;
+    private const int CarryObstacleHitBufferSize = 48;
     private readonly RaycastHit[] _preciseHitBuffer = new RaycastHit[InteractionHitBufferSize];
     private readonly RaycastHit[] _wideHitBuffer = new RaycastHit[InteractionHitBufferSize];
+    private readonly RaycastHit[] _carryObstacleHitBuffer = new RaycastHit[CarryObstacleHitBufferSize];
     private const int PlacementHitBufferSize = 64;
     private const int PlacementOverlapBufferSize = 64;
     private readonly RaycastHit[] _placementHitBuffer = new RaycastHit[PlacementHitBufferSize];
@@ -1439,18 +1441,17 @@ public class InteractionSystem : MonoBehaviour
             rayDir.Normalize();
             float castRadius = Mathf.Max(0.05f, _carriedRadius * 0.85f);
             float checkDistance = Mathf.Max(0.05f, carryMaxDistance);
-            RaycastHit[] hits = Physics.SphereCastAll(origin, castRadius, rayDir, checkDistance, interactMask, QueryTriggerInteraction.Ignore);
+            int hitCount = Physics.SphereCastNonAlloc(origin, castRadius, rayDir, _carryObstacleHitBuffer, checkDistance, interactMask, QueryTriggerInteraction.Ignore);
             float nearest = float.PositiveInfinity;
             Collider nearestCol = null;
-            RaycastHit nearestHit = default;
-            for (int i = 0; i < hits.Length; i++) {
-                Collider c = hits[i].collider;
+            for (int i = 0; i < hitCount; i++) {
+                RaycastHit hit = _carryObstacleHitBuffer[i];
+                Collider c = hit.collider;
                 if (c == null) continue;
                 if (IsIgnoredCarryHitCollider(c)) continue;
-                if (hits[i].distance < nearest) {
-                    nearest = hits[i].distance;
+                if (hit.distance < nearest) {
+                    nearest = hit.distance;
                     nearestCol = c;
-                    nearestHit = hits[i];
                 }
             }
             if (nearestCol != null) {
@@ -1488,15 +1489,16 @@ public class InteractionSystem : MonoBehaviour
         float checkDistance = maxDist;
         float castRadius = Mathf.Max(0.05f, _carriedRadius * 0.85f);
 
-        RaycastHit[] hits = Physics.SphereCastAll(origin, castRadius, rayDir, checkDistance, interactMask, QueryTriggerInteraction.Ignore);
+        int hitCount = Physics.SphereCastNonAlloc(origin, castRadius, rayDir, _carryObstacleHitBuffer, checkDistance, interactMask, QueryTriggerInteraction.Ignore);
         float nearest = float.PositiveInfinity;
-        for (int i = 0; i < hits.Length; i++)
+        for (int i = 0; i < hitCount; i++)
         {
-            Collider c = hits[i].collider;
+            RaycastHit hit = _carryObstacleHitBuffer[i];
+            Collider c = hit.collider;
             if (c == null) continue;
             if (IsIgnoredCarryHitCollider(c)) continue;
-            if (hits[i].distance < nearest)
-                nearest = hits[i].distance;
+            if (hit.distance < nearest)
+                nearest = hit.distance;
         }
 
         if (nearest == float.PositiveInfinity)
