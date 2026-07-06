@@ -21,6 +21,9 @@ public class WiperControl : MonoBehaviour
     private float progress;
     private float pauseTimer;
     private bool pendingOff;
+    private bool _lastInvert;
+    private float _cachedDirection = 1f;
+    private float _lastAppliedAngle = float.NaN;
 
     public WiperMode CurrentMode => currentMode;
     public event System.Action OnModeChanged;
@@ -36,6 +39,7 @@ public class WiperControl : MonoBehaviour
             wiperTransforms = new[] { wiperTransform };
         }
 
+        RefreshDirectionCache();
         ApplyAngle(0f);
         enabled = false;
     }
@@ -139,7 +143,14 @@ public class WiperControl : MonoBehaviour
 
     private void ApplyAngle(float angle)
     {
-        float dir = invert ? -1f : 1f;
+        RefreshDirectionCache();
+        float directedAngle = angle * _cachedDirection;
+        if (Mathf.Approximately(_lastAppliedAngle, directedAngle))
+        {
+            return;
+        }
+
+        _lastAppliedAngle = directedAngle;
         if (wiperTransforms == null)
         {
             return;
@@ -150,8 +161,19 @@ public class WiperControl : MonoBehaviour
             Transform target = wiperTransforms[i];
             if (target != null)
             {
-                target.localRotation = Quaternion.Euler(0f, angle * dir, 0f);
+                target.localRotation = Quaternion.Euler(0f, directedAngle, 0f);
             }
         }
+    }
+
+    private void RefreshDirectionCache()
+    {
+        if (_lastInvert == invert)
+        {
+            return;
+        }
+
+        _lastInvert = invert;
+        _cachedDirection = invert ? -1f : 1f;
     }
 }
