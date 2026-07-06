@@ -30,6 +30,8 @@ public class PlantPot : MonoBehaviour
     private bool _hasAppliedWorldObjectState;
     private static WorldObject s_cachedCarriedObject;
     private static bool s_cachedCarriedObjectIsPlantable;
+    private static float s_nextCarriedObjectRefreshTime;
+    private static bool s_cachedAnyPlantableHeld;
 
     void Awake()
     {
@@ -59,12 +61,7 @@ public class PlantPot : MonoBehaviour
             {
                 _nextEmptyPotCheckTime = Time.time + Mathf.Max(0.01f, emptyPotCheckInterval);
 
-                bool holdingKelp = false;
-                if (InteractionSystem.Instance != null)
-                {
-                    WorldObject carried = InteractionSystem.Instance.CarriedWorldObject;
-                    holdingKelp = IsPlantableCarriedObject(carried);
-                }
+                bool holdingKelp = IsAnyPlantableCarriedObjectHeld();
                 SetWorldObjectState(holdingKelp, holdingKelp ? "Plant Kelp" : "");
             }
         }
@@ -120,6 +117,22 @@ public class PlantPot : MonoBehaviour
         }
 
         _hasAppliedWorldObjectState = true;
+    }
+
+    private static bool IsAnyPlantableCarriedObjectHeld()
+    {
+        float now = Time.time;
+        if (now < s_nextCarriedObjectRefreshTime)
+        {
+            return s_cachedAnyPlantableHeld;
+        }
+
+        s_nextCarriedObjectRefreshTime = now + 0.05f;
+        WorldObject carried = InteractionSystem.Instance != null
+            ? InteractionSystem.Instance.CarriedWorldObject
+            : null;
+        s_cachedAnyPlantableHeld = IsPlantableCarriedObject(carried);
+        return s_cachedAnyPlantableHeld;
     }
 
     private static bool IsPlantableCarriedObject(WorldObject carried)
