@@ -168,10 +168,25 @@ public class DroneController : MonoBehaviour
     }
 
     private Slider _cachedSlider;
+    private bool _lastSliderActive;
+    private float _lastSliderProgress = -1f;
+
     private void UpdateSlider(float progress, bool active)
     {
+        if (_cachedSlider != null && _lastSliderActive == active && Mathf.Approximately(_lastSliderProgress, progress))
+        {
+            return;
+        }
+
         if (_cachedSlider == null)
         {
+            if (!active)
+            {
+                _lastSliderActive = false;
+                _lastSliderProgress = progress;
+                return;
+            }
+
             Slider[] sliders = Resources.FindObjectsOfTypeAll<Slider>();
             foreach (Slider s in sliders)
             {
@@ -189,5 +204,8 @@ public class DroneController : MonoBehaviour
             _cachedSlider.gameObject.SetActive(active);
             if (active) _cachedSlider.value = progress;
         }
+
+        _lastSliderActive = active;
+        _lastSliderProgress = progress;
     }
 }
