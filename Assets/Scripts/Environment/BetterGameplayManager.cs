@@ -45,7 +45,10 @@ namespace EnvironmentSystem
 
         [Tooltip("Extra pass: hidden objects that are within range get re-checked this many " +
                  "times per frame to reduce re-appearance latency. Keep <= objectsCheckedPerFrame.")]
-        public int hiddenObjectFastRecheck = 200;
+        public int hiddenObjectFastRecheck = 80;
+
+        [Tooltip("Minimum seconds between expensive full visibility sweeps triggered by sharp camera turns.")]
+        public float fullSweepCooldown = 0.35f;
 
         [Tooltip("Delay (frames) after a scene loads before scanning it, to let Awake/Start settle.")]
         public int scanDelayFrames = 3;
@@ -66,6 +69,7 @@ namespace EnvironmentSystem
         private readonly Plane[] _frustumPlanes = new Plane[6];
 
         private Quaternion _lastCamRot;
+        private float _nextFullSweepTime;
 
         // Name of the scene this BetterGameplayManager lives in — objects here are NEVER managed.
         private string _ownSceneName;
@@ -171,9 +175,10 @@ namespace EnvironmentSystem
 
                 // On a significant rotation, do a full sweep immediately to avoid edge-popping.
                 float rotDelta = Quaternion.Angle(_mainCamera.transform.rotation, _lastCamRot);
-                if (rotDelta > 8f)
+                if (rotDelta > 8f && Time.time >= _nextFullSweepTime)
                 {
                     _lastCamRot = _mainCamera.transform.rotation;
+                    _nextFullSweepTime = Time.time + Mathf.Max(0.05f, fullSweepCooldown);
                     DoFullVisibilitySweep();
                     return;
                 }
@@ -231,7 +236,7 @@ namespace EnvironmentSystem
             float   hideDistSq  = (defaultVisibilityRadius + hysteresis) * (defaultVisibilityRadius + hysteresis);
             float   neverCullSq = neverFrustumCullRadius * neverFrustumCullRadius;
 
-            int limit = Mathf.Min(hiddenObjectFastRecheck, _hiddenNearby.Count);
+            int limit = Mathf.Min(hiddenObjectFastRecheck, objectsCheckedPerFrame, _hiddenNearby.Count);
 
             for (int i = _hiddenNearby.Count - 1; i >= 0 && limit > 0; i--, limit--)
             {
