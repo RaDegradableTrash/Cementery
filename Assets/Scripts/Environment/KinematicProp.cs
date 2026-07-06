@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace EnvironmentSystem
@@ -18,6 +19,8 @@ namespace EnvironmentSystem
 
         private Rigidbody _rb;
         private bool _awoken = false;
+        private const int MaxTerrainColliderCacheSize = 1024;
+        private static readonly Dictionary<int, bool> TerrainColliderCache = new Dictionary<int, bool>(256);
 
         private void Awake()
         {
@@ -84,6 +87,20 @@ namespace EnvironmentSystem
         {
             if (col == null) return true;   // treat null as ground (safe default)
 
+            int cacheKey = col.GetInstanceID();
+            if (TerrainColliderCache.TryGetValue(cacheKey, out bool cachedResult))
+                return cachedResult;
+
+            bool isTerrain = ComputeIsTerrainCollider(col);
+            if (TerrainColliderCache.Count >= MaxTerrainColliderCacheSize)
+                TerrainColliderCache.Clear();
+
+            TerrainColliderCache[cacheKey] = isTerrain;
+            return isTerrain;
+        }
+
+        private static bool ComputeIsTerrainCollider(Collider col)
+        {
             // Unity built-in height-map terrain.
             if (col.GetComponent<TerrainCollider>() != null) return true;
 
