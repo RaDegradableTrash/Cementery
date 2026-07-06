@@ -161,6 +161,8 @@ public class InteractionSystem : MonoBehaviour
     private readonly RaycastHit[] _placementHitBuffer = new RaycastHit[PlacementHitBufferSize];
     private readonly Collider[] _placementOverlapBuffer = new Collider[PlacementOverlapBufferSize];
     private readonly Vector3[] _placementCornerBuffer = new Vector3[8];
+    private const int ScanWorldObjectCacheLimit = 512;
+    private readonly Dictionary<Collider, WorldObject> _scanWorldObjectCache = new Dictionary<Collider, WorldObject>(128);
     private Collider[] _placementGhostColliders;
     private Renderer[] _placementGhostRenderers;
     private bool _placementGhostActive;
@@ -903,7 +905,7 @@ public class InteractionSystem : MonoBehaviour
             if (IsIgnoredCarryHitCollider(c)) continue;
 
             foundValidHit = true;
-            if (c.GetComponentInParent<WorldObject>() != null && hit.distance < closestWorldObjectDist)
+            if (GetCachedWorldObject(c) != null && hit.distance < closestWorldObjectDist)
             {
                 closestWorldObjectDist = hit.distance;
                 closestWorldObjectHit = hit;
@@ -1067,7 +1069,7 @@ public class InteractionSystem : MonoBehaviour
         if (hitCollider == null)
             return;
 
-        _cachedScanWorldObject = hitCollider.GetComponentInParent<WorldObject>();
+        _cachedScanWorldObject = GetCachedWorldObject(hitCollider);
         if (_cachedScanWorldObject != null)
             _cachedScanContainer = _cachedScanWorldObject.GetComponent<PremodeledContainer>() ?? _cachedScanWorldObject.GetComponentInParent<PremodeledContainer>();
 
@@ -1086,6 +1088,24 @@ public class InteractionSystem : MonoBehaviour
             }
             current = current.parent;
         }
+    }
+
+    private WorldObject GetCachedWorldObject(Collider hitCollider)
+    {
+        if (hitCollider == null)
+            return null;
+
+        if (_scanWorldObjectCache.TryGetValue(hitCollider, out WorldObject cachedWorldObject))
+            return cachedWorldObject;
+
+        if (_scanWorldObjectCache.Count >= ScanWorldObjectCacheLimit)
+        {
+            _scanWorldObjectCache.Clear();
+        }
+
+        cachedWorldObject = hitCollider.GetComponentInParent<WorldObject>();
+        _scanWorldObjectCache[hitCollider] = cachedWorldObject;
+        return cachedWorldObject;
     }
 
     private void ClearLastFuelTankFocus()
