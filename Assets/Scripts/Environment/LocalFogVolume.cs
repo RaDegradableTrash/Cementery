@@ -15,12 +15,16 @@ namespace EnvironmentSystem
 
         [Header("Performance")]
         [SerializeField, Min(0.02f)] private float localFogRefreshInterval = 0.05f;
+        [SerializeField, Min(0.05f)] private float outsideVolumeCheckInterval = 0.15f;
 
         private BoxCollider _boxCollider;
         private Camera _mainCamera;
+        private Transform _cameraTransform;
         private AuraFogSystemManager _fogManager;
         private float _nextFogManagerLookupTime;
         private float _nextLocalFogApplyTime;
+        private float _nextContainmentCheckTime;
+        private bool _cameraInsideVolume;
 
 #if AURA_2_PRESENT
         private Aura2API.AuraVolume _auraVolume;
@@ -31,6 +35,7 @@ namespace EnvironmentSystem
             _boxCollider = GetComponent<BoxCollider>();
             _boxCollider.isTrigger = true;
             _mainCamera = Camera.main;
+            _cameraTransform = _mainCamera != null ? _mainCamera.transform : null;
             _fogManager = FindFirstObjectByType<AuraFogSystemManager>();
 
 #if AURA_2_PRESENT
@@ -49,15 +54,26 @@ namespace EnvironmentSystem
             if (_mainCamera == null)
             {
                 _mainCamera = Camera.main;
+                _cameraTransform = _mainCamera != null ? _mainCamera.transform : null;
                 if (_mainCamera == null) return;
             }
 
-            Vector3 camPos = _mainCamera.transform.position;
+            float now = Time.unscaledTime;
+            if (!_cameraInsideVolume && now < _nextContainmentCheckTime)
+                return;
+
+            if (_cameraTransform == null)
+                _cameraTransform = _mainCamera.transform;
+
+            Vector3 camPos = _cameraTransform.position;
             bool isInside = _boxCollider.bounds.Contains(camPos);
+            _cameraInsideVolume = isInside;
+            _nextContainmentCheckTime = now + (isInside
+                ? Mathf.Max(0.02f, localFogRefreshInterval)
+                : Mathf.Max(0.05f, outsideVolumeCheckInterval));
 
             if (isInside)
             {
-                float now = Time.unscaledTime;
                 if (now < _nextLocalFogApplyTime)
                     return;
 

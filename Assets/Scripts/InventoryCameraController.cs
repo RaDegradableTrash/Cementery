@@ -52,6 +52,7 @@ public class InventoryCameraController : MonoBehaviour
     private float _nextCullingCacheRefreshTime;
     private int _cullingCursor;
     private bool _hasForcedRenderersOff;
+    private readonly Plane[] _cullingPlanes = new Plane[6];
     public bool IsInventoryActive
     {
         get
@@ -261,6 +262,7 @@ void Update()
             return;
         }
 
+        bool wasActive = inventoryActive;
         inventoryActive = active;
         if (active)
         {
@@ -272,6 +274,13 @@ void Update()
 
         if (active)
             AutoFrameInventoryCamera();
+
+        if (active && !wasActive && aggressivelyCullOutOfViewRenderers)
+        {
+            RebuildRendererCache();
+            _nextCullingTickTime = 0f;
+            _nextCullingCacheRefreshTime = Time.unscaledTime + GetCullingCacheRefreshInterval();
+        }
 
         ApplyCursorState(active);
 
@@ -416,7 +425,7 @@ void Update()
         if (_cachedRenderers == null || _cachedRenderers.Length == 0 || now >= _nextCullingCacheRefreshTime)
         {
             RebuildRendererCache();
-            _nextCullingCacheRefreshTime = now + Mathf.Max(0.2f, cullingCacheRefreshInterval);
+            _nextCullingCacheRefreshTime = now + GetCullingCacheRefreshInterval();
         }
 
         if (now < _nextCullingTickTime)
@@ -436,7 +445,7 @@ void Update()
 
         int rendererCount = _cachedRenderers.Length;
         int batch = Mathf.Clamp(cullingBatchSize, 16, rendererCount);
-        Plane[] planes = GeometryUtility.CalculateFrustumPlanes(activeCamera);
+        GeometryUtility.CalculateFrustumPlanes(activeCamera, _cullingPlanes);
         bool forcedAnyOffThisTick = false;
         for (int i = 0; i < batch; i++)
         {
@@ -452,7 +461,7 @@ void Update()
                 continue;
             }
 
-            bool inView = GeometryUtility.TestPlanesAABB(planes, r.bounds);
+            bool inView = GeometryUtility.TestPlanesAABB(_cullingPlanes, r.bounds);
             bool forceOff = !inView && CanForceHideRenderer(r);
 
             if (r.forceRenderingOff != forceOff)
@@ -487,6 +496,11 @@ void Update()
     {
         _cachedRenderers = FindObjectsOfType<Renderer>(true);
         _cullingCursor = 0;
+    }
+
+    float GetCullingCacheRefreshInterval()
+    {
+        return Mathf.Max(3f, cullingCacheRefreshInterval);
     }
 
     void RestoreForcedRendering()
