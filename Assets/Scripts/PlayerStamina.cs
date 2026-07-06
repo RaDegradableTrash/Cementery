@@ -60,6 +60,13 @@ public class PlayerStamina : MonoBehaviour
 
     void Update()
     {
+        if (playerController != null)
+        {
+            if (!IsUiSettled())
+                UpdateUI();
+            return;
+        }
+
         bool isPressingSprint = Input.GetKey(KeyCode.LeftShift);
 
         // 使用刚体速度判断，增加了安全兼容：如果新版本没有 linearVelocity 就自动用旧版的 velocity
@@ -105,6 +112,17 @@ public class PlayerStamina : MonoBehaviour
     }
 
     float NormalizedStamina => _stamina / maxStamina;
+
+    bool IsUiSettled()
+    {
+        float normalized = NormalizedStamina;
+        bool staminaFull = Mathf.Abs(_stamina - maxStamina) <= 0.001f;
+        bool recoverySettled = _recoverCooldown <= 0f;
+        bool fillSynced = _lastFillAmount >= 0f && Mathf.Abs(_lastFillAmount - normalized) <= 0.001f;
+        bool alphaHidden = _uiCanvasGroup == null || _uiCanvasGroup.alpha <= 0.001f;
+        bool alphaTargetHidden = Mathf.Approximately(_lastTargetAlpha, 0f);
+        return staminaFull && recoverySettled && fillSynced && alphaHidden && alphaTargetHidden;
+    }
 
     void UpdateUI()
     {
