@@ -25,6 +25,8 @@ public class FlashlightInteractable : MonoBehaviour
     private bool _isEquipped = false;
     private Transform _originalParent;
     private Quaternion _localRotation;
+    private float _nextAttachmentRepairTime;
+    private const float AttachmentRepairInterval = 0.1f;
 
     void Awake()
     {
@@ -94,6 +96,7 @@ if (_rb != null)
         transform.SetParent(playerCamera);
         transform.localPosition = localOffset;
         transform.localRotation = _localRotation;
+        _nextAttachmentRepairTime = 0f;
 
         if (flashlightLight != null) flashlightLight.enabled = true;
 
@@ -148,8 +151,9 @@ if (_rb != null)
     {
         if (_isEquipped)
         {
-            if (transform.parent == playerCamera)
+            if (transform.parent == playerCamera && Time.time >= _nextAttachmentRepairTime)
             {
+                _nextAttachmentRepairTime = Time.time + AttachmentRepairInterval;
                 if ((transform.localPosition - localOffset).sqrMagnitude > 0.000001f)
                 {
                     transform.localPosition = localOffset;
