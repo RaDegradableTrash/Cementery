@@ -68,7 +68,7 @@ public class InteractionSystem : MonoBehaviour
 
 
     [Header("Debug")]
-    [SerializeField] private bool visualizeInteractionRay = true;
+    [SerializeField] private bool visualizeInteractionRay = false;
     [SerializeField] private Color interactionRayColor = new Color(1f, 0.85f, 0.1f, 1f);
 
     private MouseLook _mouseLook;
