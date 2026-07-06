@@ -116,8 +116,6 @@ namespace EnvironmentSystem
 
         private void Start()
         {
-            var go = new GameObject("DebugPhysics");
-            go.AddComponent<DebugPhysicsState>();
             FindPlayerAndCamera();
 
             // Freeze ALL Rigidbodies in every already-loaded scene immediately (frame 0),
