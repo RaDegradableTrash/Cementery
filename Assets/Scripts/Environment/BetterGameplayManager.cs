@@ -66,6 +66,7 @@ namespace EnvironmentSystem
         // ── Internal state ─────────────────────────────────────────────────────
 
         private readonly List<OptimizableObject> _managedObjects   = new List<OptimizableObject>(512);
+        private readonly HashSet<OptimizableObject> _managedObjectSet = new HashSet<OptimizableObject>();
         // Separate bucket of objects that are currently hidden but within load range — checked first.
         private readonly List<OptimizableObject> _hiddenNearby     = new List<OptimizableObject>(128);
         private readonly HashSet<OptimizableObject> _hiddenNearbySet = new HashSet<OptimizableObject>();
@@ -237,6 +238,7 @@ namespace EnvironmentSystem
                     OptimizableObject obj = _managedObjects[index];
                     if (obj == null || obj.isDestroyed)
                     {
+                        _managedObjectSet.Remove(obj);
                         _managedObjects.RemoveAt(index);
                         continue;
                     }
@@ -315,6 +317,7 @@ namespace EnvironmentSystem
                 OptimizableObject obj = _managedObjects[_currentIndex];
                 if (obj == null || obj.isDestroyed)
                 {
+                    _managedObjectSet.Remove(obj);
                     _managedObjects.RemoveAt(_currentIndex);
                     continue;
                 }
@@ -449,6 +452,7 @@ namespace EnvironmentSystem
         private void OnSceneUnloaded(Scene scene)
         {
             _managedObjects.RemoveAll(o => o == null || o.isDestroyed);
+            RebuildManagedObjectSet();
             _hiddenNearby.RemoveAll(o => o == null || o.isDestroyed);
             RebuildHiddenNearbySet();
             if (_currentIndex >= _managedObjects.Count) _currentIndex = 0;
@@ -458,7 +462,7 @@ namespace EnvironmentSystem
 
         public void Register(OptimizableObject obj)
         {
-            if (!_managedObjects.Contains(obj))
+            if (obj != null && _managedObjectSet.Add(obj))
                 _managedObjects.Add(obj);
         }
 
@@ -467,6 +471,7 @@ namespace EnvironmentSystem
             if (_hiddenNearbySet.Remove(obj))
                 _hiddenNearby.Remove(obj);
 
+            _managedObjectSet.Remove(obj);
             int index = _managedObjects.IndexOf(obj);
             if (index == -1) return;
 
@@ -474,6 +479,22 @@ namespace EnvironmentSystem
 
             if (index < _currentIndex) _currentIndex--;
             if (_currentIndex >= _managedObjects.Count) _currentIndex = 0;
+        }
+
+        private void RebuildManagedObjectSet()
+        {
+            _managedObjectSet.Clear();
+            for (int i = _managedObjects.Count - 1; i >= 0; i--)
+            {
+                OptimizableObject obj = _managedObjects[i];
+                if (obj == null || obj.isDestroyed)
+                {
+                    _managedObjects.RemoveAt(i);
+                    continue;
+                }
+
+                _managedObjectSet.Add(obj);
+            }
         }
 
         private void RebuildHiddenNearbySet()
