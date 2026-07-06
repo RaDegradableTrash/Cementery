@@ -7,6 +7,7 @@ public class DynamicSnowObject : MonoBehaviour
     public float cutoff = 0.1f;
     
     private RenderTexture localSnowMap;
+    private RenderTexture localScratchMap;
     private Material localSnowMat;
     private Material localModMat;
     private Bounds localBounds;
@@ -29,6 +30,12 @@ public class DynamicSnowObject : MonoBehaviour
         localSnowMap = new RenderTexture(width, depth, 0, RenderTextureFormat.ARGBHalf);
         localSnowMap.filterMode = FilterMode.Bilinear;
         localSnowMap.wrapMode = TextureWrapMode.Clamp;
+
+        localScratchMap = new RenderTexture(width, depth, 0, RenderTextureFormat.ARGBHalf);
+        localScratchMap.name = name + "_LocalSnowScratchMap";
+        localScratchMap.filterMode = FilterMode.Bilinear;
+        localScratchMap.wrapMode = TextureWrapMode.Clamp;
+        localScratchMap.Create();
         // Initialize to black
         localSnowMap.DiscardContents();
         RenderTexture.active = localSnowMap;
@@ -125,15 +132,43 @@ public class DynamicSnowObject : MonoBehaviour
 
         if (localModMat == null) return;
         
-        RenderTexture temp = RenderTexture.GetTemporary(localSnowMap.width, localSnowMap.height, 0, localSnowMap.format);
+        if (!EnsureLocalScratchMap())
+        {
+            return;
+        }
         
         localModMat.SetVector("_BrushParams", new Vector4(u, v, radiusU, radiusV));
         localModMat.SetVector("_BrushStrength", new Vector4(amount, localPos.y, 0, 0));
         
-        Graphics.Blit(localSnowMap, temp, localModMat, 0);
-        Graphics.Blit(temp, localSnowMap);
-        
-        RenderTexture.ReleaseTemporary(temp);
+        Graphics.Blit(localSnowMap, localScratchMap, localModMat, 0);
+        Graphics.Blit(localScratchMap, localSnowMap);
+    }
+
+    private bool EnsureLocalScratchMap()
+    {
+        if (localSnowMap == null)
+            return false;
+
+        if (localScratchMap != null &&
+            localScratchMap.width == localSnowMap.width &&
+            localScratchMap.height == localSnowMap.height &&
+            localScratchMap.format == localSnowMap.format)
+        {
+            return true;
+        }
+
+        if (localScratchMap != null)
+        {
+            localScratchMap.Release();
+            Destroy(localScratchMap);
+        }
+
+        localScratchMap = new RenderTexture(localSnowMap.width, localSnowMap.height, 0, localSnowMap.format);
+        localScratchMap.name = name + "_LocalSnowScratchMap";
+        localScratchMap.filterMode = localSnowMap.filterMode;
+        localScratchMap.wrapMode = localSnowMap.wrapMode;
+        localScratchMap.Create();
+        return true;
     }
 
     private void OnDestroy()
@@ -142,6 +177,11 @@ public class DynamicSnowObject : MonoBehaviour
         {
             localSnowMap.Release();
             Destroy(localSnowMap);
+        }
+        if (localScratchMap != null)
+        {
+            localScratchMap.Release();
+            Destroy(localScratchMap);
         }
         if (localSnowMat != null) Destroy(localSnowMat);
         if (localModMat != null) Destroy(localModMat);

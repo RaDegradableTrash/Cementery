@@ -28,6 +28,7 @@ public class SnowAccumulationManager : MonoBehaviour
     [Header("Runtime Debug (Do not set)")]
     public Material modificationMaterial;
     private RenderTexture snowHeightMap;
+    private RenderTexture snowScratchMap;
     private RenderTexture occlusionMap;
     private float _occlusionTimer;
     private float _globalSnowTimer;
@@ -68,6 +69,12 @@ public class SnowAccumulationManager : MonoBehaviour
         snowHeightMap.name = "SnowHeightMap";
         snowHeightMap.filterMode = FilterMode.Bilinear;
         snowHeightMap.wrapMode = TextureWrapMode.Clamp;
+
+        snowScratchMap = new RenderTexture(snowResolution, snowResolution, 0, RenderTextureFormat.RHalf);
+        snowScratchMap.name = "SnowScratchMap";
+        snowScratchMap.filterMode = FilterMode.Bilinear;
+        snowScratchMap.wrapMode = TextureWrapMode.Clamp;
+        snowScratchMap.Create();
         
         // CLEAR garbage data from RenderTexture initialization!
         snowHeightMap.DiscardContents();
@@ -164,13 +171,12 @@ public class SnowAccumulationManager : MonoBehaviour
         Vector4 snowParams = new Vector4(mapCenter.x, mapCenter.z, mapWorldSize, 1f / mapWorldSize);
         modificationMaterial.SetVector("_SnowMapParams", snowParams);
 
-        RenderTexture tempRT = RenderTexture.GetTemporary(snowHeightMap.descriptor);
+        if (!EnsureSnowScratchMap())
+            return;
         
         // Pass 0: Add Snow
-        Graphics.Blit(snowHeightMap, tempRT, modificationMaterial, 0);
-        Graphics.Blit(tempRT, snowHeightMap);
-
-        RenderTexture.ReleaseTemporary(tempRT);
+        Graphics.Blit(snowHeightMap, snowScratchMap, modificationMaterial, 0);
+        Graphics.Blit(snowScratchMap, snowHeightMap);
     }
 
     private void OnDestroy()
@@ -179,6 +185,11 @@ public class SnowAccumulationManager : MonoBehaviour
         {
             snowHeightMap.Release();
             Destroy(snowHeightMap);
+        }
+        if (snowScratchMap != null)
+        {
+            snowScratchMap.Release();
+            Destroy(snowScratchMap);
         }
         if (occlusionMap != null)
         {
@@ -200,13 +211,39 @@ public class SnowAccumulationManager : MonoBehaviour
         Vector4 snowParams = new Vector4(mapCenter.x, mapCenter.z, mapWorldSize, 1f / mapWorldSize);
         modificationMaterial.SetVector("_SnowMapParams", snowParams);
 
-        RenderTexture tempRT = RenderTexture.GetTemporary(snowHeightMap.descriptor);
+        if (!EnsureSnowScratchMap())
+            return;
         
         // Pass 3: Global Accumulation
-        Graphics.Blit(snowHeightMap, tempRT, modificationMaterial, 3);
-        Graphics.Blit(tempRT, snowHeightMap);
+        Graphics.Blit(snowHeightMap, snowScratchMap, modificationMaterial, 3);
+        Graphics.Blit(snowScratchMap, snowHeightMap);
+    }
 
-        RenderTexture.ReleaseTemporary(tempRT);
+    private bool EnsureSnowScratchMap()
+    {
+        if (snowHeightMap == null)
+            return false;
+
+        if (snowScratchMap != null &&
+            snowScratchMap.width == snowHeightMap.width &&
+            snowScratchMap.height == snowHeightMap.height &&
+            snowScratchMap.format == snowHeightMap.format)
+        {
+            return true;
+        }
+
+        if (snowScratchMap != null)
+        {
+            snowScratchMap.Release();
+            Destroy(snowScratchMap);
+        }
+
+        snowScratchMap = new RenderTexture(snowHeightMap.descriptor);
+        snowScratchMap.name = "SnowScratchMap";
+        snowScratchMap.filterMode = snowHeightMap.filterMode;
+        snowScratchMap.wrapMode = snowHeightMap.wrapMode;
+        snowScratchMap.Create();
+        return true;
     }
 
     private void Update()
