@@ -29,6 +29,14 @@ namespace RenderingSystem
         private readonly List<LightDistancePair> _nearestLights = new List<LightDistancePair>(8);
         private readonly HashSet<Light> _selectedNearestLights = new HashSet<Light>();
         private readonly Dictionary<Light, bool> _volumetricStates = new Dictionary<Light, bool>();
+        private float _cachedMaxLightDistance = -1f;
+        private float _cachedMaxLightDistanceSqr;
+        private float _cachedCameraMoveThreshold = -1f;
+        private float _cachedCameraMoveThresholdSqr;
+        private float _cachedCameraRotationThreshold = -1f;
+        private float _cachedCameraRotationThresholdValue;
+        private int _cachedMaxVolumetricLights = int.MinValue;
+        private int _cachedLightBudget;
 #if AURA_2_PRESENT
         private readonly Dictionary<Light, Aura2API.AuraLight> _auraLightCache = new Dictionary<Light, Aura2API.AuraLight>();
 #endif
@@ -78,10 +86,8 @@ namespace RenderingSystem
                 return true;
             }
 
-            float moveThreshold = Mathf.Max(0f, cameraMoveThreshold);
-            float rotationThreshold = Mathf.Max(0f, cameraRotationThreshold);
-            bool moved = (cameraTransform.position - _lastCameraPosition).sqrMagnitude >= moveThreshold * moveThreshold;
-            bool rotated = Quaternion.Angle(cameraTransform.rotation, _lastCameraRotation) >= rotationThreshold;
+            bool moved = (cameraTransform.position - _lastCameraPosition).sqrMagnitude >= GetCameraMoveThresholdSqr();
+            bool rotated = Quaternion.Angle(cameraTransform.rotation, _lastCameraRotation) >= GetCameraRotationThreshold();
 
             if (!moved && !rotated)
                 return false;
@@ -112,8 +118,8 @@ namespace RenderingSystem
             if (_allLights.Count == 0) return;
 
             Vector3 camPos = _mainCamera.transform.position;
-            float maxDistSqr = maxLightDistance * maxLightDistance;
-            int budget = Mathf.Max(0, maxVolumetricLights);
+            float maxDistSqr = GetMaxLightDistanceSqr();
+            int budget = GetLightBudget();
             _nearestLights.Clear();
             _selectedNearestLights.Clear();
 
@@ -189,6 +195,51 @@ namespace RenderingSystem
             _nearestLights.RemoveAt(_nearestLights.Count - 1);
             _selectedNearestLights.Remove(removed.light);
             ToggleVolumetric(removed, false);
+        }
+
+        private float GetMaxLightDistanceSqr()
+        {
+            if (!Mathf.Approximately(_cachedMaxLightDistance, maxLightDistance))
+            {
+                _cachedMaxLightDistance = maxLightDistance;
+                _cachedMaxLightDistanceSqr = maxLightDistance * maxLightDistance;
+            }
+
+            return _cachedMaxLightDistanceSqr;
+        }
+
+        private float GetCameraMoveThresholdSqr()
+        {
+            if (!Mathf.Approximately(_cachedCameraMoveThreshold, cameraMoveThreshold))
+            {
+                _cachedCameraMoveThreshold = cameraMoveThreshold;
+                float threshold = Mathf.Max(0f, cameraMoveThreshold);
+                _cachedCameraMoveThresholdSqr = threshold * threshold;
+            }
+
+            return _cachedCameraMoveThresholdSqr;
+        }
+
+        private float GetCameraRotationThreshold()
+        {
+            if (!Mathf.Approximately(_cachedCameraRotationThreshold, cameraRotationThreshold))
+            {
+                _cachedCameraRotationThreshold = cameraRotationThreshold;
+                _cachedCameraRotationThresholdValue = Mathf.Max(0f, cameraRotationThreshold);
+            }
+
+            return _cachedCameraRotationThresholdValue;
+        }
+
+        private int GetLightBudget()
+        {
+            if (_cachedMaxVolumetricLights != maxVolumetricLights)
+            {
+                _cachedMaxVolumetricLights = maxVolumetricLights;
+                _cachedLightBudget = Mathf.Max(0, maxVolumetricLights);
+            }
+
+            return _cachedLightBudget;
         }
 
         private void ToggleVolumetric(Light l, bool enable)
