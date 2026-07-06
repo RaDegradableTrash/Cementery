@@ -40,6 +40,16 @@ public class SnowAccumulationManager : MonoBehaviour
     private float _cachedSnowMapWorldSize = -1f;
     private bool _snowParamsDirty = true;
     private bool _snowDebugGreenEnabled;
+    private float _cachedTrackingUpdateIntervalSource = -1f;
+    private float _cachedTrackingUpdateInterval = 0.05f;
+    private float _cachedTrackingSnapIntervalSource = -1f;
+    private float _cachedTrackingSnapInterval = 1f;
+    private float _cachedOcclusionUpdateIntervalSource = -1f;
+    private float _cachedOcclusionUpdateInterval = 0.02f;
+    private float _cachedGlobalSnowUpdateIntervalSource = -1f;
+    private float _cachedGlobalSnowUpdateInterval = 0.02f;
+    private float _cachedShaderParamRefreshIntervalSource = -1f;
+    private float _cachedShaderParamRefreshInterval = 0.05f;
 
     private void Awake()
     {
@@ -253,7 +263,7 @@ public class SnowAccumulationManager : MonoBehaviour
         bool shaderParamsDirty = false;
 
         _trackingTimer += Time.deltaTime;
-        if (_trackingTimer >= Mathf.Max(0.05f, trackingUpdateInterval))
+        if (_trackingTimer >= GetTrackingUpdateInterval())
         {
             _trackingTimer = 0f;
 
@@ -262,7 +272,7 @@ public class SnowAccumulationManager : MonoBehaviour
             if (tracker != null)
             {
                 // Snap to a grid to avoid the snow map sliding pixel-by-pixel every frame
-                float snap = Mathf.Max(1f, trackingSnapInterval);
+                float snap = GetTrackingSnapInterval();
                 float snappedX = Mathf.Round(tracker.position.x / snap) * snap;
                 float snappedZ = Mathf.Round(tracker.position.z / snap) * snap;
                 Vector3 newCenter = new Vector3(snappedX, 0f, snappedZ);
@@ -277,14 +287,14 @@ public class SnowAccumulationManager : MonoBehaviour
         }
 
         _occlusionTimer += Time.deltaTime;
-        if (_occlusionTimer >= Mathf.Max(0.02f, occlusionUpdateInterval))
+        if (_occlusionTimer >= GetOcclusionUpdateInterval())
         {
             _occlusionTimer = 0f;
             UpdateOcclusionMap();
         }
 
         _globalSnowTimer += Time.deltaTime;
-        if (_globalSnowTimer >= Mathf.Max(0.02f, globalSnowUpdateInterval))
+        if (_globalSnowTimer >= GetGlobalSnowUpdateInterval())
         {
             float elapsed = _globalSnowTimer;
             _globalSnowTimer = 0f;
@@ -292,7 +302,7 @@ public class SnowAccumulationManager : MonoBehaviour
         }
 
         _shaderParamTimer += Time.deltaTime;
-        if (shaderParamsDirty || _shaderParamTimer >= Mathf.Max(0.05f, shaderParamRefreshInterval))
+        if (shaderParamsDirty || _shaderParamTimer >= GetShaderParamRefreshInterval())
         {
             _shaderParamTimer = 0f;
             UpdateGlobalShaderParams();
@@ -322,6 +332,61 @@ public class SnowAccumulationManager : MonoBehaviour
         }
 
         return _cachedSnowParams;
+    }
+
+    private float GetTrackingUpdateInterval()
+    {
+        if (!Mathf.Approximately(_cachedTrackingUpdateIntervalSource, trackingUpdateInterval))
+        {
+            _cachedTrackingUpdateIntervalSource = trackingUpdateInterval;
+            _cachedTrackingUpdateInterval = Mathf.Max(0.05f, trackingUpdateInterval);
+        }
+
+        return _cachedTrackingUpdateInterval;
+    }
+
+    private float GetTrackingSnapInterval()
+    {
+        if (!Mathf.Approximately(_cachedTrackingSnapIntervalSource, trackingSnapInterval))
+        {
+            _cachedTrackingSnapIntervalSource = trackingSnapInterval;
+            _cachedTrackingSnapInterval = Mathf.Max(1f, trackingSnapInterval);
+        }
+
+        return _cachedTrackingSnapInterval;
+    }
+
+    private float GetOcclusionUpdateInterval()
+    {
+        if (!Mathf.Approximately(_cachedOcclusionUpdateIntervalSource, occlusionUpdateInterval))
+        {
+            _cachedOcclusionUpdateIntervalSource = occlusionUpdateInterval;
+            _cachedOcclusionUpdateInterval = Mathf.Max(0.02f, occlusionUpdateInterval);
+        }
+
+        return _cachedOcclusionUpdateInterval;
+    }
+
+    private float GetGlobalSnowUpdateInterval()
+    {
+        if (!Mathf.Approximately(_cachedGlobalSnowUpdateIntervalSource, globalSnowUpdateInterval))
+        {
+            _cachedGlobalSnowUpdateIntervalSource = globalSnowUpdateInterval;
+            _cachedGlobalSnowUpdateInterval = Mathf.Max(0.02f, globalSnowUpdateInterval);
+        }
+
+        return _cachedGlobalSnowUpdateInterval;
+    }
+
+    private float GetShaderParamRefreshInterval()
+    {
+        if (!Mathf.Approximately(_cachedShaderParamRefreshIntervalSource, shaderParamRefreshInterval))
+        {
+            _cachedShaderParamRefreshIntervalSource = shaderParamRefreshInterval;
+            _cachedShaderParamRefreshInterval = Mathf.Max(0.05f, shaderParamRefreshInterval);
+        }
+
+        return _cachedShaderParamRefreshInterval;
     }
 
     private Transform ResolveTrackingTarget()
