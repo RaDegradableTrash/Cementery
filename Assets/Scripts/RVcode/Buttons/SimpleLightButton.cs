@@ -56,9 +56,50 @@ public class SimpleLightButton : MonoBehaviour, ICockpitInteractable, ICockpitHi
         // ────────────────────────────────────────────────────────────────────────
     }
 
-    private void Update()
+    private void OnEnable()
     {
+        SubscribeToLights();
         UpdateVisual();
+    }
+
+    private void OnDisable()
+    {
+        UnsubscribeFromLights();
+    }
+
+    private void SubscribeToLights()
+    {
+        if (lightTargets == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < lightTargets.Length; i++)
+        {
+            SimpleLight light = lightTargets[i];
+            if (light != null)
+            {
+                light.OnStateChanged -= UpdateVisual;
+                light.OnStateChanged += UpdateVisual;
+            }
+        }
+    }
+
+    private void UnsubscribeFromLights()
+    {
+        if (lightTargets == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < lightTargets.Length; i++)
+        {
+            SimpleLight light = lightTargets[i];
+            if (light != null)
+            {
+                light.OnStateChanged -= UpdateVisual;
+            }
+        }
     }
 
     public void Interact()

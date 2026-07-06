@@ -30,6 +30,7 @@ public class SimpleLight : MonoBehaviour
     private Color[] baseEmissionColors;
     private bool[] hasEmission;
     private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
+    public event System.Action OnStateChanged;
 
     private void Awake()
     {
@@ -79,6 +80,7 @@ public class SimpleLight : MonoBehaviour
         bool effectiveOn = GetEffectiveOn();
         ApplyState(effectiveOn);
         lastEffectiveOn = effectiveOn;
+        OnStateChanged?.Invoke();
     }
 
     private void PruneLightControlTargets()
@@ -266,6 +268,7 @@ public class SimpleLight : MonoBehaviour
         {
             lastEffectiveOn = effectiveOn;
             ApplyState(effectiveOn);
+            OnStateChanged?.Invoke();
         }
     }
 
@@ -281,6 +284,7 @@ public class SimpleLight : MonoBehaviour
             return;
         }
         desiredOn = value;
+        OnStateChanged?.Invoke();
     }
 
     public bool IsOn()
