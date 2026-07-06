@@ -24,6 +24,7 @@ public class SnowParticleSystem : MonoBehaviour
     private Camera _cachedCamera;
     private Vector3 _lastEmitterPosition;
     private bool _hasEmitterPosition;
+    private float _nextPlayStateCheckTime;
     private readonly Dictionary<int, CollisionTargetInfo> _collisionTargetCache = new Dictionary<int, CollisionTargetInfo>(64);
     private const int MaxCollisionTargetCacheSize = 256;
 
@@ -74,9 +75,13 @@ public class SnowParticleSystem : MonoBehaviour
             }
         }
 
-        if (partSystem != null && !partSystem.isPlaying)
+        if (partSystem != null && Time.time >= _nextPlayStateCheckTime)
         {
-            partSystem.Play();
+            _nextPlayStateCheckTime = Time.time + 1f;
+            if (!partSystem.isPlaying)
+            {
+                partSystem.Play();
+            }
         }
     }
 
