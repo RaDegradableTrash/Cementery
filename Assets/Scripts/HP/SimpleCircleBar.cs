@@ -17,12 +17,23 @@ public class SimpleCircleBar : MonoBehaviour
     void Awake()
     {
         Instance = this; // 初始化单例
+        enabled = false;
     }
 
     void Update()
     {
-        if (hpFillImage == null) return;
-        if (Mathf.Abs(hpFillImage.fillAmount - targetFillAmount) < 0.001f) return;
+        if (hpFillImage == null)
+        {
+            enabled = false;
+            return;
+        }
+
+        if (Mathf.Abs(hpFillImage.fillAmount - targetFillAmount) < 0.001f)
+        {
+            hpFillImage.fillAmount = targetFillAmount;
+            enabled = false;
+            return;
+        }
 
         // 让血条圆环平滑地转动到目标血量
         hpFillImage.fillAmount = Mathf.Lerp(hpFillImage.fillAmount, targetFillAmount, Time.deltaTime * smoothSpeed);
@@ -37,6 +48,12 @@ public class SimpleCircleBar : MonoBehaviour
     {
         if (maxHP <= 0) return;
         // 计算出 0 ~ 1 之间的比例
-        targetFillAmount = Mathf.Clamp01(currentHP / maxHP);
+        float nextFillAmount = Mathf.Clamp01(currentHP / maxHP);
+        bool targetChanged = Mathf.Abs(nextFillAmount - targetFillAmount) >= 0.001f;
+        bool fillNeedsSync = hpFillImage != null && Mathf.Abs(hpFillImage.fillAmount - nextFillAmount) >= 0.001f;
+        if (!targetChanged && !fillNeedsSync) return;
+
+        targetFillAmount = nextFillAmount;
+        enabled = true;
     }
 }
