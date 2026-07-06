@@ -42,6 +42,8 @@ public class FuelCan : MonoBehaviour
         worldObject.interactable = false;
         worldObject.collectable = false;
         worldObject.canBePushed = true;
+        worldObject.onPickUp.AddListener(OnPickedUp);
+        worldObject.onDrop.AddListener(OnDropped);
         
         // 强制确保有 Rigidbody 以便能够受到重力落下，防止飘在半空
         Rigidbody rb = GetComponent<Rigidbody>();
@@ -58,18 +60,34 @@ public class FuelCan : MonoBehaviour
         if (fuelDisplay != null)
             fuelDisplayTransform = fuelDisplay.transform;
         UpdateFuelDisplay();
+        enabled = worldObject.IsCarried;
+    }
+
+    private void OnDestroy()
+    {
+        if (worldObject == null)
+            return;
+
+        worldObject.onPickUp.RemoveListener(OnPickedUp);
+        worldObject.onDrop.RemoveListener(OnDropped);
     }
     
     void Update()
     {
+        if (!worldObject.IsCarried)
+        {
+            enabled = false;
+            return;
+        }
+
         // 当油桶被拿起时，检测右键加油
-        if (worldObject.IsCarried && Input.GetMouseButtonDown(1)) // 右键
+        if (Input.GetMouseButtonDown(1)) // 右键
         {
             TryRefillVehicle();
         }
         
         // 当油桶被拿起时，更新显示面向玩家（可选）
-        if (worldObject.IsCarried && fuelDisplayTransform != null && Time.time >= nextDisplayFacingUpdateTime)
+        if (fuelDisplayTransform != null && Time.time >= nextDisplayFacingUpdateTime)
         {
             nextDisplayFacingUpdateTime = Time.time + 0.05f;
 
@@ -83,6 +101,16 @@ public class FuelCan : MonoBehaviour
                     fuelDisplayTransform.rotation = Quaternion.LookRotation(direction, Vector3.up);
             }
         }
+    }
+
+    private void OnPickedUp(GameObject actor)
+    {
+        enabled = true;
+    }
+
+    private void OnDropped(GameObject actor)
+    {
+        enabled = false;
     }
 
     private Camera GetCachedMainCamera()
