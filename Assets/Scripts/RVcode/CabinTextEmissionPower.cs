@@ -20,6 +20,10 @@ public class CabinTextEmissionPower : MonoBehaviour
     private bool hasAppliedEmission;
     private float lastAppliedHdr = float.NaN;
     private float lastTargetHdr;
+    private float cachedOnHdr;
+    private bool cachedUseMaterialOnEmissionHdr;
+    private float cachedInspectorOnEmissionHdr = float.NaN;
+    private float cachedBaseEmissionHdr = float.NaN;
     private float nextStablePowerCheckTime;
     private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
 
@@ -71,7 +75,8 @@ public class CabinTextEmissionPower : MonoBehaviour
         }
 
         bool hasPower = startProcedure == null || startProcedure.HasAnyBatteryOn();
-        float targetHdr = GetTargetHdr(hasPower);
+        float onHdr = GetOnEmissionHdr();
+        float targetHdr = hasPower ? onHdr : offEmissionHdr;
         lastTargetHdr = targetHdr;
         float duration = hasPower ? rampUpSeconds : rampDownSeconds;
 
@@ -94,10 +99,19 @@ public class CabinTextEmissionPower : MonoBehaviour
         }
     }
 
-    private float GetTargetHdr(bool hasPower)
+    private float GetOnEmissionHdr()
     {
-        float onHdr = useMaterialOnEmissionHdr ? baseEmissionHdr : onEmissionHdr;
-        return hasPower ? onHdr : offEmissionHdr;
+        if (cachedUseMaterialOnEmissionHdr != useMaterialOnEmissionHdr ||
+            !Mathf.Approximately(cachedInspectorOnEmissionHdr, onEmissionHdr) ||
+            !Mathf.Approximately(cachedBaseEmissionHdr, baseEmissionHdr))
+        {
+            cachedUseMaterialOnEmissionHdr = useMaterialOnEmissionHdr;
+            cachedInspectorOnEmissionHdr = onEmissionHdr;
+            cachedBaseEmissionHdr = baseEmissionHdr;
+            cachedOnHdr = useMaterialOnEmissionHdr ? baseEmissionHdr : onEmissionHdr;
+        }
+
+        return cachedOnHdr;
     }
 
     private void CacheBaseEmission()
