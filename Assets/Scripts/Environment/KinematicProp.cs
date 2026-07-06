@@ -30,10 +30,19 @@ namespace EnvironmentSystem
         public void Sleep()
         {
             if (_rb == null) return;
-            _rb.isKinematic     = true;
-            _rb.useGravity      = false;
-            _rb.velocity        = Vector3.zero;
-            _rb.angularVelocity = Vector3.zero;
+
+            if (!_rb.isKinematic)
+            {
+                _rb.velocity = Vector3.zero;
+                _rb.angularVelocity = Vector3.zero;
+                _rb.isKinematic = true;
+            }
+
+            if (_rb.useGravity)
+            {
+                _rb.useGravity = false;
+            }
+
             _awoken = false;
         }
 
@@ -43,17 +52,6 @@ namespace EnvironmentSystem
             _awoken         = true;
             _rb.isKinematic = false;
             _rb.useGravity  = true;
-        }
-
-        private void FixedUpdate()
-        {
-            if (!_awoken && _rb != null)
-            {
-                _rb.isKinematic = true;
-                _rb.useGravity = false;
-                _rb.velocity = Vector3.zero;
-                _rb.angularVelocity = Vector3.zero;
-            }
         }
 
         // ── Collision handling ─────────────────────────────────────────────────
