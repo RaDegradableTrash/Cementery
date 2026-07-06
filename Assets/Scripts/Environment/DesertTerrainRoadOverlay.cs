@@ -189,6 +189,12 @@ namespace EnvironmentSystem
         private void Awake()
         {
             CacheOwnComponents();
+            ScheduleNextRuntimeSyncCheck(true);
+        }
+
+        private void OnEnable()
+        {
+            ScheduleNextRuntimeSyncCheck(true);
         }
 
         private void OnValidate()
@@ -237,7 +243,7 @@ namespace EnvironmentSystem
 
             if (Application.isPlaying)
             {
-                nextRuntimeSyncCheckTime = Time.unscaledTime + runtimeSyncCheckInterval;
+                ScheduleNextRuntimeSyncCheck(false);
             }
 
             MeshFilter terrainFilter = GetTerrainFilter();
@@ -278,6 +284,17 @@ namespace EnvironmentSystem
                     lastTerrainBounds = terrainMesh.bounds;
                 }
             }
+        }
+
+        private void ScheduleNextRuntimeSyncCheck(bool stagger)
+        {
+            if (!Application.isPlaying)
+            {
+                return;
+            }
+
+            float interval = Mathf.Max(0.1f, runtimeSyncCheckInterval);
+            nextRuntimeSyncCheckTime = Time.unscaledTime + (stagger ? Random.Range(0f, interval) : interval);
         }
     }
 }
