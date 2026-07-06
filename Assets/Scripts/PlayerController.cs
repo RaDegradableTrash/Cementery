@@ -16,6 +16,7 @@ public class PlayerController : NetworkBehaviour
     [Header("Health")]
     public int hp = 10;
     public int maxHp = 10;
+    [SerializeField] private bool logDamageEvents = false;
 
     [Header("Input")]
     [Tooltip("Use raw axis values for immediate response (recommended for low input latency).")]
@@ -411,8 +412,11 @@ public class PlayerController : NetworkBehaviour
         }
 
         // 每次 hp 发生改变，就通知 UI 刷新
-SimpleCircleBar.Instance.UpdateHealthBar(hp, maxHp);
-        Debug.Log($"[PlayerController] Took {amount} damage. Current HP: {hp}");
+        SimpleCircleBar.Instance.UpdateHealthBar(hp, maxHp);
+        if (logDamageEvents)
+        {
+            Debug.Log($"[PlayerController] Took {amount} damage. Current HP: {hp}");
+        }
     }
 
     private void Die(Vector3 sourcePos)
