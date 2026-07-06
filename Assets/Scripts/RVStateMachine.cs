@@ -24,6 +24,14 @@ namespace RVSystem
         [Tooltip("Additional fuel consumed per second when full throttle is applied.")]
         public float activeFuelConsumption = 1.5f;
 
+        private RVCameraController _cameraController;
+        private Camera _playerCamera;
+
+        private void Awake()
+        {
+            CacheTransitionReferences();
+        }
+
         void Update()
         {
             if (currentState == RVState.Active)
@@ -59,37 +67,50 @@ namespace RVSystem
         public void SetState(RVState newState)
         {
             currentState = newState;
-            
-            var cameraController = GetComponent<RVCameraController>();
-            if (cameraController == null) cameraController = GetComponentInParent<RVCameraController>();
+            CacheTransitionReferences();
 
             if (newState == RVState.Parked)
             {
                 controller.StopVehicle();
                 
-                if (cameraController != null)
+                if (_cameraController != null)
                 {
-                    cameraController.SetCamerasEnabled(false);
+                    _cameraController.SetCamerasEnabled(false);
                 }
                 if (player != null)
                 {
                     player.SetActive(true);
-                    var playerCam = player.GetComponentInChildren<Camera>(true);
-                    if (playerCam != null) playerCam.enabled = true;
+                    if (_playerCamera != null) _playerCamera.enabled = true;
                 }
             }
             else
             {
-                if (cameraController != null)
+                if (_cameraController != null)
                 {
-                    cameraController.SetCamerasEnabled(true);
-                    cameraController.SetInteriorActive(true);
+                    _cameraController.SetCamerasEnabled(true);
+                    _cameraController.SetInteriorActive(true);
                 }
                 if (player != null)
                 {
-                    var playerCam = player.GetComponentInChildren<Camera>();
-                    if (playerCam != null) playerCam.enabled = false;
+                    if (_playerCamera != null) _playerCamera.enabled = false;
                 }
+            }
+        }
+
+        private void CacheTransitionReferences()
+        {
+            if (_cameraController == null)
+            {
+                _cameraController = GetComponent<RVCameraController>();
+                if (_cameraController == null)
+                {
+                    _cameraController = GetComponentInParent<RVCameraController>();
+                }
+            }
+
+            if (player != null && _playerCamera == null)
+            {
+                _playerCamera = player.GetComponentInChildren<Camera>(true);
             }
         }
     }
