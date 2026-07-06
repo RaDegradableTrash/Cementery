@@ -21,6 +21,14 @@ public class SnowParticleSystem : MonoBehaviour
     private float _nextTargetSearchTime;
     private RVSystem.RVController _cachedRv;
     private Camera _cachedCamera;
+    private readonly Dictionary<int, CollisionTargetInfo> _collisionTargetCache = new Dictionary<int, CollisionTargetInfo>(64);
+    private const int MaxCollisionTargetCacheSize = 256;
+
+    private struct CollisionTargetInfo
+    {
+        public bool isTerrain;
+        public DynamicSnowObject dynamicSnowObject;
+    }
 
     private void Awake()
     {
@@ -214,7 +222,8 @@ public class SnowParticleSystem : MonoBehaviour
 
         int numCollisionEvents = Mathf.Min(partSystem.GetCollisionEvents(other, collisionEvents), remainingBudget);
         _processedCollisionEventsThisFrame += numCollisionEvents;
-        bool isTerrain = other.GetComponentInParent<DesertTerrainChunk>() != null || other.name.Contains("Terrain");
+        CollisionTargetInfo targetInfo = GetCollisionTargetInfo(other);
+        bool isTerrain = targetInfo.isTerrain;
 
         for (int i = 0; i < numCollisionEvents; i++)
         {
@@ -258,10 +267,12 @@ public class SnowParticleSystem : MonoBehaviour
                 if (!enableDynamicObjectSnow)
                     continue;
 
-                var dynamicObj = other.GetComponentInParent<DynamicSnowObject>();
+                DynamicSnowObject dynamicObj = targetInfo.dynamicSnowObject;
                 if (dynamicObj == null && other.transform.root != null)
                 {
                     dynamicObj = other.transform.root.gameObject.AddComponent<DynamicSnowObject>();
+                    targetInfo.dynamicSnowObject = dynamicObj;
+                    _collisionTargetCache[other.GetInstanceID()] = targetInfo;
                 }
                 
                 if (dynamicObj != null)
@@ -287,5 +298,28 @@ public class SnowParticleSystem : MonoBehaviour
                 SnowAccumulationManager.Instance.AddSnowAtPoint(pos, 3.5f, particleSnowAmount * 0.6f);
             }
         }
+    }
+
+    private CollisionTargetInfo GetCollisionTargetInfo(GameObject other)
+    {
+        int key = other.GetInstanceID();
+        if (_collisionTargetCache.TryGetValue(key, out CollisionTargetInfo info))
+        {
+            return info;
+        }
+
+        if (_collisionTargetCache.Count >= MaxCollisionTargetCacheSize)
+        {
+            _collisionTargetCache.Clear();
+        }
+
+        info = new CollisionTargetInfo
+        {
+            isTerrain = other.GetComponentInParent<DesertTerrainChunk>() != null || other.name.Contains("Terrain"),
+            dynamicSnowObject = enableDynamicObjectSnow ? other.GetComponentInParent<DynamicSnowObject>() : null
+        };
+
+        _collisionTargetCache[key] = info;
+        return info;
     }
 }
