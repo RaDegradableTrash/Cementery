@@ -26,6 +26,10 @@ public class PlayerFootstepAudio : MonoBehaviour
     private Rigidbody _playerRb;
     private InventoryCameraController _inventoryCameraController;
     private float _actualEndTime;
+    private float _nextInventoryCheckTime;
+    private bool _cachedInventoryActive;
+    private AudioClip _lastAssignedClip;
+    private float _lastAssignedVolume = -1f;
 
     void Awake()
     {
@@ -90,8 +94,16 @@ public class PlayerFootstepAudio : MonoBehaviour
             if (!_audioSource.isPlaying)
             {
                 // 首次触发或被停掉后重新起播
-                _audioSource.clip = walkSound;
-                _audioSource.volume = volume;
+                if (_lastAssignedClip != walkSound)
+                {
+                    _audioSource.clip = walkSound;
+                    _lastAssignedClip = walkSound;
+                }
+                if (!Mathf.Approximately(_lastAssignedVolume, volume))
+                {
+                    _audioSource.volume = volume;
+                    _lastAssignedVolume = volume;
+                }
                 _audioSource.time = trimStart; // 卡准【掐头】点
                 _audioSource.Play();
             }
@@ -119,9 +131,14 @@ public class PlayerFootstepAudio : MonoBehaviour
     private bool IsInventoryModeActive()
     {
         // 这里的逻辑直接参考了你 PlayerController 内部的判定
+        if (Time.unscaledTime < _nextInventoryCheckTime)
+            return _cachedInventoryActive;
+
+        _nextInventoryCheckTime = Time.unscaledTime + 0.1f;
         if (_inventoryCameraController == null)
             _inventoryCameraController = InventoryCameraController.GetPrimaryController();
 
-        return _inventoryCameraController != null && _inventoryCameraController.IsInventoryActive;
+        _cachedInventoryActive = _inventoryCameraController != null && _inventoryCameraController.IsInventoryActive;
+        return _cachedInventoryActive;
     }
 }
