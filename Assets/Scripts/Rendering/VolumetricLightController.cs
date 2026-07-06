@@ -20,6 +20,10 @@ namespace RenderingSystem
         private float _timer;
         private List<Light> _allLights = new List<Light>();
         private readonly List<LightDistancePair> _nearestLights = new List<LightDistancePair>(8);
+        private readonly Dictionary<Light, bool> _volumetricStates = new Dictionary<Light, bool>();
+#if AURA_2_PRESENT
+        private readonly Dictionary<Light, Aura2API.AuraLight> _auraLightCache = new Dictionary<Light, Aura2API.AuraLight>();
+#endif
 
         private struct LightDistancePair
         {
@@ -81,11 +85,13 @@ namespace RenderingSystem
                 if (l == null)
                 {
                     _allLights.RemoveAt(i);
+                    _volumetricStates.Remove(l);
                     continue;
                 }
 
                 if (!l.enabled || !l.gameObject.activeInHierarchy)
                 {
+                    ToggleVolumetric(l, false);
                     continue;
                 }
 
@@ -99,10 +105,7 @@ namespace RenderingSystem
 
                 LightDistancePair pair = new LightDistancePair { light = l, sqrDistance = sqrDist };
 #if AURA_2_PRESENT
-                if (l.TryGetComponent(out Aura2API.AuraLight auraL))
-                {
-                    pair.auraLight = auraL;
-                }
+                pair.auraLight = GetCachedAuraLight(l);
 #endif
                 AddNearestLight(pair, budget);
             }
@@ -162,8 +165,18 @@ namespace RenderingSystem
 
         private void ToggleVolumetric(Light l, bool enable)
         {
+            if (l == null)
+                return;
+
+            if (_volumetricStates.TryGetValue(l, out bool currentState) && currentState == enable)
+                return;
+
+            _volumetricStates[l] = enable;
+
 #if AURA_2_PRESENT
-            if (l.TryGetComponent(out Aura2API.AuraLight auraL))
+            Aura2API.AuraLight auraL = GetCachedAuraLight(l);
+
+            if (auraL != null)
             {
                 auraL.enabled = enable;
                 return;
@@ -175,6 +188,14 @@ namespace RenderingSystem
 
         private void ToggleVolumetric(LightDistancePair pair, bool enable)
         {
+            if (pair.light == null)
+                return;
+
+            if (_volumetricStates.TryGetValue(pair.light, out bool currentState) && currentState == enable)
+                return;
+
+            _volumetricStates[pair.light] = enable;
+
 #if AURA_2_PRESENT
             if (pair.auraLight != null)
             {
@@ -182,7 +203,24 @@ namespace RenderingSystem
                 return;
             }
 #endif
-            ToggleVolumetric(pair.light, enable);
+            // Fallback action if Aura 2 is not present:
+            // We can toggle shadow casting or custom light flares, or simply do nothing.
         }
+
+#if AURA_2_PRESENT
+        private Aura2API.AuraLight GetCachedAuraLight(Light light)
+        {
+            if (light == null)
+                return null;
+
+            if (!_auraLightCache.TryGetValue(light, out Aura2API.AuraLight auraL))
+            {
+                light.TryGetComponent(out auraL);
+                _auraLightCache[light] = auraL;
+            }
+
+            return auraL;
+        }
+#endif
     }
 }
