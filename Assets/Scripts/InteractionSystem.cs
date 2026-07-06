@@ -138,6 +138,16 @@ public class InteractionSystem : MonoBehaviour
     private const int InteractionHitBufferSize = 48;
     private readonly RaycastHit[] _preciseHitBuffer = new RaycastHit[InteractionHitBufferSize];
     private readonly RaycastHit[] _wideHitBuffer = new RaycastHit[InteractionHitBufferSize];
+    private const int PlacementHitBufferSize = 64;
+    private const int PlacementOverlapBufferSize = 64;
+    private readonly RaycastHit[] _placementHitBuffer = new RaycastHit[PlacementHitBufferSize];
+    private readonly Collider[] _placementOverlapBuffer = new Collider[PlacementOverlapBufferSize];
+    private readonly Vector3[] _placementCornerBuffer = new Vector3[8];
+    private Collider[] _placementGhostColliders;
+    private Renderer[] _placementGhostRenderers;
+    private bool _placementGhostActive;
+    private bool _hasPlacementMaterialState;
+    private bool _lastPlacementMaterialValid;
 
     public static InteractionSystem Instance { get; private set; }
 
@@ -1988,8 +1998,12 @@ public class InteractionSystem : MonoBehaviour
                 c.gameObject.layer = 2; // Ignore Raycast layer
             }
         }
+
+        CachePlacementGhostComponents();
+        _placementGhostActive = true;
+        _hasPlacementMaterialState = false;
         
-        _placementGhost.SetActive(false);
+        SetPlacementGhostActive(false);
     }
 
     void ExitPlacementMode()
@@ -2003,6 +2017,75 @@ public class InteractionSystem : MonoBehaviour
             if (Application.isPlaying) Destroy(_placementGhost);
             else UnityEngine.Object.DestroyImmediate(_placementGhost);
         }
+
+        _placementGhostColliders = null;
+        _placementGhostRenderers = null;
+        _placementGhostActive = false;
+        _hasPlacementMaterialState = false;
+    }
+
+    void CachePlacementGhostComponents()
+    {
+        if (_placementGhost == null)
+        {
+            _placementGhostColliders = null;
+            _placementGhostRenderers = null;
+            return;
+        }
+
+        _placementGhostColliders = _placementGhost.GetComponentsInChildren<Collider>();
+        _placementGhostRenderers = _placementGhost.GetComponentsInChildren<Renderer>();
+    }
+
+    void SetPlacementGhostActive(bool active)
+    {
+        if (_placementGhost == null)
+            return;
+
+        if (_placementGhostActive == active && _placementGhost.activeSelf == active)
+            return;
+
+        _placementGhost.SetActive(active);
+        _placementGhostActive = active;
+    }
+
+    bool TryGetPlacementGhostBounds(out Bounds bounds)
+    {
+        bounds = new Bounds(_placementGhost != null ? _placementGhost.transform.position : transform.position, Vector3.zero);
+        bool hasBounds = false;
+
+        if (_placementGhostRenderers == null || _placementGhostRenderers.Length == 0)
+            CachePlacementGhostComponents();
+
+        if (_placementGhostRenderers == null)
+            return false;
+
+        for (int i = 0; i < _placementGhostRenderers.Length; i++)
+        {
+            Renderer r = _placementGhostRenderers[i];
+            if (r == null)
+                continue;
+
+            if (hasBounds) bounds.Encapsulate(r.bounds);
+            else { bounds = r.bounds; hasBounds = true; }
+        }
+
+        return hasBounds;
+    }
+
+    void FillPlacementCornerBuffer(Bounds bounds)
+    {
+        Vector3 gc = bounds.center;
+        Vector3 ge = bounds.extents;
+
+        _placementCornerBuffer[0] = gc + new Vector3(-ge.x, -ge.y, -ge.z);
+        _placementCornerBuffer[1] = gc + new Vector3( ge.x, -ge.y, -ge.z);
+        _placementCornerBuffer[2] = gc + new Vector3(-ge.x,  ge.y, -ge.z);
+        _placementCornerBuffer[3] = gc + new Vector3( ge.x,  ge.y, -ge.z);
+        _placementCornerBuffer[4] = gc + new Vector3(-ge.x, -ge.y,  ge.z);
+        _placementCornerBuffer[5] = gc + new Vector3( ge.x, -ge.y,  ge.z);
+        _placementCornerBuffer[6] = gc + new Vector3(-ge.x,  ge.y,  ge.z);
+        _placementCornerBuffer[7] = gc + new Vector3( ge.x,  ge.y,  ge.z);
     }
     
     void UpdatePlacementGhost()
@@ -2013,19 +2096,20 @@ public class InteractionSystem : MonoBehaviour
         EnsurePlayerCollidersCached();
         
         float maxReach = placementRayRange; // Let the placement mode leverage the full configured ray range (10m) instead of capping at pickup range (3m)!
-        RaycastHit[] hits = Physics.RaycastAll(ray, placementRayRange, placementMask, QueryTriggerInteraction.Ignore);
+        int hitCount = Physics.RaycastNonAlloc(ray, _placementHitBuffer, placementRayRange, placementMask, QueryTriggerInteraction.Ignore);
         
         // Find the nearest valid hit (any surface)
         float nearest = float.PositiveInfinity;
         RaycastHit bestHit = default;
         
-        for (int i = 0; i < hits.Length; i++)
+        for (int i = 0; i < hitCount; i++)
         {
-            if (IsIgnoredCarryHitCollider(hits[i].collider)) continue;
-            if (hits[i].distance < nearest)
+            RaycastHit hit = _placementHitBuffer[i];
+            if (IsIgnoredCarryHitCollider(hit.collider)) continue;
+            if (hit.distance < nearest)
             {
-                nearest = hits[i].distance;
-                bestHit = hits[i];
+                nearest = hit.distance;
+                bestHit = hit;
             }
         }
         
@@ -2033,7 +2117,7 @@ public class InteractionSystem : MonoBehaviour
         {
             if (nearest > maxReach)
             {
-                _placementGhost.SetActive(false);
+                SetPlacementGhostActive(false);
                 _isPlacementValid = false;
                 return;
             }
@@ -2069,7 +2153,7 @@ public class InteractionSystem : MonoBehaviour
 
             if (canPlaceOnSurface)
             {
-                _placementGhost.SetActive(true);
+                SetPlacementGhostActive(true);
                 
                 // 1. Initial placement on the surface
                 _placementPosition = bestHit.point;
@@ -2094,34 +2178,44 @@ public class InteractionSystem : MonoBehaviour
                 bool foundCollider = false;
                 Plane plane = new Plane(bestHit.normal, bestHit.point);
 
-                foreach(Collider c in _placementGhost.GetComponentsInChildren<Collider>())
-                {
-                    MeshCollider mc = c as MeshCollider;
-                    if (mc != null && !mc.convex)
-                    {
-                        Vector3 center = c.bounds.center;
-                        Vector3 extents = c.bounds.extents;
-                        Vector3 lowestCorner = center;
-                        lowestCorner.x += bestHit.normal.x < 0 ? extents.x : -extents.x;
-                        lowestCorner.y += bestHit.normal.y < 0 ? extents.y : -extents.y;
-                        lowestCorner.z += bestHit.normal.z < 0 ? extents.z : -extents.z;
+                if (_placementGhostColliders == null || _placementGhostColliders.Length == 0)
+                    CachePlacementGhostComponents();
 
-                        float d = plane.GetDistanceToPoint(lowestCorner);
-                        if (d < 0 && -d > maxPenetration)
+                if (_placementGhostColliders != null)
+                {
+                    for (int i = 0; i < _placementGhostColliders.Length; i++)
+                    {
+                        Collider c = _placementGhostColliders[i];
+                        if (c == null)
+                            continue;
+
+                        MeshCollider mc = c as MeshCollider;
+                        if (mc != null && !mc.convex)
                         {
-                            maxPenetration = -d;
+                            Vector3 center = c.bounds.center;
+                            Vector3 extents = c.bounds.extents;
+                            Vector3 lowestCorner = center;
+                            lowestCorner.x += bestHit.normal.x < 0 ? extents.x : -extents.x;
+                            lowestCorner.y += bestHit.normal.y < 0 ? extents.y : -extents.y;
+                            lowestCorner.z += bestHit.normal.z < 0 ? extents.z : -extents.z;
+
+                            float d = plane.GetDistanceToPoint(lowestCorner);
+                            if (d < 0 && -d > maxPenetration)
+                            {
+                                maxPenetration = -d;
+                                foundCollider = true;
+                            }
+                            continue;
+                        }
+
+                        Vector3 farPoint = c.bounds.center - bestHit.normal * 1000f;
+                        Vector3 extremePoint = c.ClosestPoint(farPoint);
+                        float dist = plane.GetDistanceToPoint(extremePoint);
+                        if (dist < 0 && -dist > maxPenetration)
+                        {
+                            maxPenetration = -dist;
                             foundCollider = true;
                         }
-                        continue;
-                    }
-
-                    Vector3 farPoint = c.bounds.center - bestHit.normal * 1000f;
-                    Vector3 extremePoint = c.ClosestPoint(farPoint);
-                    float dist = plane.GetDistanceToPoint(extremePoint);
-                    if (dist < 0 && -dist > maxPenetration)
-                    {
-                        maxPenetration = -dist;
-                        foundCollider = true;
                     }
                 }
 
@@ -2132,14 +2226,7 @@ public class InteractionSystem : MonoBehaviour
                 }
                 else if (!foundCollider)
                 {
-                    Bounds bounds = new Bounds(_placementGhost.transform.position, Vector3.zero);
-                    bool hasRenderer = false;
-                    foreach(Renderer r in _placementGhost.GetComponentsInChildren<Renderer>())
-                    {
-                        if (hasRenderer) bounds.Encapsulate(r.bounds);
-                        else { bounds = r.bounds; hasRenderer = true; }
-                    }
-                    if (hasRenderer)
+                    if (TryGetPlacementGhostBounds(out Bounds bounds))
                     {
                         Vector3 center = bounds.center;
                         Vector3 extents = bounds.extents;
@@ -2163,20 +2250,22 @@ public class InteractionSystem : MonoBehaviour
                 float toGhostDist = toGhost.magnitude;
                 if (toGhostDist > 0.01f)
                 {
-                    RaycastHit[] occlusionHits = Physics.RaycastAll(ray.origin, toGhost / toGhostDist, toGhostDist, placementMask, QueryTriggerInteraction.Ignore);
+                    int occlusionCount = Physics.RaycastNonAlloc(ray.origin, toGhost / toGhostDist, _placementHitBuffer, toGhostDist, placementMask, QueryTriggerInteraction.Ignore);
                     RaycastHit occWallHit = default;
                     bool occluded = false;
-                    for (int i = 0; i < occlusionHits.Length; i++)
+                    float nearestOccluder = float.PositiveInfinity;
+                    for (int i = 0; i < occlusionCount; i++)
                     {
-                        if (IsIgnoredCarryHitCollider(occlusionHits[i].collider)) continue;
-                        if (occlusionHits[i].collider == bestHit.collider) continue;
-                        float occDot = Vector3.Dot(occlusionHits[i].normal, Vector3.up);
+                        RaycastHit occlusionHit = _placementHitBuffer[i];
+                        if (IsIgnoredCarryHitCollider(occlusionHit.collider)) continue;
+                        if (occlusionHit.collider == bestHit.collider) continue;
+                        float occDot = Vector3.Dot(occlusionHit.normal, Vector3.up);
                         bool occIsWall = Mathf.Abs(occDot) < 0.7f;
-                        if (occIsWall)
+                        if (occIsWall && occlusionHit.distance < nearestOccluder)
                         {
-                            occWallHit = occlusionHits[i];
+                            nearestOccluder = occlusionHit.distance;
+                            occWallHit = occlusionHit;
                             occluded = true;
-                            break;
                         }
                     }
                     if (occluded)
@@ -2203,12 +2292,22 @@ public class InteractionSystem : MonoBehaviour
                                 // Re-run primary anti-penetration for the new floor surface
                                 Plane floorPlane = new Plane(cornerFloor.normal, cornerFloor.point);
                                 float floorPen = 0f;
-                                foreach(Collider c in _placementGhost.GetComponentsInChildren<Collider>())
+                                if (_placementGhostColliders == null || _placementGhostColliders.Length == 0)
+                                    CachePlacementGhostComponents();
+
+                                if (_placementGhostColliders != null)
                                 {
-                                    Vector3 fp = c.bounds.center - cornerFloor.normal * 1000f;
-                                    Vector3 ep = c.ClosestPoint(fp);
-                                    float dd = floorPlane.GetDistanceToPoint(ep);
-                                    if (dd < 0 && -dd > floorPen) floorPen = -dd;
+                                    for (int i = 0; i < _placementGhostColliders.Length; i++)
+                                    {
+                                        Collider c = _placementGhostColliders[i];
+                                        if (c == null)
+                                            continue;
+
+                                        Vector3 fp = c.bounds.center - cornerFloor.normal * 1000f;
+                                        Vector3 ep = c.ClosestPoint(fp);
+                                        float dd = floorPlane.GetDistanceToPoint(ep);
+                                        if (dd < 0 && -dd > floorPen) floorPen = -dd;
+                                    }
                                 }
                                 if (floorPen > 0f)
                                 {
@@ -2218,14 +2317,14 @@ public class InteractionSystem : MonoBehaviour
                             }
                             else
                             {
-                                _placementGhost.SetActive(false);
+                                SetPlacementGhostActive(false);
                                 _isPlacementValid = false;
                                 return;
                             }
                         }
                         else
                         {
-                            _placementGhost.SetActive(false);
+                            SetPlacementGhostActive(false);
                             _isPlacementValid = false;
                             return;
                         }
@@ -2236,13 +2335,7 @@ public class InteractionSystem : MonoBehaviour
                 // If a ray from center to corner hits a non-placement surface,
                 // the corner extends past that surface. Push ghost out along hit normal.
                 // This handles walls at ANY angle, not just cardinal directions.
-                Bounds ghostBounds = new Bounds(_placementGhost.transform.position, Vector3.zero);
-                bool hasBounds = false;
-                foreach(Renderer r in _placementGhost.GetComponentsInChildren<Renderer>())
-                {
-                    if (hasBounds) ghostBounds.Encapsulate(r.bounds);
-                    else { ghostBounds = r.bounds; hasBounds = true; }
-                }
+                bool hasBounds = TryGetPlacementGhostBounds(out Bounds ghostBounds);
                 
                 if (hasBounds)
                 {
@@ -2250,25 +2343,14 @@ public class InteractionSystem : MonoBehaviour
                     for (int iteration = 0; iteration < 3; iteration++)
                     {
                         Vector3 gc = ghostBounds.center;
-                        Vector3 ge = ghostBounds.extents;
-                        
-                        Vector3[] corners = {
-                            gc + new Vector3(-ge.x, -ge.y, -ge.z),
-                            gc + new Vector3( ge.x, -ge.y, -ge.z),
-                            gc + new Vector3(-ge.x,  ge.y, -ge.z),
-                            gc + new Vector3( ge.x,  ge.y, -ge.z),
-                            gc + new Vector3(-ge.x, -ge.y,  ge.z),
-                            gc + new Vector3( ge.x, -ge.y,  ge.z),
-                            gc + new Vector3(-ge.x,  ge.y,  ge.z),
-                            gc + new Vector3( ge.x,  ge.y,  ge.z)
-                        };
+                        FillPlacementCornerBuffer(ghostBounds);
                         
                         float worstPen = 0f;
                         Vector3 worstNormal = Vector3.zero;
                         
-                        for (int ci = 0; ci < corners.Length; ci++)
+                        for (int ci = 0; ci < _placementCornerBuffer.Length; ci++)
                         {
-                            Vector3 dir = corners[ci] - gc;
+                            Vector3 dir = _placementCornerBuffer[ci] - gc;
                             float dist = dir.magnitude;
                             if (dist < 0.001f) continue;
                             dir /= dist;
@@ -2295,9 +2377,7 @@ public class InteractionSystem : MonoBehaviour
                         Physics.SyncTransforms();
                         
                         // Recompute bounds for next iteration
-                        ghostBounds = new Bounds(_placementGhost.transform.position, Vector3.zero);
-                        foreach(Renderer r in _placementGhost.GetComponentsInChildren<Renderer>())
-                            ghostBounds.Encapsulate(r.bounds);
+                        TryGetPlacementGhostBounds(out ghostBounds);
                     }
                 }
                 
@@ -2305,13 +2385,13 @@ public class InteractionSystem : MonoBehaviour
             }
             else
             {
-                _placementGhost.SetActive(false);
+                SetPlacementGhostActive(false);
                 _isPlacementValid = false;
             }
         }
         else
         {
-            _placementGhost.SetActive(false);
+            SetPlacementGhostActive(false);
             _isPlacementValid = false;
         }
     }
@@ -2320,15 +2400,7 @@ public class InteractionSystem : MonoBehaviour
     {
         _isPlacementValid = true;
 
-        Renderer[] ghostRenderers = _placementGhost.GetComponentsInChildren<Renderer>();
-        Bounds bounds = new Bounds(_placementGhost.transform.position, Vector3.zero);
-        bool hasBounds = false;
-        
-        foreach(Renderer r in ghostRenderers)
-        {
-            if (hasBounds) bounds.Encapsulate(r.bounds);
-            else { bounds = r.bounds; hasBounds = true; }
-        }
+        bool hasBounds = TryGetPlacementGhostBounds(out Bounds bounds);
         
         if (_isPlacementValid && hasBounds)
         {
@@ -2337,9 +2409,11 @@ public class InteractionSystem : MonoBehaviour
             extents.y = Mathf.Max(0.01f, extents.y);
             extents.z = Mathf.Max(0.01f, extents.z);
             
-            Collider[] hits = Physics.OverlapBox(bounds.center, extents, Quaternion.identity, interactMask, QueryTriggerInteraction.Ignore);
-            foreach(Collider c in hits)
+            int overlapCount = Physics.OverlapBoxNonAlloc(bounds.center, extents, _placementOverlapBuffer, Quaternion.identity, interactMask, QueryTriggerInteraction.Ignore);
+            for (int i = 0; i < overlapCount; i++)
             {
+                Collider c = _placementOverlapBuffer[i];
+                if (c == null) continue;
                 if (IsIgnoredCarryHitCollider(c)) continue;
                 if (c.transform.IsChildOf(_placementGhost.transform)) continue;
                 if (IsGroundCollider(c)) continue; // Crucial: Ignore sloped or uneven ground meshes to prevent red warning hologram!
@@ -2349,13 +2423,29 @@ public class InteractionSystem : MonoBehaviour
             }
         }
         
+        if (_hasPlacementMaterialState && _lastPlacementMaterialValid == _isPlacementValid)
+            return;
+
         Material targetMat = _isPlacementValid ? _placementValidMat : _placementInvalidMat;
-        foreach(Renderer r in ghostRenderers)
+        if (_placementGhostRenderers == null || _placementGhostRenderers.Length == 0)
+            CachePlacementGhostComponents();
+
+        if (_placementGhostRenderers == null)
+            return;
+
+        for (int i = 0; i < _placementGhostRenderers.Length; i++)
         {
+            Renderer r = _placementGhostRenderers[i];
+            if (r == null)
+                continue;
+
             Material[] mats = r.sharedMaterials;
-            for(int i=0; i<mats.Length; i++) mats[i] = targetMat;
+            for(int j=0; j<mats.Length; j++) mats[j] = targetMat;
             r.sharedMaterials = mats;
         }
+
+        _lastPlacementMaterialValid = _isPlacementValid;
+        _hasPlacementMaterialState = true;
     }
     
     void ExecutePlacement()
