@@ -65,13 +65,18 @@ namespace RVSystem
                     exteriorCamera.SetActive(false);
                 _camerasEnabled = enabled;
                 _isInteriorActive = enabled && interiorCamera != null && interiorCamera.activeSelf;
+                this.enabled = false;
                 return;
             }
 
             if (_camerasEnabled == enabled)
+            {
+                this.enabled = enabled;
                 return;
+            }
 
             _camerasEnabled = enabled;
+            this.enabled = enabled;
             if (!enabled)
             {
                 SetActiveIfChanged(interiorCamera, false);
