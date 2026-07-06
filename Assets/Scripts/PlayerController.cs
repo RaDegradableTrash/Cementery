@@ -101,6 +101,10 @@ public class PlayerController : NetworkBehaviour
     public LayerMask groundMask = ~0;
     public int groundCheckInterval = 2;
     private int _groundCheckFrameCounter;
+    [SerializeField] private bool logJumpPeak = false;
+    private const int GroundHitBufferSize = 16;
+    private readonly RaycastHit[] _groundHitBuffer = new RaycastHit[GroundHitBufferSize];
+    private readonly RaycastHit[] _groundFallbackHitBuffer = new RaycastHit[GroundHitBufferSize];
     private bool _hasSetupKinematic = false;
     private float _startupTime;
 
@@ -315,7 +319,10 @@ public class PlayerController : NetworkBehaviour
         }
         else if (_currentJumpPeakY > -Mathf.Infinity)
         {
-            Debug.Log($"[Jump Peak] Maximum Height Reached: {_currentJumpPeakY:F2}m (Delta: {(_currentJumpPeakY - transform.position.y):F2}m)");
+            if (logJumpPeak)
+            {
+                Debug.Log($"[Jump Peak] Maximum Height Reached: {_currentJumpPeakY:F2}m (Delta: {(_currentJumpPeakY - transform.position.y):F2}m)");
+            }
             _currentJumpPeakY = -Mathf.Infinity;
         }
     }
@@ -612,13 +619,13 @@ SimpleCircleBar.Instance.UpdateHealthBar(hp, maxHp);
         
         _isGrounded = false;
         
-        RaycastHit[] hits = Physics.SphereCastAll(origin, radius, Vector3.down, castDist, groundMask, QueryTriggerInteraction.Ignore);
+        int hitCount = Physics.SphereCastNonAlloc(origin, radius, Vector3.down, _groundHitBuffer, castDist, groundMask, QueryTriggerInteraction.Ignore);
         RaycastHit bestHit = default;
         bool foundValidGround = false;
         
-        for (int i = 0; i < hits.Length; i++)
+        for (int i = 0; i < hitCount; i++)
         {
-            RaycastHit hit = hits[i];
+            RaycastHit hit = _groundHitBuffer[i];
             if (hit.transform != null && hit.transform.root != transform.root)
             {
                 bestHit = hit;
@@ -629,10 +636,10 @@ SimpleCircleBar.Instance.UpdateHealthBar(hp, maxHp);
         
         if (!foundValidGround)
         {
-            RaycastHit[] fallbackHits = Physics.SphereCastAll(origin, radius, Vector3.down, castDist, ~0, QueryTriggerInteraction.Ignore);
-            for (int i = 0; i < fallbackHits.Length; i++)
+            int fallbackHitCount = Physics.SphereCastNonAlloc(origin, radius, Vector3.down, _groundFallbackHitBuffer, castDist, ~0, QueryTriggerInteraction.Ignore);
+            for (int i = 0; i < fallbackHitCount; i++)
             {
-                RaycastHit hit = fallbackHits[i];
+                RaycastHit hit = _groundFallbackHitBuffer[i];
                 if (hit.transform != null && hit.transform.root != transform.root)
                 {
                     bestHit = hit;
