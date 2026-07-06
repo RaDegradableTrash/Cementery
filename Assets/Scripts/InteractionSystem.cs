@@ -93,6 +93,7 @@ public class InteractionSystem : MonoBehaviour
     private PhysicMaterial _carryNoFrictionMaterial;
     private CapsuleCollider _playerCol;
     private Rigidbody _playerRb;
+    private PlayerController _playerController;
 
     private bool _rbWasKinematic;
     private bool _rbHadGravity;
@@ -199,6 +200,7 @@ public class InteractionSystem : MonoBehaviour
 
         _playerCol = GetComponent<CapsuleCollider>();
         _playerRb = GetComponent<Rigidbody>();
+        _playerController = GetComponent<PlayerController>();
         ResolveAttractAimPointIfNeeded();
         InitializePlacementMaterials();
         AutoBindUI();
@@ -1550,8 +1552,7 @@ public class InteractionSystem : MonoBehaviour
         RestoreCarryFriction();
         _carriedWo?.SetCarriedState(false);
         
-        PlayerController pc = GetComponent<PlayerController>();
-        if (pc != null) pc.SpeedMultiplier = 1f;
+        if (_playerController != null) _playerController.SpeedMultiplier = 1f;
 
         _carriedTransform = null;
         _carriedWo = null;
@@ -1712,9 +1713,8 @@ public class InteractionSystem : MonoBehaviour
         _carriedWo?.SetCarriedState(true);
         _carriedWo?.TriggerPickUp(gameObject);
 
-        PlayerController pc = GetComponent<PlayerController>();
-        if (pc != null && _carriedWo != null && _carriedWo.isHeavy)
-            pc.SpeedMultiplier = 0.4f;
+        if (_playerController != null && _carriedWo != null && _carriedWo.isHeavy)
+            _playerController.SpeedMultiplier = 0.4f;
     }
 
     void Drop()
@@ -1787,8 +1787,7 @@ public class InteractionSystem : MonoBehaviour
         _carriedWo?.SetCarriedState(false);
         _carriedWo?.TriggerDrop(gameObject);
 
-        PlayerController pc = GetComponent<PlayerController>();
-        if (pc != null) pc.SpeedMultiplier = 1f;
+        if (_playerController != null) _playerController.SpeedMultiplier = 1f;
 
         // 彻底清空手部引用缓存
         _carriedTransform = null;
