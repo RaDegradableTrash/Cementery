@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
+using System.Collections.Generic;
 
 [RequireComponent(typeof(Camera))]
 public class RaycastTargetIlluminate : MonoBehaviour
@@ -19,6 +20,14 @@ public class RaycastTargetIlluminate : MonoBehaviour
     private RenderTexture _maskRT;
     private Camera _camera;
     private Mesh _fullscreenQuad;
+    private const int DrawableCacheLimit = 128;
+    private readonly Dictionary<GameObject, DrawableEntry[]> _drawableCache = new Dictionary<GameObject, DrawableEntry[]>(32);
+
+    private struct DrawableEntry
+    {
+        public Renderer renderer;
+        public int subMeshCount;
+    }
 
     void OnEnable()
     {
@@ -57,6 +66,7 @@ public class RaycastTargetIlluminate : MonoBehaviour
             _maskRT.Release();
             Destroy(_maskRT);
         }
+        _drawableCache.Clear();
     }
 
     void OnEndCameraRendering(ScriptableRenderContext context, Camera cam)
@@ -124,24 +134,63 @@ public class RaycastTargetIlluminate : MonoBehaviour
 
     private void DrawMeshes(CommandBuffer cb, GameObject target)
     {
-        Renderer[] renderers = target.GetComponentsInChildren<Renderer>();
-        foreach (Renderer r in renderers)
+        DrawableEntry[] drawables = GetDrawableEntries(target);
+        for (int d = 0; d < drawables.Length; d++)
         {
+            Renderer r = drawables[d].renderer;
+            if (r == null) continue;
             if (!r.enabled) continue;
-            
-            MeshFilter mf = r.GetComponent<MeshFilter>();
-            if (mf != null && mf.sharedMesh != null)
+
+            for (int i = 0; i < drawables[d].subMeshCount; i++)
             {
-                for (int i = 0; i < mf.sharedMesh.subMeshCount; i++)
-                    cb.DrawRenderer(r, _maskMaterial, i, 0);
-            }
-            
-            SkinnedMeshRenderer smr = r as SkinnedMeshRenderer;
-            if (smr != null && smr.sharedMesh != null)
-            {
-                for (int i = 0; i < smr.sharedMesh.subMeshCount; i++)
-                    cb.DrawRenderer(smr, _maskMaterial, i, 0);
+                cb.DrawRenderer(r, _maskMaterial, i, 0);
             }
         }
+    }
+
+    private DrawableEntry[] GetDrawableEntries(GameObject target)
+    {
+        if (target == null)
+            return System.Array.Empty<DrawableEntry>();
+
+        if (_drawableCache.TryGetValue(target, out DrawableEntry[] cachedEntries))
+            return cachedEntries;
+
+        if (_drawableCache.Count >= DrawableCacheLimit)
+        {
+            _drawableCache.Clear();
+        }
+
+        Renderer[] renderers = target.GetComponentsInChildren<Renderer>();
+        List<DrawableEntry> entries = new List<DrawableEntry>(renderers.Length);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer r = renderers[i];
+            if (r == null)
+                continue;
+
+            int subMeshCount = 0;
+            if (r is SkinnedMeshRenderer smr && smr.sharedMesh != null)
+            {
+                subMeshCount = smr.sharedMesh.subMeshCount;
+            }
+            else
+            {
+                MeshFilter mf = r.GetComponent<MeshFilter>();
+                if (mf != null && mf.sharedMesh != null)
+                {
+                    subMeshCount = mf.sharedMesh.subMeshCount;
+                }
+            }
+
+            if (subMeshCount <= 0)
+                continue;
+
+            entries.Add(new DrawableEntry { renderer = r, subMeshCount = subMeshCount });
+        }
+
+        DrawableEntry[] result = entries.ToArray();
+        _drawableCache[target] = result;
+        return result;
     }
 }
