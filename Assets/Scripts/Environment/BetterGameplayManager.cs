@@ -80,6 +80,18 @@ namespace EnvironmentSystem
         private Quaternion _lastCamRot;
         private float _nextFullSweepTime;
         private Coroutine _fullSweepRoutine;
+        private float _cachedDefaultVisibilityRadius = -1f;
+        private float _cachedHysteresis = -1f;
+        private float _cachedShowDistSq;
+        private float _cachedHideDistSq;
+        private float _cachedNeverFrustumCullRadius = -1f;
+        private float _cachedNeverCullSq;
+        private float _cachedFullSweepCooldownSource = -1f;
+        private float _cachedFullSweepCooldown = 0.05f;
+        private int _cachedFullSweepObjectsPerFrameSource = int.MinValue;
+        private int _cachedFullSweepObjectsPerFrame = 64;
+        private int _cachedScanRootsPerFrameSource = int.MinValue;
+        private int _cachedScanRootsPerFrame = 1;
 
         // Name of the scene this BetterGameplayManager lives in — objects here are NEVER managed.
         private string _ownSceneName;
@@ -196,7 +208,7 @@ namespace EnvironmentSystem
                 if (rotDelta > 8f && Time.time >= _nextFullSweepTime)
                 {
                     _lastCamRot = _mainCamera.transform.rotation;
-                    _nextFullSweepTime = Time.time + Mathf.Max(0.05f, fullSweepCooldown);
+                    _nextFullSweepTime = Time.time + GetFullSweepCooldown();
                     StartBudgetedFullVisibilitySweep();
                     return;
                 }
@@ -227,14 +239,12 @@ namespace EnvironmentSystem
             _hiddenNearby.Clear();
             _hiddenNearbySet.Clear();
 
-            int budget = Mathf.Max(64, fullSweepObjectsPerFrame);
+            int budget = GetFullSweepObjectsPerFrame();
             int index = 0;
             while (index < _managedObjects.Count)
             {
                 Vector3 playerPos = PlayerPos();
-                float showDistSq = defaultVisibilityRadius * defaultVisibilityRadius;
-                float hideDistSq = (defaultVisibilityRadius + hysteresis) * (defaultVisibilityRadius + hysteresis);
-                float neverCullSq = neverFrustumCullRadius * neverFrustumCullRadius;
+                GetVisibilityDistanceSquares(out float showDistSq, out float hideDistSq, out float neverCullSq);
 
                 int processed = 0;
                 while (index < _managedObjects.Count && processed < budget)
@@ -255,7 +265,7 @@ namespace EnvironmentSystem
                     yield return null;
             }
 
-            RebuildHiddenNearbyBucket(PlayerPos(), defaultVisibilityRadius * defaultVisibilityRadius);
+            RebuildHiddenNearbyBucket(PlayerPos());
             _currentIndex = 0;
             _fullSweepRoutine = null;
         }
@@ -269,9 +279,7 @@ namespace EnvironmentSystem
             if (_hiddenNearby.Count == 0) return;
 
             Vector3 playerPos   = PlayerPos();
-            float   showDistSq  = defaultVisibilityRadius * defaultVisibilityRadius;
-            float   hideDistSq  = (defaultVisibilityRadius + hysteresis) * (defaultVisibilityRadius + hysteresis);
-            float   neverCullSq = neverFrustumCullRadius * neverFrustumCullRadius;
+            GetVisibilityDistanceSquares(out float showDistSq, out float hideDistSq, out float neverCullSq);
 
             int limit = Mathf.Min(hiddenObjectFastRecheck, objectsCheckedPerFrame, _hiddenNearby.Count);
 
@@ -309,9 +317,7 @@ namespace EnvironmentSystem
             if (_managedObjects.Count == 0) return;
 
             Vector3 playerPos   = PlayerPos();
-            float   showDistSq  = defaultVisibilityRadius * defaultVisibilityRadius;
-            float   hideDistSq  = (defaultVisibilityRadius + hysteresis) * (defaultVisibilityRadius + hysteresis);
-            float   neverCullSq = neverFrustumCullRadius * neverFrustumCullRadius;
+            GetVisibilityDistanceSquares(out float showDistSq, out float hideDistSq, out float neverCullSq);
 
             for (int i = 0; i < limit; i++)
             {
@@ -408,11 +414,84 @@ namespace EnvironmentSystem
             return true;
         }
 
-        private void RebuildHiddenNearbyBucket(Vector3 playerPos, float showDistSq)
+        private void GetVisibilityDistanceSquares(out float showDistSq, out float hideDistSq, out float neverCullSq)
+        {
+            RefreshVisibilityDistanceCache();
+            showDistSq = _cachedShowDistSq;
+            hideDistSq = _cachedHideDistSq;
+            neverCullSq = GetNeverCullSq();
+        }
+
+        private float GetHideDistSq()
+        {
+            RefreshVisibilityDistanceCache();
+            return _cachedHideDistSq;
+        }
+
+        private float GetNeverCullSq()
+        {
+            if (!Mathf.Approximately(_cachedNeverFrustumCullRadius, neverFrustumCullRadius))
+            {
+                _cachedNeverFrustumCullRadius = neverFrustumCullRadius;
+                _cachedNeverCullSq = neverFrustumCullRadius * neverFrustumCullRadius;
+            }
+
+            return _cachedNeverCullSq;
+        }
+
+        private void RefreshVisibilityDistanceCache()
+        {
+            if (Mathf.Approximately(_cachedDefaultVisibilityRadius, defaultVisibilityRadius) &&
+                Mathf.Approximately(_cachedHysteresis, hysteresis))
+            {
+                return;
+            }
+
+            _cachedDefaultVisibilityRadius = defaultVisibilityRadius;
+            _cachedHysteresis = hysteresis;
+            _cachedShowDistSq = defaultVisibilityRadius * defaultVisibilityRadius;
+            float hideDistance = defaultVisibilityRadius + hysteresis;
+            _cachedHideDistSq = hideDistance * hideDistance;
+        }
+
+        private float GetFullSweepCooldown()
+        {
+            if (!Mathf.Approximately(_cachedFullSweepCooldownSource, fullSweepCooldown))
+            {
+                _cachedFullSweepCooldownSource = fullSweepCooldown;
+                _cachedFullSweepCooldown = Mathf.Max(0.05f, fullSweepCooldown);
+            }
+
+            return _cachedFullSweepCooldown;
+        }
+
+        private int GetFullSweepObjectsPerFrame()
+        {
+            if (_cachedFullSweepObjectsPerFrameSource != fullSweepObjectsPerFrame)
+            {
+                _cachedFullSweepObjectsPerFrameSource = fullSweepObjectsPerFrame;
+                _cachedFullSweepObjectsPerFrame = Mathf.Max(64, fullSweepObjectsPerFrame);
+            }
+
+            return _cachedFullSweepObjectsPerFrame;
+        }
+
+        private int GetScanRootsPerFrame()
+        {
+            if (_cachedScanRootsPerFrameSource != scanRootsPerFrame)
+            {
+                _cachedScanRootsPerFrameSource = scanRootsPerFrame;
+                _cachedScanRootsPerFrame = Mathf.Max(1, scanRootsPerFrame);
+            }
+
+            return _cachedScanRootsPerFrame;
+        }
+
+        private void RebuildHiddenNearbyBucket(Vector3 playerPos)
         {
             _hiddenNearby.Clear();
             _hiddenNearbySet.Clear();
-            float hideDistSq = (defaultVisibilityRadius + hysteresis) * (defaultVisibilityRadius + hysteresis);
+            float hideDistSq = GetHideDistSq();
             foreach (var obj in _managedObjects)
             {
                 if (obj == null || !obj.isHiddenByManager) continue;
@@ -563,7 +642,7 @@ namespace EnvironmentSystem
 
             GameObject[] roots = scene.GetRootGameObjects();
             int added = 0;
-            int budget = Mathf.Max(1, scanRootsPerFrame);
+            int budget = GetScanRootsPerFrame();
             int processedThisFrame = 0;
 
             foreach (GameObject root in roots)
