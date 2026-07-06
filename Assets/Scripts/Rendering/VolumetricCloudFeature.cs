@@ -510,6 +510,34 @@ public class VolumetricCloudPass : ScriptableRenderPass
     private Texture3D _baseNoise;
     private Texture3D _detailNoise;
     private RTHandle _lowResCloudTexture;
+    private Texture3D _lastBaseNoise;
+    private Texture3D _lastDetailNoise;
+    private bool _hasCachedMaterialSettings;
+    private float _lastMinHeight;
+    private float _lastMaxHeight;
+    private float _lastDensityScale;
+    private float _lastThreshold;
+    private float _lastBaseScale;
+    private float _lastDetailScale;
+    private float _lastDetailInfluence;
+    private float _lastVerticalStretch;
+    private float _lastConvectiveWarp;
+    private float _lastVerticalRandomness;
+    private float _lastPuffiness;
+    private float _lastCloudBaseFlatness;
+    private float _lastAbsorption;
+    private Color _lastShadowColor;
+    private Color _lastMaxLightColor;
+    private Vector3 _lastBaseWindSpeed;
+    private Vector3 _lastDetailWindSpeed;
+    private int _lastMaxSteps;
+    private float _lastJitterStrength;
+    private float _lastShadowSampleDistance;
+    private float _lastEdgeSoftness;
+    private float _lastBacklitGlow;
+    private float _lastMaxRenderDistance;
+    private float _lastFarDistanceOptimization;
+    private int _lastFarStepCount;
 
 
     private static readonly int BaseNoiseTexId = Shader.PropertyToID("_BaseNoiseTex");
@@ -569,6 +597,9 @@ public class VolumetricCloudPass : ScriptableRenderPass
             if (_settings.cloudShader != null && !_settings.cloudShader.name.Contains("Internal-Loading"))
             {
                 _material = CoreUtils.CreateEngineMaterial(_settings.cloudShader);
+                _hasCachedMaterialSettings = false;
+                _lastBaseNoise = null;
+                _lastDetailNoise = null;
             }
         }
     }
@@ -628,49 +659,7 @@ public class VolumetricCloudPass : ScriptableRenderPass
         _material.SetMatrix(InvViewProjId, gpuVP.inverse);
         _material.SetFloat(ShaderReversedZId, SystemInfo.usesReversedZBuffer ? 1.0f : 0.0f);
 
-        // Pass Settings to the material
-        _material.SetTexture(BaseNoiseTexId, _baseNoise);
-        _material.SetTexture(DetailNoiseTexId, _detailNoise);
-        
-        _material.SetFloat(CloudMinHeightId, _settings.minHeight);
-        _material.SetFloat(CloudMaxHeightId, _settings.maxHeight);
-        _material.SetFloat(CloudDensityScaleId, _settings.densityScale);
-        _material.SetFloat(CloudThresholdId, _settings.threshold);
-        _material.SetFloat(BaseScaleId, _settings.baseNoiseScale);
-        _material.SetFloat(DetailScaleId, _settings.detailNoiseScale);
-        _material.SetFloat(DetailInfluenceId, _settings.detailInfluence);
-        _material.SetFloat(VerticalStretchId, _settings.verticalStretch);
-        _material.SetFloat(ConvectiveWarpId, _settings.convectiveWarp);
-        _material.SetFloat(VerticalRandomnessId, _settings.verticalRandomness);
-        _material.SetFloat(PuffinessId, _settings.puffiness);
-        _material.SetFloat(CloudBaseFlatnessId, _settings.cloudBaseFlatness);
-        _material.SetFloat(AbsorptionId, _settings.lightAbsorption);
-        
-        _material.SetColor(ShadowColorId, _settings.shadowColor);
-        _material.SetColor(MaxLightColorId, _settings.maxLightColor);
-        
-        _material.SetVector(BaseWindSpeedId, new Vector4(_settings.baseWindSpeed.x, _settings.baseWindSpeed.y, _settings.baseWindSpeed.z, 0));
-        _material.SetVector(DetailWindSpeedId, new Vector4(_settings.detailWindSpeed.x, _settings.detailWindSpeed.y, _settings.detailWindSpeed.z, 0));
-        
-        _material.SetFloat(StepCountId, _settings.maxSteps);
-        _material.SetFloat(JitterStrengthId, _settings.jitterStrength);
-        _material.SetFloat(LightStepDistanceId, _settings.shadowSampleDistance);
-        _material.SetFloat(EdgeSoftnessId, _settings.edgeSoftness);
-        _material.SetFloat(BacklitGlowId, _settings.backlitGlow);
-        _material.SetFloat(MaxRenderDistanceId, _settings.maxRenderDistance);
-        _material.SetFloat(FarDistanceOptimizationId, _settings.farDistanceOptimization);
-        _material.SetFloat(FarStepCountId, _settings.farStepCount);
-
-        // Set global shader variables so other shaders (like the terrain) can dynamically calculate cloud shadows!
-        Shader.SetGlobalTexture("_BaseNoiseTex", _baseNoise);
-        Shader.SetGlobalFloat("_CloudMinHeight", _settings.minHeight);
-        Shader.SetGlobalFloat("_CloudMaxHeight", _settings.maxHeight);
-        Shader.SetGlobalFloat("_CloudThreshold", _settings.threshold);
-        Shader.SetGlobalFloat("_CloudDensityScale", _settings.densityScale);
-        Shader.SetGlobalFloat("_BaseScale", _settings.baseNoiseScale);
-        Shader.SetGlobalFloat("_VerticalStretch", _settings.verticalStretch);
-        Shader.SetGlobalVector("_BaseWindSpeed", new Vector4(_settings.baseWindSpeed.x, _settings.baseWindSpeed.y, _settings.baseWindSpeed.z, 0));
-        Shader.SetGlobalFloat("_ConvectiveWarp", _settings.convectiveWarp);
+        ApplyCachedSettings();
 
         // Blit from built-in blackTexture using the custom material.
         if (_settings.resolutionScale == VolumetricCloudFeature.CloudSettings.ResolutionScale.Full || _lowResCloudTexture == null)
@@ -698,6 +687,117 @@ public class VolumetricCloudPass : ScriptableRenderPass
     public override void OnCameraCleanup(CommandBuffer cmd)
     {
         // No cleanup needed
+    }
+
+    private void ApplyCachedSettings()
+    {
+        if (_lastBaseNoise != _baseNoise)
+        {
+            _material.SetTexture(BaseNoiseTexId, _baseNoise);
+            Shader.SetGlobalTexture("_BaseNoiseTex", _baseNoise);
+            _lastBaseNoise = _baseNoise;
+        }
+
+        if (_lastDetailNoise != _detailNoise)
+        {
+            _material.SetTexture(DetailNoiseTexId, _detailNoise);
+            _lastDetailNoise = _detailNoise;
+        }
+
+        bool settingsChanged = !_hasCachedMaterialSettings
+            || !Mathf.Approximately(_lastMinHeight, _settings.minHeight)
+            || !Mathf.Approximately(_lastMaxHeight, _settings.maxHeight)
+            || !Mathf.Approximately(_lastDensityScale, _settings.densityScale)
+            || !Mathf.Approximately(_lastThreshold, _settings.threshold)
+            || !Mathf.Approximately(_lastBaseScale, _settings.baseNoiseScale)
+            || !Mathf.Approximately(_lastDetailScale, _settings.detailNoiseScale)
+            || !Mathf.Approximately(_lastDetailInfluence, _settings.detailInfluence)
+            || !Mathf.Approximately(_lastVerticalStretch, _settings.verticalStretch)
+            || !Mathf.Approximately(_lastConvectiveWarp, _settings.convectiveWarp)
+            || !Mathf.Approximately(_lastVerticalRandomness, _settings.verticalRandomness)
+            || !Mathf.Approximately(_lastPuffiness, _settings.puffiness)
+            || !Mathf.Approximately(_lastCloudBaseFlatness, _settings.cloudBaseFlatness)
+            || !Mathf.Approximately(_lastAbsorption, _settings.lightAbsorption)
+            || _lastShadowColor != _settings.shadowColor
+            || _lastMaxLightColor != _settings.maxLightColor
+            || (_lastBaseWindSpeed - _settings.baseWindSpeed).sqrMagnitude > 0.000001f
+            || (_lastDetailWindSpeed - _settings.detailWindSpeed).sqrMagnitude > 0.000001f
+            || _lastMaxSteps != _settings.maxSteps
+            || !Mathf.Approximately(_lastJitterStrength, _settings.jitterStrength)
+            || !Mathf.Approximately(_lastShadowSampleDistance, _settings.shadowSampleDistance)
+            || !Mathf.Approximately(_lastEdgeSoftness, _settings.edgeSoftness)
+            || !Mathf.Approximately(_lastBacklitGlow, _settings.backlitGlow)
+            || !Mathf.Approximately(_lastMaxRenderDistance, _settings.maxRenderDistance)
+            || !Mathf.Approximately(_lastFarDistanceOptimization, _settings.farDistanceOptimization)
+            || _lastFarStepCount != _settings.farStepCount;
+
+        if (!settingsChanged)
+            return;
+
+        _material.SetFloat(CloudMinHeightId, _settings.minHeight);
+        _material.SetFloat(CloudMaxHeightId, _settings.maxHeight);
+        _material.SetFloat(CloudDensityScaleId, _settings.densityScale);
+        _material.SetFloat(CloudThresholdId, _settings.threshold);
+        _material.SetFloat(BaseScaleId, _settings.baseNoiseScale);
+        _material.SetFloat(DetailScaleId, _settings.detailNoiseScale);
+        _material.SetFloat(DetailInfluenceId, _settings.detailInfluence);
+        _material.SetFloat(VerticalStretchId, _settings.verticalStretch);
+        _material.SetFloat(ConvectiveWarpId, _settings.convectiveWarp);
+        _material.SetFloat(VerticalRandomnessId, _settings.verticalRandomness);
+        _material.SetFloat(PuffinessId, _settings.puffiness);
+        _material.SetFloat(CloudBaseFlatnessId, _settings.cloudBaseFlatness);
+        _material.SetFloat(AbsorptionId, _settings.lightAbsorption);
+
+        _material.SetColor(ShadowColorId, _settings.shadowColor);
+        _material.SetColor(MaxLightColorId, _settings.maxLightColor);
+
+        _material.SetVector(BaseWindSpeedId, new Vector4(_settings.baseWindSpeed.x, _settings.baseWindSpeed.y, _settings.baseWindSpeed.z, 0));
+        _material.SetVector(DetailWindSpeedId, new Vector4(_settings.detailWindSpeed.x, _settings.detailWindSpeed.y, _settings.detailWindSpeed.z, 0));
+
+        _material.SetFloat(StepCountId, _settings.maxSteps);
+        _material.SetFloat(JitterStrengthId, _settings.jitterStrength);
+        _material.SetFloat(LightStepDistanceId, _settings.shadowSampleDistance);
+        _material.SetFloat(EdgeSoftnessId, _settings.edgeSoftness);
+        _material.SetFloat(BacklitGlowId, _settings.backlitGlow);
+        _material.SetFloat(MaxRenderDistanceId, _settings.maxRenderDistance);
+        _material.SetFloat(FarDistanceOptimizationId, _settings.farDistanceOptimization);
+        _material.SetFloat(FarStepCountId, _settings.farStepCount);
+
+        Shader.SetGlobalFloat("_CloudMinHeight", _settings.minHeight);
+        Shader.SetGlobalFloat("_CloudMaxHeight", _settings.maxHeight);
+        Shader.SetGlobalFloat("_CloudThreshold", _settings.threshold);
+        Shader.SetGlobalFloat("_CloudDensityScale", _settings.densityScale);
+        Shader.SetGlobalFloat("_BaseScale", _settings.baseNoiseScale);
+        Shader.SetGlobalFloat("_VerticalStretch", _settings.verticalStretch);
+        Shader.SetGlobalVector("_BaseWindSpeed", new Vector4(_settings.baseWindSpeed.x, _settings.baseWindSpeed.y, _settings.baseWindSpeed.z, 0));
+        Shader.SetGlobalFloat("_ConvectiveWarp", _settings.convectiveWarp);
+
+        _lastMinHeight = _settings.minHeight;
+        _lastMaxHeight = _settings.maxHeight;
+        _lastDensityScale = _settings.densityScale;
+        _lastThreshold = _settings.threshold;
+        _lastBaseScale = _settings.baseNoiseScale;
+        _lastDetailScale = _settings.detailNoiseScale;
+        _lastDetailInfluence = _settings.detailInfluence;
+        _lastVerticalStretch = _settings.verticalStretch;
+        _lastConvectiveWarp = _settings.convectiveWarp;
+        _lastVerticalRandomness = _settings.verticalRandomness;
+        _lastPuffiness = _settings.puffiness;
+        _lastCloudBaseFlatness = _settings.cloudBaseFlatness;
+        _lastAbsorption = _settings.lightAbsorption;
+        _lastShadowColor = _settings.shadowColor;
+        _lastMaxLightColor = _settings.maxLightColor;
+        _lastBaseWindSpeed = _settings.baseWindSpeed;
+        _lastDetailWindSpeed = _settings.detailWindSpeed;
+        _lastMaxSteps = _settings.maxSteps;
+        _lastJitterStrength = _settings.jitterStrength;
+        _lastShadowSampleDistance = _settings.shadowSampleDistance;
+        _lastEdgeSoftness = _settings.edgeSoftness;
+        _lastBacklitGlow = _settings.backlitGlow;
+        _lastMaxRenderDistance = _settings.maxRenderDistance;
+        _lastFarDistanceOptimization = _settings.farDistanceOptimization;
+        _lastFarStepCount = _settings.farStepCount;
+        _hasCachedMaterialSettings = true;
     }
 
     public void Dispose()
