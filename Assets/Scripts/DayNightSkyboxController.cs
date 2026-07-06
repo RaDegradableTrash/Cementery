@@ -155,6 +155,14 @@ public class DayNightSkyboxController : MonoBehaviour
     private float _cycleAccumulatedDelta;
     private int _probeSyncCursor;
     private bool _duplicateDirectionalLightsChecked;
+    private float _cachedDayLengthSecondsSource = -1f;
+    private float _cachedDayLengthSeconds = 10f;
+    private float _cachedCycleApplyIntervalSource = -1f;
+    private float _cachedCycleApplyInterval = 0.02f;
+    private float _cachedProbeSyncIntervalSource = -1f;
+    private float _cachedProbeSyncInterval = 0.1f;
+    private float _cachedProbeRendererCacheRefreshIntervalSource = -1f;
+    private float _cachedProbeRendererCacheRefreshInterval = 0.5f;
     private readonly List<Renderer> _cachedDynamicRenderers = new List<Renderer>(256);
     private readonly HashSet<Renderer> _dynamicRendererScratch = new HashSet<Renderer>();
     private readonly List<Renderer> _rendererChildBuffer = new List<Renderer>(16);
@@ -190,7 +198,7 @@ public class DayNightSkyboxController : MonoBehaviour
         if (Application.isPlaying)
         {
             if (autoAdvance)
-                timeOfDay = Mathf.Repeat(timeOfDay + delta / Mathf.Max(10f, dayLengthSeconds), 1f);
+                timeOfDay = Mathf.Repeat(timeOfDay + delta / GetDayLengthSeconds(), 1f);
 
             if (enforceDynamicProbeSampling && keepSyncingDynamicProbeSampling)
             {
@@ -198,13 +206,13 @@ public class DayNightSkyboxController : MonoBehaviour
                 if (optimizeForStableFrameTime)
                     _probeCacheRefreshTimer += delta;
 
-                if (optimizeForStableFrameTime && _probeCacheRefreshTimer >= probeRendererCacheRefreshInterval)
+                if (optimizeForStableFrameTime && _probeCacheRefreshTimer >= GetProbeRendererCacheRefreshInterval())
                 {
                     _probeCacheRefreshTimer = 0f;
                     RebuildDynamicRendererCache();
                 }
 
-                if (_probeSyncTimer >= probeSyncInterval)
+                if (_probeSyncTimer >= GetProbeSyncInterval())
                 {
                     _probeSyncTimer = 0f;
                     SyncDynamicProbeSampling();
@@ -220,7 +228,7 @@ public class DayNightSkyboxController : MonoBehaviour
 
         _cycleApplyTimer += delta;
         _cycleAccumulatedDelta += delta;
-        float interval = Mathf.Max(0.02f, cycleApplyInterval);
+        float interval = GetCycleApplyInterval();
         if (_cycleApplyTimer >= interval)
         {
             float elapsed = _cycleAccumulatedDelta;
@@ -228,6 +236,50 @@ public class DayNightSkyboxController : MonoBehaviour
             _cycleAccumulatedDelta = 0f;
             ApplyCycle(elapsed, false);
         }
+    }
+
+    private float GetDayLengthSeconds()
+    {
+        if (!Mathf.Approximately(_cachedDayLengthSecondsSource, dayLengthSeconds))
+        {
+            _cachedDayLengthSecondsSource = dayLengthSeconds;
+            _cachedDayLengthSeconds = Mathf.Max(10f, dayLengthSeconds);
+        }
+
+        return _cachedDayLengthSeconds;
+    }
+
+    private float GetCycleApplyInterval()
+    {
+        if (!Mathf.Approximately(_cachedCycleApplyIntervalSource, cycleApplyInterval))
+        {
+            _cachedCycleApplyIntervalSource = cycleApplyInterval;
+            _cachedCycleApplyInterval = Mathf.Max(0.02f, cycleApplyInterval);
+        }
+
+        return _cachedCycleApplyInterval;
+    }
+
+    private float GetProbeSyncInterval()
+    {
+        if (!Mathf.Approximately(_cachedProbeSyncIntervalSource, probeSyncInterval))
+        {
+            _cachedProbeSyncIntervalSource = probeSyncInterval;
+            _cachedProbeSyncInterval = Mathf.Max(0.1f, probeSyncInterval);
+        }
+
+        return _cachedProbeSyncInterval;
+    }
+
+    private float GetProbeRendererCacheRefreshInterval()
+    {
+        if (!Mathf.Approximately(_cachedProbeRendererCacheRefreshIntervalSource, probeRendererCacheRefreshInterval))
+        {
+            _cachedProbeRendererCacheRefreshIntervalSource = probeRendererCacheRefreshInterval;
+            _cachedProbeRendererCacheRefreshInterval = Mathf.Max(0.5f, probeRendererCacheRefreshInterval);
+        }
+
+        return _cachedProbeRendererCacheRefreshInterval;
     }
 
     private void OnValidate()
