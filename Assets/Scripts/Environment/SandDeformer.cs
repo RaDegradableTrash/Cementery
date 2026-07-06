@@ -30,6 +30,8 @@ namespace EnvironmentSystem
         private float _nextGroundCheckTime;
         private bool _lastGrounded;
         private Vector3 _lastGroundPoint;
+        private Vector3 _lastGroundCheckPosition;
+        private bool _hasGroundCheckPosition;
 
         private void Start()
         {
@@ -65,37 +67,50 @@ namespace EnvironmentSystem
             if (Time.time >= _nextGroundCheckTime)
             {
                 _nextGroundCheckTime = Time.time + Mathf.Max(0.02f, groundCheckInterval);
-                isGrounded = false;
-                groundPoint = currentPos;
+                bool shouldRunGroundCheck = true;
 
-                if (_wheelCollider != null)
+                if (_wheelCollider == null && !_isFirstFrame && _hasGroundCheckPosition)
                 {
-                    WheelHit hit;
-                    isGrounded = _wheelCollider.GetGroundHit(out hit);
-                    groundPoint = hit.point;
+                    float movementThreshold = Mathf.Max(0.02f, Mathf.Min(stampSpacing * 0.25f, 0.1f));
+                    shouldRunGroundCheck = (currentPos - _lastGroundCheckPosition).sqrMagnitude >= movementThreshold * movementThreshold;
                 }
-                else
+
+                if (shouldRunGroundCheck)
                 {
-                    RaycastHit hit;
-                    float startHeight = 0.5f;
-                    float rayDistance = 1.8f;
+                    isGrounded = false;
+                    groundPoint = currentPos;
 
-                    if (_cachedCollider != null)
+                    if (_wheelCollider != null)
                     {
-                        float extentsY = _cachedCollider.bounds.extents.y;
-                        startHeight = extentsY + 0.2f;
-                        rayDistance = extentsY * 2.0f + 0.6f;
-                    }
-
-                    if (Physics.Raycast(currentPos + Vector3.up * startHeight, Vector3.down, out hit, rayDistance, groundLayer))
-                    {
-                        isGrounded = true;
+                        WheelHit hit;
+                        isGrounded = _wheelCollider.GetGroundHit(out hit);
                         groundPoint = hit.point;
                     }
-                }
+                    else
+                    {
+                        RaycastHit hit;
+                        float startHeight = 0.5f;
+                        float rayDistance = 1.8f;
 
-                _lastGrounded = isGrounded;
-                _lastGroundPoint = groundPoint;
+                        if (_cachedCollider != null)
+                        {
+                            float extentsY = _cachedCollider.bounds.extents.y;
+                            startHeight = extentsY + 0.2f;
+                            rayDistance = extentsY * 2.0f + 0.6f;
+                        }
+
+                        if (Physics.Raycast(currentPos + Vector3.up * startHeight, Vector3.down, out hit, rayDistance, groundLayer))
+                        {
+                            isGrounded = true;
+                            groundPoint = hit.point;
+                        }
+                    }
+
+                    _lastGrounded = isGrounded;
+                    _lastGroundPoint = groundPoint;
+                    _lastGroundCheckPosition = currentPos;
+                    _hasGroundCheckPosition = true;
+                }
             }
 
             // 3. Register stamp on coordinate delta
