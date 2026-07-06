@@ -78,6 +78,13 @@ namespace EnvironmentSystem
         private readonly Plane[] _frustumPlanes = new Plane[6];
 
         private Quaternion _lastCamRot;
+        private Vector3 _lastFrustumPosition;
+        private Quaternion _lastFrustumRotation;
+        private float _lastFrustumFieldOfView = -1f;
+        private float _lastFrustumAspect = -1f;
+        private float _lastFrustumNearClip = -1f;
+        private float _lastFrustumFarClip = -1f;
+        private bool _hasFrustumSample;
         private float _nextFullSweepTime;
         private Coroutine _fullSweepRoutine;
         private float _cachedDefaultVisibilityRadius = -1f;
@@ -196,12 +203,12 @@ namespace EnvironmentSystem
             if (_mainCamera == null || !_mainCamera.gameObject.activeInHierarchy || !_mainCamera.enabled)
             {
                 _mainCamera = Camera.main;
+                _hasFrustumSample = false;
             }
 
             if (_mainCamera != null)
             {
-                // Recalculate frustum planes every frame (critical — without this objects stay hidden forever).
-                GeometryUtility.CalculateFrustumPlanes(_mainCamera, _frustumPlanes);
+                RefreshFrustumPlanesIfNeeded();
 
                 // On a significant rotation, do a full sweep immediately to avoid edge-popping.
                 float rotDelta = Quaternion.Angle(_mainCamera.transform.rotation, _lastCamRot);
@@ -412,6 +419,37 @@ namespace EnvironmentSystem
                     return false;
             }
             return true;
+        }
+
+        private void RefreshFrustumPlanesIfNeeded()
+        {
+            Transform cameraTransform = _mainCamera.transform;
+            Vector3 position = cameraTransform.position;
+            Quaternion rotation = cameraTransform.rotation;
+            float fieldOfView = _mainCamera.fieldOfView;
+            float aspect = _mainCamera.aspect;
+            float nearClip = _mainCamera.nearClipPlane;
+            float farClip = _mainCamera.farClipPlane;
+
+            if (_hasFrustumSample
+                && position == _lastFrustumPosition
+                && rotation == _lastFrustumRotation
+                && Mathf.Approximately(fieldOfView, _lastFrustumFieldOfView)
+                && Mathf.Approximately(aspect, _lastFrustumAspect)
+                && Mathf.Approximately(nearClip, _lastFrustumNearClip)
+                && Mathf.Approximately(farClip, _lastFrustumFarClip))
+            {
+                return;
+            }
+
+            GeometryUtility.CalculateFrustumPlanes(_mainCamera, _frustumPlanes);
+            _lastFrustumPosition = position;
+            _lastFrustumRotation = rotation;
+            _lastFrustumFieldOfView = fieldOfView;
+            _lastFrustumAspect = aspect;
+            _lastFrustumNearClip = nearClip;
+            _lastFrustumFarClip = farClip;
+            _hasFrustumSample = true;
         }
 
         private void GetVisibilityDistanceSquares(out float showDistSq, out float hideDistSq, out float neverCullSq)
