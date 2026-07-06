@@ -64,6 +64,7 @@ public class NetworkUI : MonoBehaviour
         if (NetworkManager.Singleton != null)
         {
             NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
+            NetworkManager.Singleton.OnClientDisconnectCallback += OnClientDisconnected;
         }
 
         // 绑定按钮事件
@@ -87,21 +88,6 @@ public class NetworkUI : MonoBehaviour
             SetTextIfChanged(statusText, "Services init failed");
             Debug.LogError(e);
         }
-    }
-
-    private void Update()
-    {
-        if (NetworkManager.Singleton == null)
-            return;
-
-        // 实时检测连接状态更新UI
-        bool isConnected = NetworkManager.Singleton.IsClient || NetworkManager.Singleton.IsServer;
-        bool isHost = NetworkManager.Singleton.IsHost;
-
-        if (_hasCachedUiState && _lastConnected == isConnected && _lastHost == isHost && _lastDisplayedJoinCode == generatedJoinCode)
-            return;
-
-        UpdateUIState(isConnected);
     }
 
     private void UpdateUIState(bool isConnected)
@@ -207,11 +193,17 @@ public class NetworkUI : MonoBehaviour
     private void OnDestroy()
     {
         if (NetworkManager.Singleton != null)
+        {
             NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
+            NetworkManager.Singleton.OnClientDisconnectCallback -= OnClientDisconnected;
+        }
     }
 
     private void OnClientConnected(ulong clientId)
     {
+        _hasCachedUiState = false;
+        UpdateUIState(true);
+
         // 只有服务端（房主）有权限分配玩家对象
         if (NetworkManager.Singleton.IsServer)
         {
@@ -258,5 +250,19 @@ public class NetworkUI : MonoBehaviour
                 }
             }
         }
+    }
+
+    private void OnClientDisconnected(ulong clientId)
+    {
+        bool isConnected = NetworkManager.Singleton != null &&
+            (NetworkManager.Singleton.IsClient || NetworkManager.Singleton.IsServer);
+
+        if (!isConnected)
+        {
+            generatedJoinCode = "";
+        }
+
+        _hasCachedUiState = false;
+        UpdateUIState(isConnected);
     }
 }
