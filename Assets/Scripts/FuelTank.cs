@@ -323,6 +323,7 @@ public class FuelTank : MonoBehaviour
 
         _baseVertices = vertices;
         _animatedVertices = new Vector3[numVerts];
+        System.Array.Copy(_baseVertices, _animatedVertices, _baseVertices.Length);
         _baseUVs = uvs;
         _baseTriangles = triangles;
 
@@ -338,9 +339,8 @@ public class FuelTank : MonoBehaviour
         if (_animatedVertices == null || _animatedVertices.Length != _baseVertices.Length)
         {
             _animatedVertices = new Vector3[_baseVertices.Length];
+            System.Array.Copy(_baseVertices, _animatedVertices, _baseVertices.Length);
         }
-
-        System.Array.Copy(_baseVertices, _animatedVertices, _baseVertices.Length);
 
         float timeVal = Time.time * waveSpeed;
 
