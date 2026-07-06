@@ -112,6 +112,14 @@ public class InteractionSystem : MonoBehaviour
 
     private Coroutine _hideInfoCo;
     private Coroutine _hideCarryDistanceLimitCo;
+    private bool _carryLabelActive;
+    private bool _interactLabelActive;
+    private bool _collectLabelActive;
+    private bool _infoLabelActive;
+    private bool _carryDistanceLimitLabelActive;
+    private string _interactLabelText;
+    private string _infoLabelText;
+    private string _carryDistanceLimitLabelText;
 
     [Header("Placement Mode (Tab)")]
     [SerializeField] private LayerMask placementMask = ~0;
@@ -1809,24 +1817,48 @@ public class InteractionSystem : MonoBehaviour
         bool showInteract = _lookedAt != null && _lookedAt.interactable;
         bool showCollect = _carriedWo != null && _carriedWo.collectable;
 
-        SetLabel(carryLabel, showCarry);
-        SetLabel(interactLabel, showInteract);
-        SetLabel(collectLabel, showCollect);
+        SetLabel(carryLabel, showCarry, ref _carryLabelActive);
+        SetLabel(interactLabel, showInteract, ref _interactLabelActive);
+        SetLabel(collectLabel, showCollect, ref _collectLabelActive);
     }
 
-    void SetLabel(TextMeshProUGUI label, bool active)
+    void SetLabel(TextMeshProUGUI label, bool active, ref bool cachedActive)
     {
-        if (label != null)
-            label.gameObject.SetActive(active);
+        if (label == null)
+        {
+            cachedActive = active;
+            return;
+        }
+
+        if (cachedActive == active && label.gameObject.activeSelf == active)
+            return;
+
+        label.gameObject.SetActive(active);
+        cachedActive = active;
+    }
+
+    void SetLabelText(TextMeshProUGUI label, string text, ref string cachedText)
+    {
+        if (label == null)
+        {
+            cachedText = text;
+            return;
+        }
+
+        if (cachedText == text && label.text == text)
+            return;
+
+        label.text = text;
+        cachedText = text;
     }
 
     public void ClearPrompts()
     {
-        SetLabel(carryLabel, false);
-        SetLabel(interactLabel, false);
-        SetLabel(collectLabel, false);
-        if (infoLabel != null) infoLabel.gameObject.SetActive(false);
-        if (carryDistanceLimitLabel != null) carryDistanceLimitLabel.gameObject.SetActive(false);
+        SetLabel(carryLabel, false, ref _carryLabelActive);
+        SetLabel(interactLabel, false, ref _interactLabelActive);
+        SetLabel(collectLabel, false, ref _collectLabelActive);
+        SetLabel(infoLabel, false, ref _infoLabelActive);
+        SetLabel(carryDistanceLimitLabel, false, ref _carryDistanceLimitLabelActive);
     }
 
     // 🌟 外界专属接口：支持车内或其它外部模块强行设置交互提示文字并显示/隐藏它！
@@ -1834,8 +1866,8 @@ public class InteractionSystem : MonoBehaviour
     {
         if (interactLabel != null)
         {
-            interactLabel.text = text;
-            interactLabel.gameObject.SetActive(active);
+            SetLabelText(interactLabel, text, ref _interactLabelText);
+            SetLabel(interactLabel, active, ref _interactLabelActive);
         }
     }
 
@@ -1870,8 +1902,8 @@ public class InteractionSystem : MonoBehaviour
         if (_hideInfoCo != null)
             StopCoroutine(_hideInfoCo);
 
-        infoLabel.text = message;
-        infoLabel.gameObject.SetActive(true);
+        SetLabelText(infoLabel, message, ref _infoLabelText);
+        SetLabel(infoLabel, true, ref _infoLabelActive);
         _hideInfoCo = StartCoroutine(HideInfoAfter(infoDisplayDuration));
     }
 
@@ -1883,24 +1915,22 @@ public class InteractionSystem : MonoBehaviour
         if (_hideCarryDistanceLimitCo != null)
             StopCoroutine(_hideCarryDistanceLimitCo);
 
-        carryDistanceLimitLabel.text = message;
-        carryDistanceLimitLabel.gameObject.SetActive(true);
+        SetLabelText(carryDistanceLimitLabel, message, ref _carryDistanceLimitLabelText);
+        SetLabel(carryDistanceLimitLabel, true, ref _carryDistanceLimitLabelActive);
         _hideCarryDistanceLimitCo = StartCoroutine(HideCarryDistanceLimitAfter(carryDistanceLimitDisplayDuration));
     }
 
     IEnumerator HideInfoAfter(float delay)
     {
         yield return new WaitForSeconds(delay);
-        if (infoLabel != null)
-            infoLabel.gameObject.SetActive(false);
+        SetLabel(infoLabel, false, ref _infoLabelActive);
         _hideInfoCo = null;
     }
 
     IEnumerator HideCarryDistanceLimitAfter(float delay)
     {
         yield return new WaitForSeconds(delay);
-        if (carryDistanceLimitLabel != null)
-            carryDistanceLimitLabel.gameObject.SetActive(false);
+        SetLabel(carryDistanceLimitLabel, false, ref _carryDistanceLimitLabelActive);
         _hideCarryDistanceLimitCo = null;
     }
 
