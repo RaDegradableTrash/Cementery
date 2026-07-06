@@ -34,6 +34,8 @@ namespace EnvironmentSystem
         public int loadingRange = 2;
         [Tooltip("Maximum additive chunk scene loads running at once. Lower values reduce frame spikes.")]
         [Min(1)] public int maxConcurrentLoads = 1;
+        [Tooltip("Minimum time between starting additive chunk scene loads. Small spacing smooths activation spikes while moving fast.")]
+        [Min(0f)] public float loadStartInterval = 0.1f;
 
         private HashSet<string> _requestedChunks = new HashSet<string>();
         private HashSet<string> _loadedChunks = new HashSet<string>();
@@ -46,6 +48,8 @@ namespace EnvironmentSystem
         private readonly List<Vector2Int> _streamingOffsets = new List<Vector2Int>(49);
         private int _activeLoads = 0;
         private int _cachedOffsetRange = int.MinValue;
+        private Coroutine _drainLoadQueueRoutine;
+        private float _nextLoadStartTime;
 
         // Cache DesertTerrainChunk size so it is not recalculated every streaming check.
         private float _chunkSizeCacheTime = -99f;
@@ -286,9 +290,26 @@ namespace EnvironmentSystem
 
         private void DrainLoadQueue()
         {
-            int loadLimit = Mathf.Max(1, maxConcurrentLoads);
-            while (_activeLoads < loadLimit && _loadQueue.Count > 0)
+            if (_drainLoadQueueRoutine != null)
+                return;
+
+            _drainLoadQueueRoutine = StartCoroutine(DrainLoadQueueAsync());
+        }
+
+        private IEnumerator DrainLoadQueueAsync()
+        {
+            while (_loadQueue.Count > 0)
             {
+                int loadLimit = Mathf.Max(1, maxConcurrentLoads);
+                if (_activeLoads >= loadLimit)
+                    break;
+
+                if (Time.time < _nextLoadStartTime)
+                {
+                    yield return new WaitForSeconds(_nextLoadStartTime - Time.time);
+                    continue;
+                }
+
                 string next = _loadQueue.Dequeue();
                 _queuedChunks.Remove(next);
                 if (!_requestedChunks.Contains(next))
@@ -298,8 +319,16 @@ namespace EnvironmentSystem
                 }
 
                 _activeLoads++;
+                _nextLoadStartTime = Time.time + loadStartInterval;
                 StartCoroutine(LoadSceneAsync(next));
+
+                if (loadStartInterval > 0f)
+                    yield return new WaitForSeconds(loadStartInterval);
+                else
+                    yield return null;
             }
+
+            _drainLoadQueueRoutine = null;
         }
 
         private void UnloadChunk(string chunkName)
@@ -356,7 +385,13 @@ namespace EnvironmentSystem
             }
 
             AsyncOperation asyncUnload = SceneManager.UnloadSceneAsync(sceneName);
-            if (asyncUnload == null) yield break;
+            if (asyncUnload == null)
+            {
+                _loadedChunks.Remove(sceneName);
+                _unloadRoutines.Remove(sceneName);
+                DrainLoadQueue();
+                yield break;
+            }
 
             while (!asyncUnload.isDone)
             {
