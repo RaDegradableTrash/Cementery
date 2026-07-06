@@ -26,6 +26,7 @@ namespace EnvironmentSystem
         private int _currentIndex = 0;
         private int _activeDeformerCount;
         private bool _dynamicBindingsStable;
+        private float _nextFadeUploadTime;
         [Header("Runtime Binding")]
         [Tooltip("Periodically attach deformers to player and vehicle wheels that appear after scene load.")]
         public bool autoBindPlayerAndVehicleDeformers = true;
@@ -33,6 +34,9 @@ namespace EnvironmentSystem
         public bool autoBindLoosePropDeformers = false;
         [Tooltip("Enable logs when runtime deformers are attached.")]
         public bool verboseBindingLogs = false;
+        [Min(0.01f)]
+        [Tooltip("Minimum time between shader uploads for slow footprint fade updates.")]
+        public float shaderUploadInterval = 0.05f;
 
         // Shader Property IDs for lightning-fast GPU uploads
         private static readonly int DeformerPositionsId = Shader.PropertyToID("_DeformerPositions");
@@ -92,6 +96,7 @@ namespace EnvironmentSystem
                         _deformerParams[i] = new Vector4(depth, rimWidth, rimHeight, 1f);
                         _lifetimes[i] = lifetime;
                         _maxLifetimes[i] = lifetime;
+                        UploadDeformerArrays();
                         return;
                     }
 
@@ -115,6 +120,7 @@ namespace EnvironmentSystem
             }
 
             _currentIndex = (_currentIndex + 1) % MaxDeformers;
+            UploadDeformerArrays();
         }
 
         private float _nextSweepTime = 0f;
@@ -162,12 +168,17 @@ namespace EnvironmentSystem
                 }
             }
 
-            // Upload the compiled arrays to global shader memory
-            if (hasChanged || Time.frameCount % 8 == 0)
+            if (hasChanged && Time.time >= _nextFadeUploadTime)
             {
-                Shader.SetGlobalVectorArray(DeformerPositionsId, _deformerPositions);
-                Shader.SetGlobalVectorArray(DeformerParamsId, _deformerParams);
+                UploadDeformerArrays();
             }
+        }
+
+        private void UploadDeformerArrays()
+        {
+            _nextFadeUploadTime = Time.time + Mathf.Max(0.01f, shaderUploadInterval);
+            Shader.SetGlobalVectorArray(DeformerPositionsId, _deformerPositions);
+            Shader.SetGlobalVectorArray(DeformerParamsId, _deformerParams);
         }
 
         private float GetDynamicBindingSweepInterval()
