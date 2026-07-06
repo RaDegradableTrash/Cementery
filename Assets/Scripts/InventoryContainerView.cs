@@ -37,6 +37,8 @@ public class InventoryContainerView : MonoBehaviour
     private float _cachedInset = -1f;
     private bool _gridLineVisibilityInitialized;
     private bool _gridLinesVisible;
+    private float _nextInventoryControllerLookupTime;
+    private const float InventoryControllerLookupInterval = 0.25f;
 
     private Transform _placedItemsRoot;
     private Dictionary<ItemInstance, GameObject> _placedVisuals = new Dictionary<ItemInstance, GameObject>();
@@ -399,11 +401,17 @@ public class InventoryContainerView : MonoBehaviour
 
     bool IsInventoryActive()
     {
-        InventoryCameraController primary = InventoryCameraController.GetPrimaryController();
-        if (primary != null)
-            inventoryCameraController = primary;
-        else if (inventoryCameraController == null)
-            inventoryCameraController = FindObjectOfType<InventoryCameraController>();
+        if (inventoryCameraController == null)
+        {
+            float now = Time.unscaledTime;
+            if (now < _nextInventoryControllerLookupTime)
+                return false;
+
+            _nextInventoryControllerLookupTime = now + InventoryControllerLookupInterval;
+            inventoryCameraController = InventoryCameraController.GetPrimaryController();
+            if (inventoryCameraController == null)
+                inventoryCameraController = FindObjectOfType<InventoryCameraController>();
+        }
 
         return inventoryCameraController != null && inventoryCameraController.IsInventoryActive;
     }
