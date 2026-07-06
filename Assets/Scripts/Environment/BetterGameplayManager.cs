@@ -70,6 +70,7 @@ namespace EnvironmentSystem
         // Separate bucket of objects that are currently hidden but within load range — checked first.
         private readonly List<OptimizableObject> _hiddenNearby     = new List<OptimizableObject>(128);
         private readonly HashSet<OptimizableObject> _hiddenNearbySet = new HashSet<OptimizableObject>();
+        private readonly List<Rigidbody> _rigidbodyBuffer = new List<Rigidbody>(64);
         private int _currentIndex = 0;
 
         private Camera    _mainCamera;
@@ -165,8 +166,13 @@ namespace EnvironmentSystem
             foreach (GameObject root in scene.GetRootGameObjects())
             {
                 if (ShouldSkipRoot(root)) continue;
-                foreach (Rigidbody rb in root.GetComponentsInChildren<Rigidbody>(true))
+                _rigidbodyBuffer.Clear();
+                root.GetComponentsInChildren<Rigidbody>(true, _rigidbodyBuffer);
+                for (int i = 0; i < _rigidbodyBuffer.Count; i++)
                 {
+                    Rigidbody rb = _rigidbodyBuffer[i];
+                    if (rb == null) continue;
+
                     rb.isKinematic = true;
                     rb.useGravity  = false;
                     rb.velocity        = Vector3.zero;
