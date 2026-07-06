@@ -50,6 +50,12 @@ public class SnowAccumulationManager : MonoBehaviour
     private float _cachedGlobalSnowUpdateInterval = 0.02f;
     private float _cachedShaderParamRefreshIntervalSource = -1f;
     private float _cachedShaderParamRefreshInterval = 0.05f;
+    private bool _hasOcclusionSample;
+    private bool _occlusionClearedWithoutTarget;
+    private Vector3 _lastOcclusionPosition;
+    private Vector3 _lastOcclusionForward;
+    private Vector4 _lastOcclusionSnowParams;
+    private float _lastOcclusionRadius = -1f;
 
     private void Awake()
     {
@@ -148,19 +154,43 @@ public class SnowAccumulationManager : MonoBehaviour
 
         if (playerCar != null)
         {
-            modificationMaterial.SetVector("_CarParams", new Vector4(playerCar.position.x, playerCar.position.y, playerCar.position.z, carOcclusionRadius));
-            modificationMaterial.SetVector("_CarParamsForward", new Vector4(playerCar.forward.x, playerCar.forward.y, playerCar.forward.z, 4.5f));
-            modificationMaterial.SetVector("_SnowMapParams", GetSnowParams());
+            Vector3 carPosition = playerCar.position;
+            Vector3 carForward = playerCar.forward;
+            Vector4 snowParams = GetSnowParams();
+            if (_hasOcclusionSample &&
+                !_occlusionClearedWithoutTarget &&
+                (carPosition - _lastOcclusionPosition).sqrMagnitude < 0.0001f &&
+                (carForward - _lastOcclusionForward).sqrMagnitude < 0.0001f &&
+                Mathf.Approximately(_lastOcclusionRadius, carOcclusionRadius) &&
+                (_lastOcclusionSnowParams - snowParams).sqrMagnitude < 0.000001f)
+            {
+                return;
+            }
+
+            modificationMaterial.SetVector("_CarParams", new Vector4(carPosition.x, carPosition.y, carPosition.z, carOcclusionRadius));
+            modificationMaterial.SetVector("_CarParamsForward", new Vector4(carForward.x, carForward.y, carForward.z, 4.5f));
+            modificationMaterial.SetVector("_SnowMapParams", snowParams);
             
             // Pass 2: Draw Occlusion mask
             Graphics.Blit(null, occlusionMap, modificationMaterial, 2);
+            _hasOcclusionSample = true;
+            _occlusionClearedWithoutTarget = false;
+            _lastOcclusionPosition = carPosition;
+            _lastOcclusionForward = carForward;
+            _lastOcclusionSnowParams = snowParams;
+            _lastOcclusionRadius = carOcclusionRadius;
         }
         else
         {
+            if (_occlusionClearedWithoutTarget)
+                return;
+
             // If no car, clear to white (no occlusion)
             RenderTexture.active = occlusionMap;
             GL.Clear(false, true, Color.white);
             RenderTexture.active = null;
+            _hasOcclusionSample = false;
+            _occlusionClearedWithoutTarget = true;
         }
     }
 
