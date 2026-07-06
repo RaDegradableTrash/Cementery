@@ -32,6 +32,8 @@ public class PlayerStamina : MonoBehaviour
     
     // 用于控制淡入淡出的 CanvasGroup
     private CanvasGroup _uiCanvasGroup; 
+    private float _lastFillAmount = -1f;
+    private float _lastTargetAlpha = -1f;
 
     void Awake()
     {
@@ -65,11 +67,12 @@ public class PlayerStamina : MonoBehaviour
         if (_rb != null)
         {
 #if UNITY_6000_0_OR_NEWER
-            Vector3 horizontalVelocity = new Vector3(_rb.linearVelocity.x, 0f, _rb.linearVelocity.z);
+            Vector3 velocity = _rb.linearVelocity;
 #else
-            Vector3 horizontalVelocity = new Vector3(_rb.velocity.x, 0f, _rb.velocity.z);
+            Vector3 velocity = _rb.velocity;
 #endif
-            isMoving = horizontalVelocity.magnitude > 0.3f; // 略微调高阈值，更加稳健
+            float horizontalSpeedSqr = velocity.x * velocity.x + velocity.z * velocity.z;
+            isMoving = horizontalSpeedSqr > 0.09f; // 略微调高阈值，更加稳健
         }
 
         // 状态判定逻辑
@@ -107,17 +110,26 @@ public class PlayerStamina : MonoBehaviour
     {
         if (staminaBarFill == null) return;
 
-        // 1. 实时更新进度条填充度
-        staminaBarFill.fillAmount = NormalizedStamina;
+        float normalized = NormalizedStamina;
+        if (Mathf.Abs(_lastFillAmount - normalized) > 0.001f)
+        {
+            _lastFillAmount = normalized;
+            staminaBarFill.fillAmount = normalized;
+        }
 
         // 2. 使用 CanvasGroup 的 alpha 进行平滑淡入淡出，彻底告别 SetActive 带来的物理抽搐
         if (_uiCanvasGroup != null)
         {
             // 如果体力不满 98%，说明在消耗中，目标透明度为 1（显示）；否则满状态目标透明度为 0（隐藏）
-            float targetAlpha = (NormalizedStamina < 0.98f) ? 1f : 0f;
+            float targetAlpha = (normalized < 0.98f) ? 1f : 0f;
             
             // 每帧平滑过渡透明度
-            _uiCanvasGroup.alpha = Mathf.MoveTowards(_uiCanvasGroup.alpha, targetAlpha, Time.deltaTime * 5f);
+            float nextAlpha = Mathf.MoveTowards(_uiCanvasGroup.alpha, targetAlpha, Time.deltaTime * 5f);
+            if (Mathf.Abs(_uiCanvasGroup.alpha - nextAlpha) > 0.001f || _lastTargetAlpha != targetAlpha)
+            {
+                _uiCanvasGroup.alpha = nextAlpha;
+                _lastTargetAlpha = targetAlpha;
+            }
         }
     }
 }
