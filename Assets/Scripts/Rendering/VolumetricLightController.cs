@@ -15,9 +15,16 @@ namespace RenderingSystem
 
         [Tooltip("Update frequency (seconds) to recount and update nearest lights. Do not do it every frame to save CPU.")]
         [Range(0.05f, 1f)] public float updateInterval = 0.15f;
+        [Tooltip("Minimum camera movement before recalculating nearest volumetric lights.")]
+        [Min(0f)] public float cameraMoveThreshold = 1f;
+        [Tooltip("Minimum camera rotation before recalculating nearest volumetric lights.")]
+        [Min(0f)] public float cameraRotationThreshold = 5f;
 
         private Camera _mainCamera;
         private float _timer;
+        private Vector3 _lastCameraPosition;
+        private Quaternion _lastCameraRotation = Quaternion.identity;
+        private bool _hasCameraSample;
         private List<Light> _allLights = new List<Light>();
         private readonly List<LightDistancePair> _nearestLights = new List<LightDistancePair>(8);
         private readonly Dictionary<Light, bool> _volumetricStates = new Dictionary<Light, bool>();
@@ -52,8 +59,35 @@ namespace RenderingSystem
             if (_timer >= updateInterval)
             {
                 _timer = 0f;
-                UpdateVolumetricLights();
+                if (ShouldRefreshForCamera())
+                {
+                    UpdateVolumetricLights();
+                }
             }
+        }
+
+        private bool ShouldRefreshForCamera()
+        {
+            Transform cameraTransform = _mainCamera.transform;
+            if (!_hasCameraSample)
+            {
+                _lastCameraPosition = cameraTransform.position;
+                _lastCameraRotation = cameraTransform.rotation;
+                _hasCameraSample = true;
+                return true;
+            }
+
+            float moveThreshold = Mathf.Max(0f, cameraMoveThreshold);
+            float rotationThreshold = Mathf.Max(0f, cameraRotationThreshold);
+            bool moved = (cameraTransform.position - _lastCameraPosition).sqrMagnitude >= moveThreshold * moveThreshold;
+            bool rotated = Quaternion.Angle(cameraTransform.rotation, _lastCameraRotation) >= rotationThreshold;
+
+            if (!moved && !rotated)
+                return false;
+
+            _lastCameraPosition = cameraTransform.position;
+            _lastCameraRotation = cameraTransform.rotation;
+            return true;
         }
 
         public void RebuildLightCache()
@@ -68,6 +102,8 @@ namespace RenderingSystem
                     _allLights.Add(l);
                 }
             }
+
+            _hasCameraSample = false;
         }
 
         private void UpdateVolumetricLights()
