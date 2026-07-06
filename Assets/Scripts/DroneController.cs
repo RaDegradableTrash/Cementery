@@ -21,6 +21,7 @@ public class DroneController : MonoBehaviour
     private bool _hasSoul = false;
 
     private PlayerDeathFlowController _flowController;
+    private Rigidbody _rb;
 
     public void Initialize(Camera cam, PlayerDeathFlowController flowController)
     {
@@ -34,12 +35,12 @@ public class DroneController : MonoBehaviour
         _pitch = transform.eulerAngles.x;
         _yaw = transform.eulerAngles.y;
 
-        Rigidbody rb = GetComponent<Rigidbody>();
-        if (rb == null) rb = gameObject.AddComponent<Rigidbody>();
-        rb.isKinematic = false;
-        rb.useGravity = false;
-        rb.freezeRotation = true;
-        rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+        _rb = GetComponent<Rigidbody>();
+        if (_rb == null) _rb = gameObject.AddComponent<Rigidbody>();
+        _rb.isKinematic = false;
+        _rb.useGravity = false;
+        _rb.freezeRotation = true;
+        _rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
 
         Collider col = GetComponent<Collider>();
         if (col == null)
@@ -98,10 +99,9 @@ public class DroneController : MonoBehaviour
 
         Vector3 move = right * h + forward * v + Vector3.up * up;
         
-        Rigidbody rb = GetComponent<Rigidbody>();
-        if (rb != null)
+        if (_rb != null)
         {
-            rb.velocity = move * speed;
+            _rb.velocity = move * speed;
         }
     }
 
