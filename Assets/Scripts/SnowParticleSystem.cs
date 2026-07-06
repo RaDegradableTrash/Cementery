@@ -24,6 +24,8 @@ public class SnowParticleSystem : MonoBehaviour
     private Camera _cachedCamera;
     private Vector3 _lastEmitterPosition;
     private bool _hasEmitterPosition;
+    private float _cachedFollowRepositionDistance = -1f;
+    private float _cachedFollowRepositionDistanceSqr = 0.01f;
     private float _nextPlayStateCheckTime;
     private readonly Dictionary<int, CollisionTargetInfo> _collisionTargetCache = new Dictionary<int, CollisionTargetInfo>(64);
     private const int MaxCollisionTargetCacheSize = 256;
@@ -66,8 +68,7 @@ public class SnowParticleSystem : MonoBehaviour
         {
             // Position the particle system above the player so that it always falls around the player
             Vector3 emitterPosition = new Vector3(_playerTransform.position.x, _playerTransform.position.y + 40f, _playerTransform.position.z);
-            float minMoveDistance = Mathf.Max(0.1f, followRepositionDistance);
-            if (!_hasEmitterPosition || (emitterPosition - _lastEmitterPosition).sqrMagnitude >= minMoveDistance * minMoveDistance)
+            if (!_hasEmitterPosition || (emitterPosition - _lastEmitterPosition).sqrMagnitude >= GetFollowRepositionDistanceSqr())
             {
                 transform.position = emitterPosition;
                 _lastEmitterPosition = emitterPosition;
@@ -106,6 +107,18 @@ public class SnowParticleSystem : MonoBehaviour
             _cachedCamera = Camera.main;
 
         return _cachedCamera != null ? _cachedCamera.transform : null;
+    }
+
+    private float GetFollowRepositionDistanceSqr()
+    {
+        if (!Mathf.Approximately(_cachedFollowRepositionDistance, followRepositionDistance))
+        {
+            _cachedFollowRepositionDistance = followRepositionDistance;
+            float minMoveDistance = Mathf.Max(0.1f, followRepositionDistance);
+            _cachedFollowRepositionDistanceSqr = minMoveDistance * minMoveDistance;
+        }
+
+        return _cachedFollowRepositionDistanceSqr;
     }
 
     private void ConfigureParticleSystemProgrammatically()
