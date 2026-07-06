@@ -78,6 +78,7 @@ public class InventoryRaycastPlacer : MonoBehaviour
     private readonly Dictionary<Vector2Int, bool> _previewFootprintBlocked = new Dictionary<Vector2Int, bool>();
     private readonly HashSet<int> _occupiedFailFlashCells = new HashSet<int>();
     private readonly Dictionary<ItemData, Vector3> _previewCenterOffsetCache = new Dictionary<ItemData, Vector3>();
+    private readonly List<Vector3Int> _rotatedOffsetBuffer = new List<Vector3Int>(16);
     private Transform _cellRoot;
     private Material _runtimeCellMaterial;
     private int _cachedCellWidth = -1;
@@ -148,7 +149,7 @@ public class InventoryRaycastPlacer : MonoBehaviour
 
             if (mouseInGrid)
             {
-                var offsets = previewItemData.GetRotatedOffsets(previewRotation);
+                List<Vector3Int> offsets = GetRotatedOffsetBuffer(previewItemData, previewRotation);
                 int minX = 0, maxX = 0, minZ = 0, maxZ = 0;
                 bool first = true;
                 foreach (var off in offsets)
@@ -433,7 +434,8 @@ public class InventoryRaycastPlacer : MonoBehaviour
         _occupiedFailFlashCells.Clear();
 
         int layer = inventorySystem.currentLayer;
-        foreach (Vector3Int offset in previewItemData.GetRotatedOffsets(previewRotation))
+        List<Vector3Int> offsets = GetRotatedOffsetBuffer(previewItemData, previewRotation);
+        foreach (Vector3Int offset in offsets)
         {
             Vector3Int pos = anchor + offset;
             if (!inventorySystem.InBounds(pos) || pos.y != layer)
@@ -876,7 +878,7 @@ public class InventoryRaycastPlacer : MonoBehaviour
         _previewFootprintBlocked.Clear();
         if (hasPreviewItem)
         {
-            List<Vector3Int> offsets = new List<Vector3Int>(previewItemData.GetRotatedOffsets(previewRotation));
+            List<Vector3Int> offsets = GetRotatedOffsetBuffer(previewItemData, previewRotation);
             while (_previewCellTiles.Count < offsets.Count)
             {
                 GameObject tile = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -990,6 +992,25 @@ public class InventoryRaycastPlacer : MonoBehaviour
 
         ClearOccupiedFailFlash();
         return false;
+    }
+
+    List<Vector3Int> GetRotatedOffsetBuffer(ItemData item, Quaternion rotation)
+    {
+        _rotatedOffsetBuffer.Clear();
+        if (item == null || item.localOffsets == null)
+            return _rotatedOffsetBuffer;
+
+        for (int i = 0; i < item.localOffsets.Count; i++)
+        {
+            Vector3 rotated = rotation * item.localOffsets[i];
+            _rotatedOffsetBuffer.Add(new Vector3Int(
+                Mathf.RoundToInt(rotated.x),
+                Mathf.RoundToInt(rotated.y),
+                Mathf.RoundToInt(rotated.z)
+            ));
+        }
+
+        return _rotatedOffsetBuffer;
     }
 
     void ClearOccupiedFailFlash()
