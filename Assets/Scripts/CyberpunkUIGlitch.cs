@@ -1,6 +1,6 @@
+using System.Collections;
 using UnityEngine;
 using TMPro;
-using UnityEngine.UI;
 
 public class CyberpunkUIGlitch : MonoBehaviour
 {
@@ -14,8 +14,7 @@ public class CyberpunkUIGlitch : MonoBehaviour
     private Color _originalColor;
     private float _originalAlpha;
     
-    private float _timer;
-    private int _burstFramesRemaining;
+    private Coroutine _glitchRoutine;
 
     private void Awake()
     {
@@ -27,51 +26,58 @@ public class CyberpunkUIGlitch : MonoBehaviour
         
         if (_tmp != null)
             _originalColor = _tmp.color;
-
-        _timer = Random.Range(0f, baseInterval);
     }
 
     private void OnEnable()
     {
+        if (_rt != null)
+            _originalPos = _rt.anchoredPosition;
+
         if (_cg != null) 
         {
             _cg.alpha = 1f;
             _originalAlpha = 1f;
         }
         if (_tmp != null) _tmp.color = _originalColor;
+
+        _glitchRoutine = StartCoroutine(GlitchRoutine());
     }
 
     private void OnDisable()
     {
+        if (_glitchRoutine != null)
+        {
+            StopCoroutine(_glitchRoutine);
+            _glitchRoutine = null;
+        }
+
+        ResetGlitch();
         if (_tmp != null) _tmp.color = _originalColor;
     }
 
-    private void Update()
+    private IEnumerator GlitchRoutine()
     {
-        if (_burstFramesRemaining > 0)
-        {
-            ApplyGlitchFrame();
-            _burstFramesRemaining--;
+        float initialDelay = Random.Range(0f, Mathf.Max(0.05f, baseInterval));
+        if (initialDelay > 0f)
+            yield return new WaitForSecondsRealtime(initialDelay);
 
-            if (_burstFramesRemaining <= 0)
-            {
-                ResetGlitch();
-            }
-            return;
-        }
-
-        _timer -= Time.unscaledDeltaTime;
-        if (_timer <= 0f)
+        while (enabled)
         {
             if (_cg == null) _cg = GetComponent<CanvasGroup>();
-            
-            // Start a glitch burst
-            _burstFramesRemaining = Random.Range(2, 6);
-            _timer = baseInterval * Random.Range(0.2f, 1.5f);
-            
-            // Save state just before glitching
+
             if (_rt != null) _originalPos = _rt.anchoredPosition;
             if (_cg != null) _originalAlpha = _cg.alpha;
+
+            int burstFrames = Random.Range(2, 6);
+            for (int i = 0; i < burstFrames; i++)
+            {
+                ApplyGlitchFrame();
+                yield return null;
+            }
+
+            ResetGlitch();
+            float waitTime = Mathf.Max(0.05f, baseInterval * Random.Range(0.2f, 1.5f));
+            yield return new WaitForSecondsRealtime(waitTime);
         }
     }
 
