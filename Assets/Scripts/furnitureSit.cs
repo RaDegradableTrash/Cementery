@@ -28,6 +28,11 @@ public class FurnitureObject : NetworkBehaviour
     private MouseLook _currentMouseLook;
     private Coroutine _activeCoroutine;
 
+    private void Awake()
+    {
+        enabled = false;
+    }
+
     /// <summary>
     /// 当玩家右键点击或按下互动键指向床时调用此方法
     /// </summary>
@@ -44,6 +49,7 @@ public class FurnitureObject : NetworkBehaviour
         if (_activeCoroutine != null) return;
 
         // 开始上床/上椅子的平滑协程
+        enabled = true;
         _activeCoroutine = StartCoroutine(EnterFurnitureCo(playerGameObject));
     }
 
@@ -150,6 +156,7 @@ public class FurnitureObject : NetworkBehaviour
         if (_currentActor == null)
         {
             _activeCoroutine = null;
+            enabled = false;
             yield break;
         }
 
@@ -207,6 +214,7 @@ public class FurnitureObject : NetworkBehaviour
         _currentController = null;
         _currentMouseLook = null;
         _activeCoroutine = null;
+        enabled = false;
 
         Debug.Log("[Furniture] 玩家已成功起立并安全回到地面。");
     }
