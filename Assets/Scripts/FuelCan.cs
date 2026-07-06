@@ -147,10 +147,11 @@ public class FuelCan : MonoBehaviour
         }
         
         // 检查距离
-        float distance = Vector3.Distance(transform.position, car.transform.position);
-        if (distance > refillDistance)
+        float refillDistanceSq = refillDistance * refillDistance;
+        float distanceSq = (transform.position - car.transform.position).sqrMagnitude;
+        if (distanceSq > refillDistanceSq)
         {
-            LogRefillDebug($"距离车辆太远 ({distance:F1}米)，需要靠近到 {refillDistance} 米以内");
+            LogRefillTooFar(distanceSq);
             return;
         }
         
@@ -206,6 +207,17 @@ public class FuelCan : MonoBehaviour
         {
             Debug.Log(message);
         }
+    }
+
+    private void LogRefillTooFar(float distanceSq)
+    {
+        if (!logRefillDebug)
+        {
+            return;
+        }
+
+        float distance = Mathf.Sqrt(distanceSq);
+        Debug.Log($"距离车辆太远 ({distance:F1}米)，需要靠近到 {refillDistance} 米以内");
     }
     
     CarControl FindNearestVehicle()
