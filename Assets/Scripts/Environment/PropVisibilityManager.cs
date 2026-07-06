@@ -26,7 +26,6 @@ namespace EnvironmentSystem
         private bool[] _visible;
 
         private Transform _playerTransform;
-        private float _checkTimer;
 
         // ── Lifecycle ─────────────────────────────────────────────────────────
 
@@ -85,22 +84,25 @@ namespace EnvironmentSystem
 
                 if (_playerTransform == null || _props == null) continue;
 
-                Vector3 playerXZ = new Vector3(_playerTransform.position.x, 0f, _playerTransform.position.z);
+                Vector3 playerPos = _playerTransform.position;
 
-                float showDist = visibilityRadius;
+                float showDistSq = visibilityRadius * visibilityRadius;
                 float hideDist = visibilityRadius + hysteresis;
+                float hideDistSq = hideDist * hideDist;
 
                 for (int i = 0; i < _props.Length; i++)
                 {
                     if (_props[i] == null) continue;
 
-                    Vector3 propXZ = new Vector3(_props[i].position.x, 0f, _props[i].position.z);
-                    float dist = Vector3.Distance(playerXZ, propXZ);
+                    Vector3 propPos = _props[i].position;
+                    float dx = playerPos.x - propPos.x;
+                    float dz = playerPos.z - propPos.z;
+                    float distSq = dx * dx + dz * dz;
 
                     if (_visible[i])
                     {
                         // Currently visible → hide if beyond hide threshold
-                        if (dist > hideDist)
+                        if (distSq > hideDistSq)
                         {
                             _props[i].gameObject.SetActive(false);
                             _visible[i] = false;
@@ -109,7 +111,7 @@ namespace EnvironmentSystem
                     else
                     {
                         // Currently hidden → show if within show threshold
-                        if (dist <= showDist)
+                        if (distSq <= showDistSq)
                         {
                             _props[i].gameObject.SetActive(true);
                             _visible[i] = true;
