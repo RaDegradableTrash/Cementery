@@ -93,20 +93,27 @@ namespace EnvironmentSystem
 
         private void Update()
         {
-            if (Time.time < _nextCheckTime) return;
-            _nextCheckTime = Time.time + checkInterval;
-
             if (!useGridStreaming) return;
 
-            RefreshTrackingTarget();
+            float now = Time.time;
+            bool shouldRunScheduledCheck = now >= _nextCheckTime;
+            if (shouldRunScheduledCheck)
+            {
+                _nextCheckTime = now + checkInterval;
+                RefreshTrackingTarget();
+            }
+            else if (trackingTarget == null)
+            {
+                return;
+            }
 
             // 2. Perform grid projection and load surrounding chunks based on loadingRange
             if (trackingTarget != null)
             {
                 // Refresh chunk size from the active chunk registry without a scene-wide search.
-                if (Time.time - _chunkSizeCacheTime > ChunkSizeCacheInterval)
+                if (shouldRunScheduledCheck && now - _chunkSizeCacheTime > ChunkSizeCacheInterval)
                 {
-                    _chunkSizeCacheTime = Time.time;
+                    _chunkSizeCacheTime = now;
                     TryRefreshChunkSizeFromLoadedChunk();
                 }
 
