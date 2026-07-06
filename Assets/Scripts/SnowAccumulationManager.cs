@@ -5,13 +5,17 @@ public class SnowAccumulationManager : MonoBehaviour
     public static SnowAccumulationManager Instance { get; private set; }
 
     [Header("Snow Map Settings")]
-    public int mapResolution = 1024;
+    public int mapResolution = 512;
+    public int occlusionMapResolution = 256;
     [Tooltip("World-space diameter of the snow coverage area. This follows the player so snow is always global.")]
     public float mapWorldSize = 512f;
     [Tooltip("Auto-updated at runtime to follow the player. Do not set manually.")]
     public Vector3 mapCenter = Vector3.zero;
     [Tooltip("How many world-units the player must move before the snow map re-centers. Prevents constant flickering.")]
     public float trackingSnapInterval = 64f;
+    [Min(0.02f)] public float occlusionUpdateInterval = 0.12f;
+    [Min(0.02f)] public float globalSnowUpdateInterval = 0.25f;
+    [Min(0.05f)] public float shaderParamRefreshInterval = 0.5f;
 
     [Header("Resources")]
     public Shader modificationShader;
@@ -25,6 +29,9 @@ public class SnowAccumulationManager : MonoBehaviour
     public Material modificationMaterial;
     private RenderTexture snowHeightMap;
     private RenderTexture occlusionMap;
+    private float _occlusionTimer;
+    private float _globalSnowTimer;
+    private float _shaderParamTimer;
 
     private void Awake()
     {
@@ -52,8 +59,10 @@ public class SnowAccumulationManager : MonoBehaviour
 
     private void InitializeMap()
     {
-        // 1. Create a 1024x1024 RenderTexture for high precision (10cm per pixel for 100x100m)
-        snowHeightMap = new RenderTexture(1024, 1024, 0, RenderTextureFormat.RHalf);
+        int snowResolution = Mathf.Clamp(mapResolution, 256, 1024);
+        int occlusionResolution = Mathf.Clamp(occlusionMapResolution, 128, 512);
+
+        snowHeightMap = new RenderTexture(snowResolution, snowResolution, 0, RenderTextureFormat.RHalf);
         snowHeightMap.name = "SnowHeightMap";
         snowHeightMap.filterMode = FilterMode.Bilinear;
         snowHeightMap.wrapMode = TextureWrapMode.Clamp;
@@ -64,8 +73,7 @@ public class SnowAccumulationManager : MonoBehaviour
         GL.Clear(true, true, Color.black);
         RenderTexture.active = null;
 
-        // 2. Create the occlusion map
-        occlusionMap = new RenderTexture(512, 512, 0, RenderTextureFormat.RHalf);
+        occlusionMap = new RenderTexture(occlusionResolution, occlusionResolution, 0, RenderTextureFormat.RHalf);
         occlusionMap.name = "OcclusionMap";
         occlusionMap.filterMode = FilterMode.Bilinear;
         occlusionMap.wrapMode = TextureWrapMode.Clamp;
@@ -181,11 +189,11 @@ public class SnowAccumulationManager : MonoBehaviour
         }
     }
 
-    private void AccumulateGlobalSnow()
+    private void AccumulateGlobalSnow(float deltaSeconds)
     {
         if (modificationMaterial == null || snowHeightMap == null || globalSnowRate <= 0f) return;
 
-        modificationMaterial.SetVector("_BrushStrength", new Vector4(globalSnowRate * Time.deltaTime, 0, 0, 0));
+        modificationMaterial.SetVector("_BrushStrength", new Vector4(globalSnowRate * deltaSeconds, 0, 0, 0));
         
         Vector4 snowParams = new Vector4(mapCenter.x, mapCenter.z, mapWorldSize, 1f / mapWorldSize);
         modificationMaterial.SetVector("_SnowMapParams", snowParams);
@@ -201,6 +209,8 @@ public class SnowAccumulationManager : MonoBehaviour
 
     private void Update()
     {
+        bool shaderParamsDirty = false;
+
         // ── Track player so snow coverage is always global ──────────────────
         Transform tracker = ResolveTrackingTarget();
         if (tracker != null)
@@ -214,14 +224,31 @@ public class SnowAccumulationManager : MonoBehaviour
             if (newCenter != mapCenter)
             {
                 mapCenter = newCenter;
-                // Re-push shader params immediately after center shift
-                UpdateGlobalShaderParams();
+                shaderParamsDirty = true;
             }
         }
 
-        UpdateOcclusionMap();
-        AccumulateGlobalSnow();
-        UpdateGlobalShaderParams();
+        _occlusionTimer += Time.deltaTime;
+        if (_occlusionTimer >= Mathf.Max(0.02f, occlusionUpdateInterval))
+        {
+            _occlusionTimer = 0f;
+            UpdateOcclusionMap();
+        }
+
+        _globalSnowTimer += Time.deltaTime;
+        if (_globalSnowTimer >= Mathf.Max(0.02f, globalSnowUpdateInterval))
+        {
+            float elapsed = _globalSnowTimer;
+            _globalSnowTimer = 0f;
+            AccumulateGlobalSnow(elapsed);
+        }
+
+        _shaderParamTimer += Time.deltaTime;
+        if (shaderParamsDirty || _shaderParamTimer >= Mathf.Max(0.05f, shaderParamRefreshInterval))
+        {
+            _shaderParamTimer = 0f;
+            UpdateGlobalShaderParams();
+        }
 
         if (Input.GetKeyDown(KeyCode.P))
         {

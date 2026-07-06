@@ -6,11 +6,18 @@ using EnvironmentSystem;
 public class SnowParticleSystem : MonoBehaviour
 {
     [Header("Snow Settings")]
-    public float particleSnowRadius = 1.5f; 
+    public float particleSnowRadius = 1.5f;
     public float particleSnowAmount = 0.2f; // Increase accumulation rate so it passes the Cutoff!
+    [Header("Performance")]
+    public int maxCollisionEventsPerFrame = 24;
+    public int skyVisibilityCheckStride = 4;
+    public bool enableDynamicObjectSnow = false;
 
     private ParticleSystem partSystem;
     private List<ParticleCollisionEvent> collisionEvents;
+    private int _collisionFrame = -1;
+    private int _processedCollisionEventsThisFrame;
+    private int _skyCheckCounter;
 
     private void Awake()
     {
@@ -19,7 +26,7 @@ public class SnowParticleSystem : MonoBehaviour
         particleSnowAmount = 0.05f;
 
         partSystem = GetComponent<ParticleSystem>();
-        collisionEvents = new List<ParticleCollisionEvent>();
+        collisionEvents = new List<ParticleCollisionEvent>(64);
     }
 
     private Transform _playerTransform;
@@ -83,19 +90,19 @@ public class SnowParticleSystem : MonoBehaviour
         var main = partSystem.main;
         main.loop = true;
         main.startLifetime = 150f; // Longer lifetime since it falls slower
-        main.startSpeed = 0f; 
+        main.startSpeed = 0f;
         // 粒子保持2d，略微带点冰晶蓝
         main.startSize = new ParticleSystem.MinMaxCurve(0.04f, 0.16f);
-        main.startColor = new Color(0.9f, 0.95f, 1.0f, 0.8f); 
+        main.startColor = new Color(0.9f, 0.95f, 1.0f, 0.8f);
         // 下落速度降至当前的 30% (之前是0.5)
-        main.gravityModifier = 0.15f; 
+        main.gravityModifier = 0.15f;
         main.simulationSpace = ParticleSystemSimulationSpace.World;
-        main.maxParticles = Application.platform == RuntimePlatform.WebGLPlayer ? 2000 : 5000; 
+        main.maxParticles = Application.platform == RuntimePlatform.WebGLPlayer ? 1000 : 2500;
 
         // 3. Emission Module setup
         var emission = partSystem.emission;
         emission.enabled = true;
-        emission.rateOverTime = Application.platform == RuntimePlatform.WebGLPlayer ? 150f : 500f;  
+        emission.rateOverTime = Application.platform == RuntimePlatform.WebGLPlayer ? 80f : 220f;
 
         // 4. Shape Module setup: 圆形范围 (Circle)
         var shape = partSystem.shape;
@@ -112,8 +119,8 @@ public class SnowParticleSystem : MonoBehaviour
         collision.dampen = 1f; 
         collision.lifetimeLoss = 1f; 
         collision.collidesWith = ~0; 
-        collision.quality = ParticleSystemCollisionQuality.Medium; // High drops collisions on 130k poly terrains!
-        collision.voxelSize = 0.2f; // Increase voxel resolution to 20cm to eliminate grid-snapping lines!
+        collision.quality = ParticleSystemCollisionQuality.Low;
+        collision.voxelSize = 0.4f;
 
         // 6. 生成并应用柔和的雪花材质
         var renderer = GetComponent<ParticleSystemRenderer>();
@@ -179,15 +186,27 @@ public class SnowParticleSystem : MonoBehaviour
 
     private void OnParticleCollision(GameObject other)
     {
-        int numCollisionEvents = partSystem.GetCollisionEvents(other, collisionEvents);
+        if (partSystem == null || other == null)
+            return;
+
+        if (_collisionFrame != Time.frameCount)
+        {
+            _collisionFrame = Time.frameCount;
+            _processedCollisionEventsThisFrame = 0;
+        }
+
+        int remainingBudget = Mathf.Max(0, maxCollisionEventsPerFrame - _processedCollisionEventsThisFrame);
+        if (remainingBudget <= 0)
+            return;
+
+        int numCollisionEvents = Mathf.Min(partSystem.GetCollisionEvents(other, collisionEvents), remainingBudget);
+        _processedCollisionEventsThisFrame += numCollisionEvents;
+        bool isTerrain = other.GetComponentInParent<DesertTerrainChunk>() != null || other.name.Contains("Terrain");
 
         for (int i = 0; i < numCollisionEvents; i++)
         {
             Vector3 pos = collisionEvents[i].intersection;
             Vector3 normal = collisionEvents[i].normal;
-
-            // 判定是否碰到了地形
-            bool isTerrain = (other.GetComponentInParent<DesertTerrainChunk>() != null || other.name.Contains("Terrain"));
 
             // 1. 坡度合法性检验 (Slope Check)：
             // 【极其重要】：Medium 质量的碰撞使用了体素网格（Voxel Grid）。
@@ -204,7 +223,10 @@ public class SnowParticleSystem : MonoBehaviour
             // 因此，如果是地形，我们将起点抬高至上方 0.5 米发射射线，过滤自遮挡干扰！
             float raycastOffset = isTerrain ? 0.5f : 0.02f;
             RaycastHit hit;
-            if (Physics.Raycast(pos + Vector3.up * raycastOffset, Vector3.up, out hit, 30f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+            int visibilityStride = Mathf.Max(1, skyVisibilityCheckStride);
+            bool runSkyVisibilityCheck = visibilityStride <= 1 || (_skyCheckCounter++ % visibilityStride) == 0;
+            if (runSkyVisibilityCheck &&
+                Physics.Raycast(pos + Vector3.up * raycastOffset, Vector3.up, out hit, 30f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
             {
                 // 如果是地形，且上方遮挡点非常近（可能射中了极陡峭的山崖上部），我们也忽略此遮挡
                 if (isTerrain && hit.distance < 1.0f)
@@ -213,13 +235,16 @@ public class SnowParticleSystem : MonoBehaviour
                 }
                 else
                 {
-                    continue; 
+                    continue;
                 }
             }
 
             // 如果撞到的不是地形，就意味着撞到了车子、石头等动态或静态物体
-            if (other.GetComponentInParent<DesertTerrainChunk>() == null && !other.name.Contains("Terrain"))
+            if (!isTerrain)
             {
+                if (!enableDynamicObjectSnow)
+                    continue;
+
                 var dynamicObj = other.GetComponentInParent<DynamicSnowObject>();
                 if (dynamicObj == null && other.transform.root != null)
                 {
@@ -239,7 +264,7 @@ public class SnowParticleSystem : MonoBehaviour
             {
                 GameObject managerGO = new GameObject("[SYSTEM] SnowAccumulationManager");
                 var manager = managerGO.AddComponent<SnowAccumulationManager>();
-                manager.mapCenter = pos; 
+                manager.mapCenter = pos;
             }
             
             if (SnowAccumulationManager.Instance != null)

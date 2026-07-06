@@ -11939,6 +11939,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   particleSnowRadius: 0.2
   particleSnowAmount: 0.5
+  maxCollisionEventsPerFrame: 24
+  skyVisibilityCheckStride: 4
+  enableDynamicObjectSnow: 0
 --- !u!114 &963315338
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -11951,10 +11954,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ade5adc4da55c43659f637a89acab26f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  mapResolution: 1024
+  mapResolution: 512
+  occlusionMapResolution: 256
   mapWorldSize: 100
   mapCenter: {x: 0, y: 0, z: 0}
   trackingSnapInterval: 64
+  occlusionUpdateInterval: 0.12
+  globalSnowUpdateInterval: 0.25
+  shaderParamRefreshInterval: 0.5
   modificationShader: {fileID: 4800000, guid: 1539b409392814f6680dab70ec3888fa, type: 3}
   playerCar: {fileID: 0}
   carOcclusionRadius: 3.5
