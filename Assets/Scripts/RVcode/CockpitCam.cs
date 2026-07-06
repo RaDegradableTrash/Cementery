@@ -54,6 +54,10 @@ public class CockpitCam : MonoBehaviour
 	private Vector3 lastRayHitPoint;
 	private ICockpitHighlightable currentHighlight;
 	private Furniture_SlideDoor currentDoorTarget;
+	private ICockpitInteractable lastPromptTarget;
+	private Furniture_SlideDoor lastPromptDoorTarget;
+	private bool lastPromptVisible;
+	private string lastPromptText;
 	private const int MaxCockpitRayHits = 32;
 	private readonly RaycastHit[] cockpitRayHits = new RaycastHit[MaxCockpitRayHits];
 	private readonly System.Collections.Generic.Dictionary<Collider, ICockpitInteractable> cockpitInteractableCache = new System.Collections.Generic.Dictionary<Collider, ICockpitInteractable>(64);
@@ -613,6 +617,7 @@ public class CockpitCam : MonoBehaviour
 		{
 			InteractionSystem.Instance.SetExternalInteractPrompt("", false);
 		}
+		ClearVehiclePromptCache();
 	}
 
 	private static float NormalizeAngle(float angle)
@@ -631,22 +636,59 @@ public class CockpitCam : MonoBehaviour
 
 		if (target != null)
 		{
+			if (lastPromptVisible && lastPromptTarget == target)
+			{
+				return;
+			}
+
 			// 用各个按钮分别的名字代替提示的右键交互信息，始终以"[ RMB ] "开头
 			string btnName = GetFriendlyButtonName(target);
 			string promptText = $"[ RMB ] {btnName}";
-			InteractionSystem.Instance.SetExternalInteractPrompt(promptText, true);
+			SetVehiclePrompt(promptText, true, target, null);
 		}
 		else if (doorTarget != null)
 		{
+			if (lastPromptVisible && lastPromptDoorTarget == doorTarget)
+			{
+				return;
+			}
+
 			// 面向车门提示可以开关车门，始终以"[ RMB ] "开头
 			string promptText = "[ RMB ] Toggle Door";
-			InteractionSystem.Instance.SetExternalInteractPrompt(promptText, true);
+			SetVehiclePrompt(promptText, true, null, doorTarget);
 		}
 		else
 		{
+			if (!lastPromptVisible)
+			{
+				return;
+			}
+
 			// 视线中没有可交互目标，隐藏提示文字
-			InteractionSystem.Instance.SetExternalInteractPrompt("", false);
+			SetVehiclePrompt("", false, null, null);
 		}
+	}
+
+	private void SetVehiclePrompt(string text, bool visible, ICockpitInteractable target, Furniture_SlideDoor doorTarget)
+	{
+		if (lastPromptVisible == visible && lastPromptText == text && lastPromptTarget == target && lastPromptDoorTarget == doorTarget)
+		{
+			return;
+		}
+
+		lastPromptVisible = visible;
+		lastPromptText = text;
+		lastPromptTarget = target;
+		lastPromptDoorTarget = doorTarget;
+		InteractionSystem.Instance.SetExternalInteractPrompt(text, visible);
+	}
+
+	private void ClearVehiclePromptCache()
+	{
+		lastPromptVisible = false;
+		lastPromptText = null;
+		lastPromptTarget = null;
+		lastPromptDoorTarget = null;
 	}
 
 	// 🌟 智能个性化英文名映射，为每个排档按钮、引擎、电瓶按钮输出简短英文！
