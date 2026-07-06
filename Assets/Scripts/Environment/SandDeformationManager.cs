@@ -15,6 +15,7 @@ namespace EnvironmentSystem
         private const int MaxDeformers = 128;
         private const float DefaultSweepInterval = 8f;
         private const float WebGlSweepInterval = 12f;
+        private const float StableSweepInterval = 30f;
 
         // Circular buffer arrays passed to Shader
         private Vector4[] _deformerPositions = new Vector4[MaxDeformers];
@@ -23,6 +24,7 @@ namespace EnvironmentSystem
         private float[] _maxLifetimes = new float[MaxDeformers];
         
         private int _currentIndex = 0;
+        private bool _dynamicBindingsStable;
         [Header("Runtime Binding")]
         [Tooltip("Periodically attach deformers to player and vehicle wheels that appear after scene load.")]
         public bool autoBindPlayerAndVehicleDeformers = true;
@@ -104,9 +106,9 @@ namespace EnvironmentSystem
         {
             if (autoBindPlayerAndVehicleDeformers && Time.time >= _nextSweepTime)
             {
-                float interval = Application.platform == RuntimePlatform.WebGLPlayer ? WebGlSweepInterval : DefaultSweepInterval;
+                float interval = GetDynamicBindingSweepInterval();
                 _nextSweepTime = Time.time + interval;
-                AutoBindDynamicDeformers();
+                _dynamicBindingsStable = AutoBindDynamicDeformers();
             }
 
             bool hasChanged = false;
@@ -139,14 +141,30 @@ namespace EnvironmentSystem
             }
         }
 
-        private void AutoBindDynamicDeformers()
+        private float GetDynamicBindingSweepInterval()
         {
+            if (_dynamicBindingsStable)
+                return StableSweepInterval;
+
+            return Application.platform == RuntimePlatform.WebGLPlayer ? WebGlSweepInterval : DefaultSweepInterval;
+        }
+
+        private bool AutoBindDynamicDeformers()
+        {
+            bool sawPlayerOrWheel = false;
+            bool addedDeformer = false;
+
             var wheelColliders = Object.FindObjectsOfType<WheelCollider>(true);
             foreach (var wc in wheelColliders)
             {
-                if (wc != null && wc.GetComponent<SandDeformer>() == null)
+                if (wc == null)
+                    continue;
+
+                sawPlayerOrWheel = true;
+                if (wc.GetComponent<SandDeformer>() == null)
                 {
                     var deformer = wc.gameObject.AddComponent<SandDeformer>();
+                    addedDeformer = true;
                     
                     // Wheel tire imprint characteristics
                     deformer.radius = 0.58f;
@@ -161,9 +179,14 @@ namespace EnvironmentSystem
             var players = GameObject.FindGameObjectsWithTag("Player");
             foreach (var player in players)
             {
-                if (player != null && player.GetComponent<SandDeformer>() == null)
+                if (player == null)
+                    continue;
+
+                sawPlayerOrWheel = true;
+                if (player.GetComponent<SandDeformer>() == null)
                 {
                     var deformer = player.AddComponent<SandDeformer>();
+                    addedDeformer = true;
                     
                     // Character foot print characteristics
                     deformer.radius = 0.35f;
@@ -176,7 +199,7 @@ namespace EnvironmentSystem
             }
 
             if (!autoBindLoosePropDeformers)
-                return;
+                return sawPlayerOrWheel && !addedDeformer;
 
             var allRigidbodies = Object.FindObjectsOfType<Rigidbody>(true);
             foreach (var rb in allRigidbodies)
@@ -191,6 +214,7 @@ namespace EnvironmentSystem
                     if (col != null && !col.isTrigger)
                     {
                         var deformer = rb.gameObject.AddComponent<SandDeformer>();
+                        addedDeformer = true;
                         
                         // Dynamically scale stamp parameters based on collider bounds and physical mass!
                         float boundsScale = col.bounds.extents.magnitude;
@@ -208,6 +232,8 @@ namespace EnvironmentSystem
                     }
                 }
             }
+
+            return sawPlayerOrWheel && !addedDeformer;
         }
     }
 }
