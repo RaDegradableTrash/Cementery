@@ -366,7 +366,10 @@ namespace EnvironmentSystem
 
                 if (Time.time < _nextLoadStartTime)
                 {
-                    yield return new WaitForSeconds(_nextLoadStartTime - Time.time);
+                    while (Time.time < _nextLoadStartTime)
+                    {
+                        yield return null;
+                    }
                     continue;
                 }
 
@@ -427,7 +430,10 @@ namespace EnvironmentSystem
 
             if (loadActivationInterval > 0f && Time.time < _nextLoadActivationTime)
             {
-                yield return new WaitForSeconds(_nextLoadActivationTime - Time.time);
+                while (Time.time < _nextLoadActivationTime)
+                {
+                    yield return null;
+                }
             }
 
             _nextLoadActivationTime = Time.time + loadActivationInterval;
