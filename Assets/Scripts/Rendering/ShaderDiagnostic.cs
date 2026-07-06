@@ -3,12 +3,16 @@ using UnityEngine;
 public class ShaderDiagnostic : MonoBehaviour
 {
     private float _timer = 0f;
+    private static readonly bool AutoBootstrapDiagnostic = false;
     [SerializeField] private bool runInPlayerBuilds = false;
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void AutoInitialize()
     {
+        if (!AutoBootstrapDiagnostic)
+            return;
+
         GameObject go = new GameObject("[ShaderDiagnostic_AutoBootstrapper]");
         go.AddComponent<ShaderDiagnostic>();
         DontDestroyOnLoad(go);
@@ -100,7 +104,7 @@ public class ShaderDiagnostic : MonoBehaviour
     private bool ShouldRun()
     {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-        return true;
+        return runInPlayerBuilds;
 #else
         return runInPlayerBuilds;
 #endif

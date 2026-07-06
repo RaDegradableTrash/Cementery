@@ -42,6 +42,7 @@ namespace EnvironmentSystem
         private Queue<string> _loadQueue = new Queue<string>();
         private HashSet<string> _queuedChunks = new HashSet<string>();
         private readonly List<string> _requiredChunks = new List<string>(49);
+        private readonly List<string> _chunksToUnload = new List<string>(49);
         private readonly List<Vector2Int> _streamingOffsets = new List<Vector2Int>(49);
         private int _activeLoads = 0;
         private int _cachedOffsetRange = int.MinValue;
@@ -246,19 +247,19 @@ namespace EnvironmentSystem
                 LoadChunk(chunk);
             }
 
-            // Unload chunks that are no longer requested
-            List<string> chunksToUnload = new List<string>();
+            // Unload chunks that are no longer requested.
+            _chunksToUnload.Clear();
             foreach (var loaded in _loadedChunks)
             {
                 if (!_requestedChunks.Contains(loaded))
                 {
-                    chunksToUnload.Add(loaded);
+                    _chunksToUnload.Add(loaded);
                 }
             }
 
-            foreach (var chunk in chunksToUnload)
+            for (int i = 0; i < _chunksToUnload.Count; i++)
             {
-                UnloadChunk(chunk);
+                UnloadChunk(_chunksToUnload[i]);
             }
         }
 
