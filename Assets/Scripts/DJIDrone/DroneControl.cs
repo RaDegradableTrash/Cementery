@@ -91,6 +91,8 @@ public class DroneControl : MonoBehaviour
     private float _holdTimer = 0f;
     private bool _hasSoul = false;
     private UnityEngine.UI.Slider _cachedSlider;
+    private bool _lastSliderActive;
+    private float _lastSliderProgress = -1f;
 
     private float _targetPropellerRotationSpeed = 0f;  // ────────────────────────────────────────────────────────────────────────
 
@@ -337,8 +339,20 @@ public class DroneControl : MonoBehaviour
 
     private void UpdateSlider(float progress, bool active)
     {
+        if (_cachedSlider != null && _lastSliderActive == active && Mathf.Approximately(_lastSliderProgress, progress))
+        {
+            return;
+        }
+
         if (_cachedSlider == null)
         {
+            if (!active)
+            {
+                _lastSliderActive = false;
+                _lastSliderProgress = progress;
+                return;
+            }
+
             UnityEngine.UI.Slider[] sliders = Resources.FindObjectsOfTypeAll<UnityEngine.UI.Slider>();
             foreach (UnityEngine.UI.Slider s in sliders)
             {
@@ -356,6 +370,9 @@ public class DroneControl : MonoBehaviour
             _cachedSlider.gameObject.SetActive(active);
             if (active) _cachedSlider.value = progress;
         }
+
+        _lastSliderActive = active;
+        _lastSliderProgress = progress;
     }
 
     private void GatherInputAndPhysics(float dt)
