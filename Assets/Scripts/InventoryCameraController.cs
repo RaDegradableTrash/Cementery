@@ -53,6 +53,14 @@ public class InventoryCameraController : MonoBehaviour
     private int _cullingCursor;
     private bool _hasForcedRenderersOff;
     private readonly Plane[] _cullingPlanes = new Plane[6];
+    private Camera _lastCullingCamera;
+    private Vector3 _lastCullingCameraPosition;
+    private Quaternion _lastCullingCameraRotation;
+    private float _lastCullingCameraFieldOfView = -1f;
+    private float _lastCullingCameraAspect = -1f;
+    private float _lastCullingCameraNearClip = -1f;
+    private float _lastCullingCameraFarClip = -1f;
+    private bool _hasCullingCameraSample;
     public bool IsInventoryActive
     {
         get
@@ -278,6 +286,7 @@ void Update()
         if (active && !wasActive && aggressivelyCullOutOfViewRenderers)
         {
             RebuildRendererCache();
+            _hasCullingCameraSample = false;
             _nextCullingTickTime = 0f;
             _nextCullingCacheRefreshTime = Time.unscaledTime + GetCullingCacheRefreshInterval();
         }
@@ -445,7 +454,7 @@ void Update()
 
         int rendererCount = _cachedRenderers.Length;
         int batch = Mathf.Clamp(cullingBatchSize, 16, rendererCount);
-        GeometryUtility.CalculateFrustumPlanes(activeCamera, _cullingPlanes);
+        RefreshCullingPlanesIfNeeded(activeCamera);
         bool forcedAnyOffThisTick = false;
         for (int i = 0; i < batch; i++)
         {
@@ -490,6 +499,39 @@ void Update()
             return false;
 
         return true;
+    }
+
+    void RefreshCullingPlanesIfNeeded(Camera activeCamera)
+    {
+        Transform cameraTransform = activeCamera.transform;
+        Vector3 position = cameraTransform.position;
+        Quaternion rotation = cameraTransform.rotation;
+        float fieldOfView = activeCamera.fieldOfView;
+        float aspect = activeCamera.aspect;
+        float nearClip = activeCamera.nearClipPlane;
+        float farClip = activeCamera.farClipPlane;
+
+        if (_hasCullingCameraSample
+            && _lastCullingCamera == activeCamera
+            && position == _lastCullingCameraPosition
+            && rotation == _lastCullingCameraRotation
+            && Mathf.Approximately(fieldOfView, _lastCullingCameraFieldOfView)
+            && Mathf.Approximately(aspect, _lastCullingCameraAspect)
+            && Mathf.Approximately(nearClip, _lastCullingCameraNearClip)
+            && Mathf.Approximately(farClip, _lastCullingCameraFarClip))
+        {
+            return;
+        }
+
+        GeometryUtility.CalculateFrustumPlanes(activeCamera, _cullingPlanes);
+        _lastCullingCamera = activeCamera;
+        _lastCullingCameraPosition = position;
+        _lastCullingCameraRotation = rotation;
+        _lastCullingCameraFieldOfView = fieldOfView;
+        _lastCullingCameraAspect = aspect;
+        _lastCullingCameraNearClip = nearClip;
+        _lastCullingCameraFarClip = farClip;
+        _hasCullingCameraSample = true;
     }
 
     void RebuildRendererCache()
