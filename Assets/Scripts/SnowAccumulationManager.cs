@@ -16,6 +16,7 @@ public class SnowAccumulationManager : MonoBehaviour
     [Min(0.02f)] public float occlusionUpdateInterval = 0.12f;
     [Min(0.02f)] public float globalSnowUpdateInterval = 0.25f;
     [Min(0.05f)] public float shaderParamRefreshInterval = 0.5f;
+    [Min(0.05f)] public float trackingUpdateInterval = 0.2f;
 
     [Header("Resources")]
     public Shader modificationShader;
@@ -33,7 +34,11 @@ public class SnowAccumulationManager : MonoBehaviour
     private float _occlusionTimer;
     private float _globalSnowTimer;
     private float _shaderParamTimer;
+    private float _trackingTimer;
     private float _nextTrackingTargetSearchTime;
+    private Vector4 _cachedSnowParams;
+    private float _cachedSnowMapWorldSize = -1f;
+    private bool _snowParamsDirty = true;
     private bool _snowDebugGreenEnabled;
 
     private void Awake()
@@ -123,7 +128,7 @@ public class SnowAccumulationManager : MonoBehaviour
         {
             modificationMaterial.SetTexture("_OcclusionMap", occlusionMap);
         }
-        Vector4 snowParams = new Vector4(mapCenter.x, mapCenter.z, mapWorldSize, 1f / mapWorldSize);
+        Vector4 snowParams = GetSnowParams();
         Shader.SetGlobalVector("_GlobalSnowMapParams", snowParams);
     }
 
@@ -135,8 +140,7 @@ public class SnowAccumulationManager : MonoBehaviour
         {
             modificationMaterial.SetVector("_CarParams", new Vector4(playerCar.position.x, playerCar.position.y, playerCar.position.z, carOcclusionRadius));
             modificationMaterial.SetVector("_CarParamsForward", new Vector4(playerCar.forward.x, playerCar.forward.y, playerCar.forward.z, 4.5f));
-            Vector4 snowParams = new Vector4(mapCenter.x, mapCenter.z, mapWorldSize, 1f / mapWorldSize);
-            modificationMaterial.SetVector("_SnowMapParams", snowParams);
+            modificationMaterial.SetVector("_SnowMapParams", GetSnowParams());
             
             // Pass 2: Draw Occlusion mask
             Graphics.Blit(null, occlusionMap, modificationMaterial, 2);
@@ -168,8 +172,7 @@ public class SnowAccumulationManager : MonoBehaviour
         modificationMaterial.SetVector("_BrushParams", new Vector4(pos.x, pos.y, pos.z, radius));
         modificationMaterial.SetVector("_BrushStrength", new Vector4(amount, 0, 0, 0));
         
-        Vector4 snowParams = new Vector4(mapCenter.x, mapCenter.z, mapWorldSize, 1f / mapWorldSize);
-        modificationMaterial.SetVector("_SnowMapParams", snowParams);
+        modificationMaterial.SetVector("_SnowMapParams", GetSnowParams());
 
         if (!EnsureSnowScratchMap())
             return;
@@ -208,8 +211,7 @@ public class SnowAccumulationManager : MonoBehaviour
 
         modificationMaterial.SetVector("_BrushStrength", new Vector4(globalSnowRate * deltaSeconds, 0, 0, 0));
         
-        Vector4 snowParams = new Vector4(mapCenter.x, mapCenter.z, mapWorldSize, 1f / mapWorldSize);
-        modificationMaterial.SetVector("_SnowMapParams", snowParams);
+        modificationMaterial.SetVector("_SnowMapParams", GetSnowParams());
 
         if (!EnsureSnowScratchMap())
             return;
@@ -250,20 +252,27 @@ public class SnowAccumulationManager : MonoBehaviour
     {
         bool shaderParamsDirty = false;
 
-        // ── Track player so snow coverage is always global ──────────────────
-        Transform tracker = ResolveTrackingTarget();
-        if (tracker != null)
+        _trackingTimer += Time.deltaTime;
+        if (_trackingTimer >= Mathf.Max(0.05f, trackingUpdateInterval))
         {
-            // Snap to a grid to avoid the snow map sliding pixel-by-pixel every frame
-            float snap = trackingSnapInterval;
-            float snappedX = Mathf.Round(tracker.position.x / snap) * snap;
-            float snappedZ = Mathf.Round(tracker.position.z / snap) * snap;
-            Vector3 newCenter = new Vector3(snappedX, 0f, snappedZ);
+            _trackingTimer = 0f;
 
-            if (newCenter != mapCenter)
+            // ── Track player so snow coverage is always global ──────────────────
+            Transform tracker = ResolveTrackingTarget();
+            if (tracker != null)
             {
-                mapCenter = newCenter;
-                shaderParamsDirty = true;
+                // Snap to a grid to avoid the snow map sliding pixel-by-pixel every frame
+                float snap = Mathf.Max(1f, trackingSnapInterval);
+                float snappedX = Mathf.Round(tracker.position.x / snap) * snap;
+                float snappedZ = Mathf.Round(tracker.position.z / snap) * snap;
+                Vector3 newCenter = new Vector3(snappedX, 0f, snappedZ);
+
+                if (newCenter != mapCenter)
+                {
+                    mapCenter = newCenter;
+                    _snowParamsDirty = true;
+                    shaderParamsDirty = true;
+                }
             }
         }
 
@@ -300,6 +309,19 @@ public class SnowAccumulationManager : MonoBehaviour
             _snowDebugGreenEnabled = debugGreen;
             Shader.SetGlobalFloat("_SnowDebugGreen", debugGreen ? 1f : 0f);
         }
+    }
+
+    private Vector4 GetSnowParams()
+    {
+        if (_snowParamsDirty || !Mathf.Approximately(_cachedSnowMapWorldSize, mapWorldSize))
+        {
+            float worldSize = Mathf.Max(0.001f, mapWorldSize);
+            _cachedSnowParams = new Vector4(mapCenter.x, mapCenter.z, worldSize, 1f / worldSize);
+            _cachedSnowMapWorldSize = mapWorldSize;
+            _snowParamsDirty = false;
+        }
+
+        return _cachedSnowParams;
     }
 
     private Transform ResolveTrackingTarget()
