@@ -22,6 +22,7 @@ public class RaycastTargetIlluminate : MonoBehaviour
     private Mesh _fullscreenQuad;
     private const int DrawableCacheLimit = 128;
     private readonly Dictionary<GameObject, DrawableEntry[]> _drawableCache = new Dictionary<GameObject, DrawableEntry[]>(32);
+    private readonly List<DrawableEntry> _drawableBuildBuffer = new List<DrawableEntry>(16);
 
     private struct DrawableEntry
     {
@@ -162,7 +163,7 @@ public class RaycastTargetIlluminate : MonoBehaviour
         }
 
         Renderer[] renderers = target.GetComponentsInChildren<Renderer>();
-        List<DrawableEntry> entries = new List<DrawableEntry>(renderers.Length);
+        _drawableBuildBuffer.Clear();
         for (int i = 0; i < renderers.Length; i++)
         {
             Renderer r = renderers[i];
@@ -186,10 +187,10 @@ public class RaycastTargetIlluminate : MonoBehaviour
             if (subMeshCount <= 0)
                 continue;
 
-            entries.Add(new DrawableEntry { renderer = r, subMeshCount = subMeshCount });
+            _drawableBuildBuffer.Add(new DrawableEntry { renderer = r, subMeshCount = subMeshCount });
         }
 
-        DrawableEntry[] result = entries.ToArray();
+        DrawableEntry[] result = _drawableBuildBuffer.ToArray();
         _drawableCache[target] = result;
         return result;
     }
