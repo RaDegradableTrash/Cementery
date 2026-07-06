@@ -48,6 +48,7 @@ namespace EnvironmentSystem
         private readonly List<string> _requiredChunks = new List<string>(49);
         private readonly List<string> _chunksToUnload = new List<string>(49);
         private readonly List<string> _queuedChunkBuffer = new List<string>(49);
+        private readonly HashSet<string> _queuedChunkBufferSet = new HashSet<string>();
         private readonly List<Vector2Int> _streamingOffsets = new List<Vector2Int>(49);
         private int _activeLoads = 0;
         private int _cachedOffsetRange = int.MinValue;
@@ -281,16 +282,19 @@ namespace EnvironmentSystem
             }
 
             _queuedChunkBuffer.Clear();
+            _queuedChunkBufferSet.Clear();
             while (_loadQueue.Count > 0)
             {
-                _queuedChunkBuffer.Add(_loadQueue.Dequeue());
+                string chunkName = _loadQueue.Dequeue();
+                _queuedChunkBuffer.Add(chunkName);
+                _queuedChunkBufferSet.Add(chunkName);
             }
 
             _queuedChunks.Clear();
             for (int i = 0; i < priorityOrder.Count; i++)
             {
                 string chunkName = priorityOrder[i];
-                if (!_queuedChunkBuffer.Contains(chunkName))
+                if (!_queuedChunkBufferSet.Contains(chunkName))
                 {
                     continue;
                 }
