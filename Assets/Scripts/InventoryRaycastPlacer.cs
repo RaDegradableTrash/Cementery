@@ -997,19 +997,10 @@ public class InventoryRaycastPlacer : MonoBehaviour
     List<Vector3Int> GetRotatedOffsetBuffer(ItemData item, Quaternion rotation)
     {
         _rotatedOffsetBuffer.Clear();
-        if (item == null || item.localOffsets == null)
+        if (item == null)
             return _rotatedOffsetBuffer;
 
-        for (int i = 0; i < item.localOffsets.Count; i++)
-        {
-            Vector3 rotated = rotation * item.localOffsets[i];
-            _rotatedOffsetBuffer.Add(new Vector3Int(
-                Mathf.RoundToInt(rotated.x),
-                Mathf.RoundToInt(rotated.y),
-                Mathf.RoundToInt(rotated.z)
-            ));
-        }
-
+        item.FillRotatedOffsets(_rotatedOffsetBuffer, rotation);
         return _rotatedOffsetBuffer;
     }
 

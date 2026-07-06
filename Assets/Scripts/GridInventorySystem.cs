@@ -22,6 +22,7 @@ public class GridInventorySystem : MonoBehaviour
     public event System.Action<ItemInstance> OnItemRemoved;
 
     private readonly List<ItemInstance> allItems = new List<ItemInstance>();
+    private readonly List<Vector3Int> rotatedOffsetBuffer = new List<Vector3Int>(16);
 
     void Awake()
     {
@@ -40,8 +41,13 @@ public class GridInventorySystem : MonoBehaviour
     /// </summary>
     public bool CanPlace(ItemData item, Vector3Int anchor, Quaternion rotation)
     {
-        foreach (var offset in item.GetRotatedOffsets(rotation))
+        if (item == null)
+            return false;
+
+        item.FillRotatedOffsets(rotatedOffsetBuffer, rotation);
+        for (int i = 0; i < rotatedOffsetBuffer.Count; i++)
         {
+            Vector3Int offset = rotatedOffsetBuffer[i];
             Vector3Int pos = anchor + offset;
             if (!InBounds(pos)) return false;
             if (grid[pos.x, pos.y, pos.z] != null) return false;
@@ -56,8 +62,9 @@ public class GridInventorySystem : MonoBehaviour
     {
         if (!CanPlace(item, anchor, rotation)) return false;
         var instance = new ItemInstance(item, anchor, rotation);
-        foreach (var offset in item.GetRotatedOffsets(rotation))
+        for (int i = 0; i < rotatedOffsetBuffer.Count; i++)
         {
+            Vector3Int offset = rotatedOffsetBuffer[i];
             Vector3Int pos = anchor + offset;
             grid[pos.x, pos.y, pos.z] = instance;
         }
@@ -75,8 +82,10 @@ public class GridInventorySystem : MonoBehaviour
     {
         var inst = grid[anchor.x, anchor.y, anchor.z];
         if (inst == null) return;
-        foreach (var offset in inst.item.GetRotatedOffsets(inst.rotation))
+        inst.item.FillRotatedOffsets(rotatedOffsetBuffer, inst.rotation);
+        for (int i = 0; i < rotatedOffsetBuffer.Count; i++)
         {
+            Vector3Int offset = rotatedOffsetBuffer[i];
             Vector3Int pos = inst.anchor + offset;
             if (InBounds(pos) && grid[pos.x, pos.y, pos.z] == inst)
                 grid[pos.x, pos.y, pos.z] = null;
