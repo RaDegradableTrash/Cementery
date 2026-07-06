@@ -28,6 +28,7 @@ namespace RenderingSystem
         private List<Light> _allLights = new List<Light>();
         private readonly List<LightDistancePair> _nearestLights = new List<LightDistancePair>(8);
         private readonly HashSet<Light> _selectedNearestLights = new HashSet<Light>();
+        private readonly HashSet<Light> _previousSelectedLights = new HashSet<Light>();
         private readonly Dictionary<Light, bool> _volumetricStates = new Dictionary<Light, bool>();
         private float _cachedMaxLightDistance = -1f;
         private float _cachedMaxLightDistanceSqr;
@@ -99,7 +100,13 @@ namespace RenderingSystem
 
         public void RebuildLightCache()
         {
+            foreach (Light light in _previousSelectedLights)
+            {
+                ToggleVolumetric(light, false);
+            }
+
             _allLights.Clear();
+            _previousSelectedLights.Clear();
             Light[] lights = FindObjectsByType<Light>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
             foreach (var l in lights)
             {
@@ -143,7 +150,6 @@ namespace RenderingSystem
 
                 if (sqrDist > maxDistSqr || budget == 0)
                 {
-                    ToggleVolumetric(l, false);
                     continue;
                 }
 
@@ -154,15 +160,23 @@ namespace RenderingSystem
                 AddNearestLight(pair, budget);
             }
 
-            for (int i = 0; i < _allLights.Count; i++)
+            foreach (Light light in _previousSelectedLights)
             {
-                Light light = _allLights[i];
-                if (light == null)
+                if (light != null && !_selectedNearestLights.Contains(light))
                 {
-                    continue;
+                    ToggleVolumetric(light, false);
                 }
+            }
 
-                ToggleVolumetric(light, _selectedNearestLights.Contains(light));
+            foreach (Light light in _selectedNearestLights)
+            {
+                ToggleVolumetric(light, true);
+            }
+
+            _previousSelectedLights.Clear();
+            foreach (Light light in _selectedNearestLights)
+            {
+                _previousSelectedLights.Add(light);
             }
         }
 
@@ -180,7 +194,6 @@ namespace RenderingSystem
 
             if (insertAt >= budget)
             {
-                ToggleVolumetric(pair, false);
                 return;
             }
 
@@ -194,7 +207,6 @@ namespace RenderingSystem
             LightDistancePair removed = _nearestLights[_nearestLights.Count - 1];
             _nearestLights.RemoveAt(_nearestLights.Count - 1);
             _selectedNearestLights.Remove(removed.light);
-            ToggleVolumetric(removed, false);
         }
 
         private float GetMaxLightDistanceSqr()
@@ -262,27 +274,6 @@ namespace RenderingSystem
             }
 #endif
             // Fallback action if Aura 2 is not present: 
-            // We can toggle shadow casting or custom light flares, or simply do nothing.
-        }
-
-        private void ToggleVolumetric(LightDistancePair pair, bool enable)
-        {
-            if (pair.light == null)
-                return;
-
-            if (_volumetricStates.TryGetValue(pair.light, out bool currentState) && currentState == enable)
-                return;
-
-            _volumetricStates[pair.light] = enable;
-
-#if AURA_2_PRESENT
-            if (pair.auraLight != null)
-            {
-                pair.auraLight.enabled = enable;
-                return;
-            }
-#endif
-            // Fallback action if Aura 2 is not present:
             // We can toggle shadow casting or custom light flares, or simply do nothing.
         }
 
