@@ -21,9 +21,15 @@ namespace EnvironmentSystem
         [Tooltip("How often (seconds) the visibility check runs. Higher = cheaper but less responsive.")]
         public float checkInterval = 0.4f;
 
+        [Tooltip("Maximum props checked per interval. Large holders are spread across multiple ticks.")]
+        [Min(8)] public int maxPropsCheckedPerTick = 256;
+
         // Cached list of all direct child renderers grouped by child index for batch toggling
         private Transform[] _props;
         private bool[] _visible;
+        private int _visibilityCursor;
+        private WaitForSeconds _visibilityWait;
+        private float _cachedCheckInterval = -1f;
 
         private Transform _playerTransform;
 
@@ -47,6 +53,7 @@ namespace EnvironmentSystem
             int count = transform.childCount;
             _props = new Transform[count];
             _visible = new bool[count];
+            _visibilityCursor = 0;
 
             for (int i = 0; i < count; i++)
             {
@@ -73,10 +80,12 @@ namespace EnvironmentSystem
         {
             // Stagger startup across all managers to spread the load across frames
             yield return new WaitForSeconds(Random.Range(0f, checkInterval));
+            RefreshVisibilityWait();
 
             while (true)
             {
-                yield return new WaitForSeconds(checkInterval);
+                RefreshVisibilityWait();
+                yield return _visibilityWait;
 
                 // Re-find player lazily (handles RV/player switching)
                 if (_playerTransform == null || !_playerTransform.gameObject.activeInHierarchy)
@@ -90,22 +99,29 @@ namespace EnvironmentSystem
                 float hideDist = visibilityRadius + hysteresis;
                 float hideDistSq = hideDist * hideDist;
 
-                for (int i = 0; i < _props.Length; i++)
+                int propCount = _props.Length;
+                int checksThisTick = Mathf.Min(Mathf.Max(8, maxPropsCheckedPerTick), propCount);
+                for (int i = 0; i < checksThisTick; i++)
                 {
-                    if (_props[i] == null) continue;
+                    if (_visibilityCursor >= propCount)
+                        _visibilityCursor = 0;
 
-                    Vector3 propPos = _props[i].position;
+                    int propIndex = _visibilityCursor++;
+                    Transform prop = _props[propIndex];
+                    if (prop == null) continue;
+
+                    Vector3 propPos = prop.position;
                     float dx = playerPos.x - propPos.x;
                     float dz = playerPos.z - propPos.z;
                     float distSq = dx * dx + dz * dz;
 
-                    if (_visible[i])
+                    if (_visible[propIndex])
                     {
                         // Currently visible → hide if beyond hide threshold
                         if (distSq > hideDistSq)
                         {
-                            _props[i].gameObject.SetActive(false);
-                            _visible[i] = false;
+                            prop.gameObject.SetActive(false);
+                            _visible[propIndex] = false;
                         }
                     }
                     else
@@ -113,11 +129,21 @@ namespace EnvironmentSystem
                         // Currently hidden → show if within show threshold
                         if (distSq <= showDistSq)
                         {
-                            _props[i].gameObject.SetActive(true);
-                            _visible[i] = true;
+                            prop.gameObject.SetActive(true);
+                            _visible[propIndex] = true;
                         }
                     }
                 }
+            }
+        }
+
+        private void RefreshVisibilityWait()
+        {
+            float interval = Mathf.Max(0.05f, checkInterval);
+            if (_visibilityWait == null || !Mathf.Approximately(_cachedCheckInterval, interval))
+            {
+                _cachedCheckInterval = interval;
+                _visibilityWait = new WaitForSeconds(interval);
             }
         }
 

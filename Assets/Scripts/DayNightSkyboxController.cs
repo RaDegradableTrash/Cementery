@@ -156,6 +156,7 @@ public class DayNightSkyboxController : MonoBehaviour
     private int _probeSyncCursor;
     private bool _duplicateDirectionalLightsChecked;
     private readonly List<Renderer> _cachedDynamicRenderers = new List<Renderer>(256);
+    private readonly HashSet<Renderer> _dynamicRendererScratch = new HashSet<Renderer>();
 
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -748,7 +749,7 @@ public class DayNightSkyboxController : MonoBehaviour
     private void RebuildDynamicRendererCache()
     {
         _cachedDynamicRenderers.Clear();
-        HashSet<Renderer> unique = new HashSet<Renderer>();
+        _dynamicRendererScratch.Clear();
 
         bool includeInactive = includeInactiveRenderersForProbeSync;
 
@@ -759,7 +760,7 @@ public class DayNightSkyboxController : MonoBehaviour
         foreach (var smr in smrs)
         {
             if (smr != null && !smr.gameObject.isStatic)
-                unique.Add(smr);
+                _dynamicRendererScratch.Add(smr);
         }
 
         // 2. Renderers under Rigidbodies
@@ -773,7 +774,7 @@ public class DayNightSkyboxController : MonoBehaviour
             foreach (var r in rbRenderers)
             {
                 if (r != null && !r.gameObject.isStatic)
-                    unique.Add(r);
+                    _dynamicRendererScratch.Add(r);
             }
         }
 
@@ -788,11 +789,12 @@ public class DayNightSkyboxController : MonoBehaviour
             foreach (var r in animRenderers)
             {
                 if (r != null && !r.gameObject.isStatic)
-                    unique.Add(r);
+                    _dynamicRendererScratch.Add(r);
             }
         }
 
-        _cachedDynamicRenderers.AddRange(unique);
+        _cachedDynamicRenderers.AddRange(_dynamicRendererScratch);
+        _dynamicRendererScratch.Clear();
         _probeSyncCursor = 0;
     }
 
