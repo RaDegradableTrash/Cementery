@@ -300,12 +300,14 @@ public void SetBaseRotation(Quaternion targetRotation)
         if (root == null || string.IsNullOrEmpty(childName))
             return null;
 
-        Transform[] all = root.GetComponentsInChildren<Transform>(true);
-        for (int i = 0; i < all.Length; i++)
+        if (root.name == childName)
+            return root;
+
+        for (int i = 0; i < root.childCount; i++)
         {
-            Transform t = all[i];
-            if (t != null && t.name == childName)
-                return t;
+            Transform match = FindChildByName(root.GetChild(i), childName);
+            if (match != null)
+                return match;
         }
 
         return null;
