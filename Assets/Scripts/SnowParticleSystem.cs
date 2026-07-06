@@ -12,6 +12,7 @@ public class SnowParticleSystem : MonoBehaviour
     public int maxCollisionEventsPerFrame = 24;
     public int skyVisibilityCheckStride = 4;
     public bool enableDynamicObjectSnow = false;
+    [Min(0.1f)] public float followRepositionDistance = 1.5f;
 
     private ParticleSystem partSystem;
     private List<ParticleCollisionEvent> collisionEvents;
@@ -21,6 +22,8 @@ public class SnowParticleSystem : MonoBehaviour
     private float _nextTargetSearchTime;
     private RVSystem.RVController _cachedRv;
     private Camera _cachedCamera;
+    private Vector3 _lastEmitterPosition;
+    private bool _hasEmitterPosition;
     private readonly Dictionary<int, CollisionTargetInfo> _collisionTargetCache = new Dictionary<int, CollisionTargetInfo>(64);
     private const int MaxCollisionTargetCacheSize = 256;
 
@@ -61,7 +64,14 @@ public class SnowParticleSystem : MonoBehaviour
         if (_playerTransform != null)
         {
             // Position the particle system above the player so that it always falls around the player
-            transform.position = new Vector3(_playerTransform.position.x, _playerTransform.position.y + 40f, _playerTransform.position.z);
+            Vector3 emitterPosition = new Vector3(_playerTransform.position.x, _playerTransform.position.y + 40f, _playerTransform.position.z);
+            float minMoveDistance = Mathf.Max(0.1f, followRepositionDistance);
+            if (!_hasEmitterPosition || (emitterPosition - _lastEmitterPosition).sqrMagnitude >= minMoveDistance * minMoveDistance)
+            {
+                transform.position = emitterPosition;
+                _lastEmitterPosition = emitterPosition;
+                _hasEmitterPosition = true;
+            }
         }
 
         if (partSystem != null && !partSystem.isPlaying)
@@ -105,6 +115,8 @@ public class SnowParticleSystem : MonoBehaviour
         }
         
         transform.position = new Vector3(mapCenter.x, 50f, mapCenter.z); // Cloud height
+        _lastEmitterPosition = transform.position;
+        _hasEmitterPosition = true;
         transform.rotation = Quaternion.Euler(90f, 0f, 0f); // Pointing straight down (Z down)
 
         // 2. Main Module setup
