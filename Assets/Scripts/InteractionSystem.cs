@@ -89,6 +89,8 @@ public class InteractionSystem : MonoBehaviour
 
     private Collider[] _carriedCols;
     private Collider[] _playerCols;
+    private readonly HashSet<Collider> _carriedColliderSet = new HashSet<Collider>();
+    private readonly HashSet<Collider> _playerColliderSet = new HashSet<Collider>();
     private PhysicMaterial[] _carriedOriginalMaterials;
     private PhysicMaterial _carryNoFrictionMaterial;
     private CapsuleCollider _playerCol;
@@ -577,14 +579,7 @@ public class InteractionSystem : MonoBehaviour
         if (IsPlayerCollider(c))
             return true;
 
-        if (_carriedCols == null)
-            return false;
-
-        for (int i = 0; i < _carriedCols.Length; i++)
-            if (_carriedCols[i] == c)
-                return true;
-
-        return false;
+        return _carriedColliderSet.Contains(c);
     }
 
     bool IsGroundCollider(Collider c)
@@ -633,7 +628,42 @@ public class InteractionSystem : MonoBehaviour
             _playerCol = GetComponent<CapsuleCollider>();
 
         if (_playerCols == null || _playerCols.Length == 0)
+        {
             _playerCols = GetComponentsInChildren<Collider>(true);
+            RebuildPlayerColliderSet();
+        }
+        else if (_playerColliderSet.Count == 0)
+        {
+            RebuildPlayerColliderSet();
+        }
+    }
+
+    void RebuildPlayerColliderSet()
+    {
+        _playerColliderSet.Clear();
+        if (_playerCols == null)
+            return;
+
+        for (int i = 0; i < _playerCols.Length; i++)
+        {
+            Collider collider = _playerCols[i];
+            if (collider != null)
+                _playerColliderSet.Add(collider);
+        }
+    }
+
+    void RebuildCarriedColliderSet()
+    {
+        _carriedColliderSet.Clear();
+        if (_carriedCols == null)
+            return;
+
+        for (int i = 0; i < _carriedCols.Length; i++)
+        {
+            Collider collider = _carriedCols[i];
+            if (collider != null)
+                _carriedColliderSet.Add(collider);
+        }
     }
 
     float GetCameraCarryRangeCompensation()
@@ -738,14 +768,7 @@ public class InteractionSystem : MonoBehaviour
         if (_playerCol != null && c == _playerCol)
             return true;
 
-        if (_playerCols == null)
-            return false;
-
-        for (int i = 0; i < _playerCols.Length; i++)
-            if (_playerCols[i] == c)
-                return true;
-
-        return false;
+        return _playerColliderSet.Contains(c);
     }
 
     void SetCarryPlayerCollisionIgnored(bool ignored)
@@ -1560,6 +1583,8 @@ public class InteractionSystem : MonoBehaviour
         ClearCarriedComponentCache();
         _carriedCols = null;
         _playerCols = null;
+        _carriedColliderSet.Clear();
+        _playerColliderSet.Clear();
         _carriedOriginalMaterials = null;
         _carryRayLocalDir = Vector3.forward;
         _carryRayDistance = 0f;
@@ -1644,6 +1669,8 @@ public class InteractionSystem : MonoBehaviour
 
         _playerCols = GetComponentsInChildren<Collider>();
         _carriedCols = rb.GetComponentsInChildren<Collider>();
+        RebuildPlayerColliderSet();
+        RebuildCarriedColliderSet();
         _carriedRadius = ComputeCarriedRadius();
         ApplyCarryNoFriction();
 
@@ -1796,6 +1823,8 @@ public class InteractionSystem : MonoBehaviour
         ClearCarriedComponentCache();
         _carriedCols = null;
         _playerCols = null;
+        _carriedColliderSet.Clear();
+        _playerColliderSet.Clear();
         _carriedOriginalMaterials = null;
         _carryRayLocalDir = Vector3.forward;
         _carryRayDistance = 0f;
