@@ -171,7 +171,7 @@ public class PlayerController : NetworkBehaviour
         if (inventoryCameraController == null)
             inventoryCameraController = InventoryCameraController.GetPrimaryController();
 
-        Camera[] allCameras = FindObjectsOfType<Camera>(true);
+        Camera[] allCameras = FindObjectsByType<Camera>(FindObjectsInactive.Include, FindObjectsSortMode.None);
         Camera playerCamera = GetComponentInChildren<Camera>(true);
         foreach (Camera cam in allCameras)
         {
@@ -189,8 +189,8 @@ public class PlayerController : NetworkBehaviour
             }
         }
 
-        if (mouseLook == null && Camera.main != null)
-            mouseLook = Camera.main.GetComponent<MouseLook>();
+        if (mouseLook == null && playerCamera != null)
+            mouseLook = playerCamera.GetComponent<MouseLook>();
 
         // 补充初始化 UI
         if (SimpleCircleBar.Instance != null)
