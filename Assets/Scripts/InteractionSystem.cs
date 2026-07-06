@@ -135,6 +135,9 @@ public class InteractionSystem : MonoBehaviour
 
     private float _timeRButtonPressed;
     private float _placementRotationOffset = 0f;
+    private const int InteractionHitBufferSize = 48;
+    private readonly RaycastHit[] _preciseHitBuffer = new RaycastHit[InteractionHitBufferSize];
+    private readonly RaycastHit[] _wideHitBuffer = new RaycastHit[InteractionHitBufferSize];
 
     public static InteractionSystem Instance { get; private set; }
 
@@ -789,16 +792,16 @@ public class InteractionSystem : MonoBehaviour
         // we should prioritize the exact collider hit by the line-of-sight ray.
         // This avoids issues where a thick SphereCast overlaps surrounding colliders
         // at close range and fails to target the correct object.
-        RaycastHit[] preciseHits = Physics.RaycastAll(ray, range, interactMask, QueryTriggerInteraction.Ignore);
-        if (preciseHits != null && preciseHits.Length > 0)
+        int preciseHitCount = Physics.RaycastNonAlloc(ray, _preciseHitBuffer, range, interactMask, QueryTriggerInteraction.Ignore);
+        if (preciseHitCount > 0)
         {
             float closestPreciseDist = float.MaxValue;
             RaycastHit bestPreciseHit = default;
             bool foundPrecise = false;
 
-            for (int i = 0; i < preciseHits.Length; i++)
+            for (int i = 0; i < preciseHitCount; i++)
             {
-                RaycastHit phit = preciseHits[i];
+                RaycastHit phit = _preciseHitBuffer[i];
                 if (phit.collider != null && !IsIgnoredCarryHitCollider(phit.collider))
                 {
                     if (phit.distance < closestPreciseDist)
@@ -819,66 +822,50 @@ public class InteractionSystem : MonoBehaviour
 
         float sphereRadius = interactionRayRadius > 0.0001f ? interactionRayRadius * 5f : 0f; // 500% thicker cast
 
-        RaycastHit[] hits = sphereRadius > 0.0001f
-            ? Physics.SphereCastAll(ray, sphereRadius, range, interactMask, QueryTriggerInteraction.Ignore)
-            : Physics.RaycastAll(ray, range, interactMask, QueryTriggerInteraction.Ignore);
-        if (hits == null || hits.Length == 0)
+        int hitCount = sphereRadius > 0.0001f
+            ? Physics.SphereCastNonAlloc(ray, sphereRadius, _wideHitBuffer, range, interactMask, QueryTriggerInteraction.Ignore)
+            : Physics.RaycastNonAlloc(ray, _wideHitBuffer, range, interactMask, QueryTriggerInteraction.Ignore);
+        if (hitCount <= 0)
             return false;
 
-        // 1. Gather all valid hits (ignoring player or ignored carry colliders)
-        List<RaycastHit> validHits = new List<RaycastHit>();
-        for (int i = 0; i < hits.Length; i++)
+        // 1. Prioritize valid WorldObject hits by distance.
+        float closestWorldObjectDist = float.MaxValue;
+        RaycastHit closestWorldObjectHit = default;
+        bool foundWorldObject = false;
+        bool foundValidHit = false;
+        for (int i = 0; i < hitCount; i++)
         {
-            RaycastHit hit = hits[i];
+            RaycastHit hit = _wideHitBuffer[i];
             Collider c = hit.collider;
             if (c == null) continue;
             if (IsIgnoredCarryHitCollider(c)) continue;
-            validHits.Add(hit);
+
+            foundValidHit = true;
+            if (c.GetComponentInParent<WorldObject>() != null && hit.distance < closestWorldObjectDist)
+            {
+                closestWorldObjectDist = hit.distance;
+                closestWorldObjectHit = hit;
+                foundWorldObject = true;
+            }
         }
 
-        if (validHits.Count == 0)
+        if (foundWorldObject)
+        {
+            bestHit = closestWorldObjectHit;
+            return true;
+        }
+
+        if (!foundValidHit)
             return false;
 
-        // 2. Separate into qualifying hits that possess a WorldObject component (directly or in parents)
-        List<RaycastHit> qualifyingHits = new List<RaycastHit>();
-        for (int i = 0; i < validHits.Count; i++)
-        {
-            RaycastHit hit = validHits[i];
-            if (hit.collider.GetComponentInParent<WorldObject>() != null)
-            {
-                qualifyingHits.Add(hit);
-            }
-        }
-
-        // 3. If multiple qualifying targets are hit, prioritize the one the raycast touches first (minimum distance)!
-        if (qualifyingHits.Count >= 1)
-        {
-            float minDistance = float.MaxValue;
-            RaycastHit closestHit = default;
-            bool found = false;
-            for (int i = 0; i < qualifyingHits.Count; i++)
-            {
-                RaycastHit hit = qualifyingHits[i];
-                if (hit.distance < minDistance)
-                {
-                    minDistance = hit.distance;
-                    closestHit = hit;
-                    found = true;
-                }
-            }
-            if (found)
-            {
-                bestHit = closestHit;
-                return true;
-            }
-        }
-
-        // 4. Otherwise (no qualifying WorldObjects hit), fallback to original scoring based on screen alignment
+        // 2. Otherwise fallback to original scoring based on screen alignment.
         float bestScore = float.PositiveInfinity;
-        for (int i = 0; i < validHits.Count; i++)
+        for (int i = 0; i < hitCount; i++)
         {
-            RaycastHit hit = validHits[i];
+            RaycastHit hit = _wideHitBuffer[i];
             Collider c = hit.collider;
+            if (c == null) continue;
+            if (IsIgnoredCarryHitCollider(c)) continue;
 
             // Unity SphereCast returns (0,0,0) and distance 0 if the sphere overlaps the collider at the start.
             Vector3 pointToEvaluate = hit.point;

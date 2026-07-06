@@ -39,6 +39,9 @@ public class DayNightSkyboxController : MonoBehaviour
     [Header("Performance")]
     [Tooltip("Reduce runtime spikes by throttling expensive updates.")]
     public bool optimizeForStableFrameTime = true;
+    [Min(0.02f)]
+    [Tooltip("How often runtime lighting, fog, skybox, and shadow settings are refreshed while playing.")]
+    public float cycleApplyInterval = 0.1f;
 
     [Min(0.5f)] public float probeRendererCacheRefreshInterval = 10f;
     [Min(8)] public int probeSyncBatchSize = 128;
@@ -148,7 +151,10 @@ public class DayNightSkyboxController : MonoBehaviour
     private float _reflectionTimer;
     private float _probeSyncTimer;
     private float _probeCacheRefreshTimer;
+    private float _cycleApplyTimer;
+    private float _cycleAccumulatedDelta;
     private int _probeSyncCursor;
+    private bool _duplicateDirectionalLightsChecked;
     private readonly List<Renderer> _cachedDynamicRenderers = new List<Renderer>(256);
 
 
@@ -168,7 +174,6 @@ public class DayNightSkyboxController : MonoBehaviour
         EnsureSunLight();
         EnsureRuntimeSkybox();
 
-        enforceDynamicProbeSampling = true; // Enabled to run the fix pass
         if (enforceDynamicProbeSampling)
             RebuildDynamicRendererCache();
 
@@ -205,12 +210,28 @@ public class DayNightSkyboxController : MonoBehaviour
             }
         }
 
-        ApplyCycle(delta, false);
+        if (!Application.isPlaying || !optimizeForStableFrameTime)
+        {
+            ApplyCycle(delta, false);
+            return;
+        }
+
+        _cycleApplyTimer += delta;
+        _cycleAccumulatedDelta += delta;
+        float interval = Mathf.Max(0.02f, cycleApplyInterval);
+        if (_cycleApplyTimer >= interval)
+        {
+            float elapsed = _cycleAccumulatedDelta;
+            _cycleApplyTimer = 0f;
+            _cycleAccumulatedDelta = 0f;
+            ApplyCycle(elapsed, false);
+        }
     }
 
     private void OnValidate()
     {
         dayLengthSeconds = Mathf.Max(10f, dayLengthSeconds);
+        cycleApplyInterval = Mathf.Max(0.02f, cycleApplyInterval);
         reflectionUpdateInterval = Mathf.Max(0.1f, reflectionUpdateInterval);
         probeSyncInterval = Mathf.Max(0.1f, probeSyncInterval);
 
@@ -245,7 +266,6 @@ public class DayNightSkyboxController : MonoBehaviour
 
         if (Application.isPlaying)
         {
-            enforceDynamicProbeSampling = true;
             if (enforceDynamicProbeSampling)
                 RebuildDynamicRendererCache();
 
@@ -316,8 +336,9 @@ public class DayNightSkyboxController : MonoBehaviour
         }
 
         // 3. Auto-disable any other active directional lights at runtime to prevent double-sun conflicts
-        if (sunLight != null && Application.isPlaying)
+        if (sunLight != null && Application.isPlaying && !_duplicateDirectionalLightsChecked)
         {
+            _duplicateDirectionalLightsChecked = true;
             Light[] lights = FindObjectsByType<Light>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
             for (int i = 0; i < lights.Length; i++)
             {
