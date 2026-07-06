@@ -157,6 +157,7 @@ public class DayNightSkyboxController : MonoBehaviour
     private bool _duplicateDirectionalLightsChecked;
     private readonly List<Renderer> _cachedDynamicRenderers = new List<Renderer>(256);
     private readonly HashSet<Renderer> _dynamicRendererScratch = new HashSet<Renderer>();
+    private readonly List<Renderer> _rendererChildBuffer = new List<Renderer>(16);
 
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -770,9 +771,11 @@ public class DayNightSkyboxController : MonoBehaviour
         foreach (var rb in rbs)
         {
             if (rb == null) continue;
-            Renderer[] rbRenderers = rb.GetComponentsInChildren<Renderer>(includeInactive);
-            foreach (var r in rbRenderers)
+            _rendererChildBuffer.Clear();
+            rb.GetComponentsInChildren<Renderer>(includeInactive, _rendererChildBuffer);
+            for (int i = 0; i < _rendererChildBuffer.Count; i++)
             {
+                Renderer r = _rendererChildBuffer[i];
                 if (r != null && !r.gameObject.isStatic)
                     _dynamicRendererScratch.Add(r);
             }
@@ -785,9 +788,11 @@ public class DayNightSkyboxController : MonoBehaviour
         foreach (var anim in anims)
         {
             if (anim == null) continue;
-            Renderer[] animRenderers = anim.GetComponentsInChildren<Renderer>(includeInactive);
-            foreach (var r in animRenderers)
+            _rendererChildBuffer.Clear();
+            anim.GetComponentsInChildren<Renderer>(includeInactive, _rendererChildBuffer);
+            for (int i = 0; i < _rendererChildBuffer.Count; i++)
             {
+                Renderer r = _rendererChildBuffer[i];
                 if (r != null && !r.gameObject.isStatic)
                     _dynamicRendererScratch.Add(r);
             }
@@ -795,6 +800,7 @@ public class DayNightSkyboxController : MonoBehaviour
 
         _cachedDynamicRenderers.AddRange(_dynamicRendererScratch);
         _dynamicRendererScratch.Clear();
+        _rendererChildBuffer.Clear();
         _probeSyncCursor = 0;
     }
 
