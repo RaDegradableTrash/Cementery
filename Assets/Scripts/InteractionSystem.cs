@@ -157,6 +157,11 @@ public class InteractionSystem : MonoBehaviour
     private bool _placementGhostActive;
     private bool _hasPlacementMaterialState;
     private bool _lastPlacementMaterialValid;
+    private Collider _lastScanCollider;
+    private WorldObject _cachedScanWorldObject;
+    private PremodeledContainer _cachedScanContainer;
+    private FuelTank _cachedScanFuelTank;
+    private bool _cachedScanColliderIsFuelTankPart;
 
     public static InteractionSystem Instance { get; private set; }
 
@@ -982,59 +987,20 @@ public class InteractionSystem : MonoBehaviour
             return;
         }
 
-        _lookedAt = hit.collider.GetComponentInParent<WorldObject>();
-        
-        // 🌟 新增：扫描当前注视的物体（或其父级）上是否挂有收纳盒组件
-        if (_lookedAt != null)
-            _lookedAtContainer = _lookedAt.GetComponent<PremodeledContainer>() ?? _lookedAt.GetComponentInParent<PremodeledContainer>();
-        else
-            _lookedAtContainer = null;
+        ResolveScanTargets(hit.collider);
 
-        // Scan for FuelTank component
-        if (hit.collider != null)
+        _lookedAt = _cachedScanWorldObject;
+        _lookedAtContainer = _cachedScanContainer;
+        _lookedAtFuelTank = _cachedScanColliderIsFuelTankPart ? _cachedScanFuelTank : null;
+
+        if (_lookedAtFuelTank != null)
         {
-            // First check if the hit collider or its parent/children has a FuelTank component
-            _lookedAtFuelTank = hit.collider.GetComponent<FuelTank>() ?? hit.collider.GetComponentInParent<FuelTank>() ?? hit.collider.transform.GetComponentInParent<FuelTank>();
-
-            if (_lookedAtFuelTank != null)
+            if (_lastLookedAtFuelTank != null && _lastLookedAtFuelTank != _lookedAtFuelTank)
             {
-                // Double check: ensure the collider is actually the fuel tank itself or a direct child of its hierarchy
-                // This prevents raycasts hitting the giant truck frame/mudguards (if they are separate objects) from accidentally showing the UI.
-                Transform t = hit.collider.transform;
-                bool isPartOfTank = (t == _lookedAtFuelTank.transform);
-                if (!isPartOfTank)
-                {
-                    // Check if it is a child of the FuelTank
-                    Transform parent = t.parent;
-                    while (parent != null)
-                    {
-                        if (parent == _lookedAtFuelTank.transform)
-                        {
-                            isPartOfTank = true;
-                            break;
-                        }
-                        parent = parent.parent;
-                    }
-                }
-
-                if (isPartOfTank)
-                {
-                    if (_lastLookedAtFuelTank != null && _lastLookedAtFuelTank != _lookedAtFuelTank)
-                    {
-                        _lastLookedAtFuelTank.ShowUI(false);
-                    }
-                    _lookedAtFuelTank.ShowUI(true);
-                    _lastLookedAtFuelTank = _lookedAtFuelTank;
-                }
-                else
-                {
-                    ClearLastFuelTankFocus();
-                }
+                _lastLookedAtFuelTank.ShowUI(false);
             }
-            else
-            {
-                ClearLastFuelTankFocus();
-            }
+            _lookedAtFuelTank.ShowUI(true);
+            _lastLookedAtFuelTank = _lookedAtFuelTank;
         }
         else
         {
@@ -1047,6 +1013,41 @@ public class InteractionSystem : MonoBehaviour
         {
             _carryCandidateRb = null;
             _carryCandidateWo = null;
+        }
+    }
+
+    private void ResolveScanTargets(Collider hitCollider)
+    {
+        if (hitCollider == _lastScanCollider)
+            return;
+
+        _lastScanCollider = hitCollider;
+        _cachedScanWorldObject = null;
+        _cachedScanContainer = null;
+        _cachedScanFuelTank = null;
+        _cachedScanColliderIsFuelTankPart = false;
+
+        if (hitCollider == null)
+            return;
+
+        _cachedScanWorldObject = hitCollider.GetComponentInParent<WorldObject>();
+        if (_cachedScanWorldObject != null)
+            _cachedScanContainer = _cachedScanWorldObject.GetComponent<PremodeledContainer>() ?? _cachedScanWorldObject.GetComponentInParent<PremodeledContainer>();
+
+        _cachedScanFuelTank = hitCollider.GetComponent<FuelTank>() ?? hitCollider.GetComponentInParent<FuelTank>();
+        if (_cachedScanFuelTank == null)
+            return;
+
+        Transform tankTransform = _cachedScanFuelTank.transform;
+        Transform current = hitCollider.transform;
+        while (current != null)
+        {
+            if (current == tankTransform)
+            {
+                _cachedScanColliderIsFuelTankPart = true;
+                return;
+            }
+            current = current.parent;
         }
     }
 
