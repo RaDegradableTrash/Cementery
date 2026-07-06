@@ -17,22 +17,37 @@ namespace HP
         public float waveSpeed = 1f;      // 液体波动速度
         public float waveHeight = 0.1f;    // 液体波动高度
         public float waveTime = 0f;       // 波浪的时间种子
+        [Min(0.02f)]
+        public float meshRefreshInterval = 0.033f;
 
         [Header("曲面细分")]
         public Vector2Int SubdivisionSurface = new Vector2Int(1, 1);
 
         public float waveOffset = 0f;    // 液体波动偏移量
         public Color color2;             // 中间/顶层液体颜色
+        private float _meshRefreshTimer;
 
         protected override void OnEnable()
         {
             base.OnEnable();
+            _meshRefreshTimer = 0f;
+            SetVerticesDirty();
         }
 
         private void Update()
         {
-            waveTime += Time.deltaTime * waveSpeed;
-            SetVerticesDirty(); // 每帧标记网格失效，触发重绘
+            if (canvasRenderer == null || canvasRenderer.GetAlpha() <= 0.001f)
+                return;
+
+            _meshRefreshTimer += Time.deltaTime;
+            float interval = Mathf.Max(0.02f, meshRefreshInterval);
+            if (_meshRefreshTimer < interval)
+                return;
+
+            float elapsed = _meshRefreshTimer;
+            _meshRefreshTimer = 0f;
+            waveTime += elapsed * waveSpeed;
+            SetVerticesDirty();
         }
 
         // 核心：动态网格重建

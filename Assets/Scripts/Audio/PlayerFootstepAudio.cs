@@ -24,6 +24,7 @@ public class PlayerFootstepAudio : MonoBehaviour
 
     private AudioSource _audioSource;
     private Rigidbody _playerRb;
+    private InventoryCameraController _inventoryCameraController;
     private float _actualEndTime;
 
     void Awake()
@@ -36,6 +37,7 @@ public class PlayerFootstepAudio : MonoBehaviour
         {
             _playerRb = playerController.GetComponent<Rigidbody>();
         }
+        _inventoryCameraController = InventoryCameraController.GetPrimaryController();
     }
 
     void Start()
@@ -73,7 +75,8 @@ public class PlayerFootstepAudio : MonoBehaviour
         if (playerController == null || _playerRb == null || walkSound == null) return;
 
         // 1. 从 PlayerController 的核心状态中判断玩家目前是否能走、想走
-        bool isMoving = _playerRb.velocity.magnitude > speedThreshold;
+        float thresholdSqr = speedThreshold * speedThreshold;
+        bool isMoving = _playerRb.velocity.sqrMagnitude > thresholdSqr;
         
         // 联动 PlayerController 里的各种状态拦截
         bool canPlayFootstep = isMoving 
@@ -116,7 +119,9 @@ public class PlayerFootstepAudio : MonoBehaviour
     private bool IsInventoryModeActive()
     {
         // 这里的逻辑直接参考了你 PlayerController 内部的判定
-        var invCam = InventoryCameraController.GetPrimaryController();
-        return invCam != null && invCam.IsInventoryActive;
+        if (_inventoryCameraController == null)
+            _inventoryCameraController = InventoryCameraController.GetPrimaryController();
+
+        return _inventoryCameraController != null && _inventoryCameraController.IsInventoryActive;
     }
 }

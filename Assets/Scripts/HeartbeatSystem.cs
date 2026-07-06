@@ -52,6 +52,7 @@ public class HeartbeatSystem : MonoBehaviour
     private bool phaseInitialized;
     private bool playedLub;
     private bool playedDub;
+    private bool animatorConfigured;
 
     private void Awake()
     {
@@ -161,6 +162,12 @@ public class HeartbeatSystem : MonoBehaviour
 
     private void ResolveAnimator()
     {
+        if (animator != null && animatorConfigured)
+        {
+            animatorLinked = true;
+            return;
+        }
+
         if (animator == null)
         {
             animator = GetComponent<Animator>();
@@ -201,6 +208,7 @@ public class HeartbeatSystem : MonoBehaviour
         if (animator != null)
         {
             animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+            animatorConfigured = true;
         }
 
         animatorLinked = animator != null;

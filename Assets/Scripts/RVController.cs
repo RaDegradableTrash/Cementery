@@ -28,6 +28,8 @@ namespace RVSystem
         private Rigidbody _rb;
         private bool _hasSetupKinematic = false;
         private float _startupTime;
+        private Vector3 _configuredCenterOfMass;
+        private bool _centerOfMassConfigured;
 
         void Awake()
         {
@@ -42,6 +44,7 @@ namespace RVSystem
         {
             _startupTime = Time.time;
             if (_rb == null) _rb = GetComponent<Rigidbody>();
+            ConfigureCenterOfMass(true);
             AutoBindWheels();
 
             // FIX: Force all renderers on the RV to properly receive Ambient Light in URP
@@ -178,20 +181,32 @@ namespace RVSystem
 
         void FixedUpdate()
         {
-            ConfigureCenterOfMass();
+            ConfigureCenterOfMass(false);
         }
 
-        private void ConfigureCenterOfMass()
+        private void ConfigureCenterOfMass(bool force)
         {
-            if (centerOfMass != null)
+            if (_rb == null) return;
+
+            Vector3 targetCenterOfMass = centerOfMass != null
+                ? centerOfMass.localPosition
+                : new Vector3(0, -0.5f, 0);
+
+            if (!force &&
+                _centerOfMassConfigured &&
+                (_configuredCenterOfMass - targetCenterOfMass).sqrMagnitude < 0.000001f)
             {
-                _rb.centerOfMass = centerOfMass.localPosition;
+                return;
             }
-            else
-            {
-                // Fallback: set CoM lower if not assigned
-                _rb.centerOfMass = new Vector3(0, -0.5f, 0);
-            }
+
+            _rb.centerOfMass = targetCenterOfMass;
+            _configuredCenterOfMass = targetCenterOfMass;
+            _centerOfMassConfigured = true;
+        }
+
+        private void OnValidate()
+        {
+            _centerOfMassConfigured = false;
         }
 
         public void ApplyInputs(float throttle, float steer, bool braking)

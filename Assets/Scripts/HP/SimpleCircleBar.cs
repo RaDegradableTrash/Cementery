@@ -22,6 +22,7 @@ public class SimpleCircleBar : MonoBehaviour
     void Update()
     {
         if (hpFillImage == null) return;
+        if (Mathf.Abs(hpFillImage.fillAmount - targetFillAmount) < 0.001f) return;
 
         // 让血条圆环平滑地转动到目标血量
         hpFillImage.fillAmount = Mathf.Lerp(hpFillImage.fillAmount, targetFillAmount, Time.deltaTime * smoothSpeed);
