@@ -55,6 +55,10 @@ namespace EnvironmentSystem
         private Coroutine _drainLoadQueueRoutine;
         private float _nextLoadStartTime;
         private float _nextLoadActivationTime;
+        private float _cachedLoadStartWaitInterval = -1f;
+        private WaitForSeconds _cachedLoadStartWait;
+        private float _cachedUnloadWaitDelay = -1f;
+        private WaitForSeconds _cachedUnloadWait;
 
         // Cache DesertTerrainChunk size so it is not recalculated every streaming check.
         private float _chunkSizeCacheTime = -99f;
@@ -379,7 +383,7 @@ namespace EnvironmentSystem
                 StartCoroutine(LoadSceneAsync(next));
 
                 if (loadStartInterval > 0f)
-                    yield return new WaitForSeconds(loadStartInterval);
+                    yield return GetLoadStartWait();
                 else
                     yield return null;
             }
@@ -450,7 +454,7 @@ namespace EnvironmentSystem
         private IEnumerator UnloadSceneAsync(string sceneName)
         {
             // Wait a few seconds before actual unload to avoid thrashing
-            yield return new WaitForSeconds(unloadDelay);
+            yield return GetUnloadWait();
 
             // Double check if it got re-requested during the delay
             if (_requestedChunks.Contains(sceneName))
@@ -479,6 +483,30 @@ namespace EnvironmentSystem
             {
                 Debug.Log($"[WorldStreamer] Unloaded chunk: {sceneName}");
             }
+        }
+
+        private WaitForSeconds GetLoadStartWait()
+        {
+            float interval = Mathf.Max(0f, loadStartInterval);
+            if (_cachedLoadStartWait == null || !Mathf.Approximately(_cachedLoadStartWaitInterval, interval))
+            {
+                _cachedLoadStartWaitInterval = interval;
+                _cachedLoadStartWait = new WaitForSeconds(interval);
+            }
+
+            return _cachedLoadStartWait;
+        }
+
+        private WaitForSeconds GetUnloadWait()
+        {
+            float delay = Mathf.Max(0f, unloadDelay);
+            if (_cachedUnloadWait == null || !Mathf.Approximately(_cachedUnloadWaitDelay, delay))
+            {
+                _cachedUnloadWaitDelay = delay;
+                _cachedUnloadWait = new WaitForSeconds(delay);
+            }
+
+            return _cachedUnloadWait;
         }
     }
 }
