@@ -65,6 +65,7 @@ namespace EnvironmentSystem
         private readonly List<OptimizableObject> _managedObjects   = new List<OptimizableObject>(512);
         // Separate bucket of objects that are currently hidden but within load range — checked first.
         private readonly List<OptimizableObject> _hiddenNearby     = new List<OptimizableObject>(128);
+        private readonly HashSet<OptimizableObject> _hiddenNearbySet = new HashSet<OptimizableObject>();
         private int _currentIndex = 0;
 
         private Camera    _mainCamera;
@@ -216,6 +217,7 @@ namespace EnvironmentSystem
         private IEnumerator BudgetedFullVisibilitySweep()
         {
             _hiddenNearby.Clear();
+            _hiddenNearbySet.Clear();
 
             int budget = Mathf.Max(64, fullSweepObjectsPerFrame);
             int index = 0;
@@ -270,7 +272,7 @@ namespace EnvironmentSystem
                 OptimizableObject obj = _hiddenNearby[i];
                 if (obj == null || obj.isDestroyed || !obj.isHiddenByManager)
                 {
-                    _hiddenNearby.RemoveAt(i);
+                    RemoveHiddenNearbyAt(i);
                     continue;
                 }
 
@@ -278,7 +280,7 @@ namespace EnvironmentSystem
                 if (sqrDist > hideDistSq)
                 {
                     // Moved out of range — remove from bucket.
-                    _hiddenNearby.RemoveAt(i);
+                    RemoveHiddenNearbyAt(i);
                     continue;
                 }
 
@@ -287,7 +289,7 @@ namespace EnvironmentSystem
 
                 // If ProcessObject made it visible, remove from bucket.
                 if (!obj.isHiddenByManager)
-                    _hiddenNearby.RemoveAt(i);
+                    RemoveHiddenNearbyAt(i);
             }
         }
 
@@ -321,8 +323,8 @@ namespace EnvironmentSystem
                 if (!wasHidden && obj.isHiddenByManager)
                 {
                     float sqrDist = (obj.CachedPosition - playerPos).sqrMagnitude;
-                    if (sqrDist <= hideDistSq && !_hiddenNearby.Contains(obj))
-                        _hiddenNearby.Add(obj);
+                    if (sqrDist <= hideDistSq)
+                        AddHiddenNearby(obj);
                 }
 
                 _currentIndex++;
@@ -401,14 +403,30 @@ namespace EnvironmentSystem
         private void RebuildHiddenNearbyBucket(Vector3 playerPos, float showDistSq)
         {
             _hiddenNearby.Clear();
+            _hiddenNearbySet.Clear();
             float hideDistSq = (defaultVisibilityRadius + hysteresis) * (defaultVisibilityRadius + hysteresis);
             foreach (var obj in _managedObjects)
             {
                 if (obj == null || !obj.isHiddenByManager) continue;
                 float sqrDist = (obj.CachedPosition - playerPos).sqrMagnitude;
                 if (sqrDist <= hideDistSq)
-                    _hiddenNearby.Add(obj);
+                    AddHiddenNearby(obj);
             }
+        }
+
+        private void AddHiddenNearby(OptimizableObject obj)
+        {
+            if (obj != null && _hiddenNearbySet.Add(obj))
+                _hiddenNearby.Add(obj);
+        }
+
+        private void RemoveHiddenNearbyAt(int index)
+        {
+            OptimizableObject obj = _hiddenNearby[index];
+            if (obj != null)
+                _hiddenNearbySet.Remove(obj);
+
+            _hiddenNearby.RemoveAt(index);
         }
 
         // ── Scene event handlers ───────────────────────────────────────────────
@@ -429,6 +447,7 @@ namespace EnvironmentSystem
         {
             _managedObjects.RemoveAll(o => o == null || o.isDestroyed);
             _hiddenNearby.RemoveAll(o => o == null || o.isDestroyed);
+            RebuildHiddenNearbySet();
             if (_currentIndex >= _managedObjects.Count) _currentIndex = 0;
         }
 
@@ -442,7 +461,8 @@ namespace EnvironmentSystem
 
         public void Unregister(OptimizableObject obj)
         {
-            _hiddenNearby.Remove(obj);
+            if (_hiddenNearbySet.Remove(obj))
+                _hiddenNearby.Remove(obj);
 
             int index = _managedObjects.IndexOf(obj);
             if (index == -1) return;
@@ -451,6 +471,22 @@ namespace EnvironmentSystem
 
             if (index < _currentIndex) _currentIndex--;
             if (_currentIndex >= _managedObjects.Count) _currentIndex = 0;
+        }
+
+        private void RebuildHiddenNearbySet()
+        {
+            _hiddenNearbySet.Clear();
+            for (int i = _hiddenNearby.Count - 1; i >= 0; i--)
+            {
+                OptimizableObject obj = _hiddenNearby[i];
+                if (obj == null || obj.isDestroyed)
+                {
+                    _hiddenNearby.RemoveAt(i);
+                    continue;
+                }
+
+                _hiddenNearbySet.Add(obj);
+            }
         }
 
         // ── Auto-scanning ──────────────────────────────────────────────────────
