@@ -266,6 +266,8 @@ public class SnowParticleSystem : MonoBehaviour
         int targetCacheKey = other.GetInstanceID();
         CollisionTargetInfo targetInfo = GetCollisionTargetInfo(other, targetCacheKey);
         bool isTerrain = targetInfo.isTerrain;
+        int visibilityStride = Mathf.Max(1, skyVisibilityCheckStride);
+        SnowAccumulationManager snowManager = SnowAccumulationManager.Instance;
 
         for (int i = 0; i < numCollisionEvents; i++)
         {
@@ -287,7 +289,6 @@ public class SnowParticleSystem : MonoBehaviour
             // 因此，如果是地形，我们将起点抬高至上方 0.5 米发射射线，过滤自遮挡干扰！
             float raycastOffset = isTerrain ? 0.5f : 0.02f;
             RaycastHit hit;
-            int visibilityStride = Mathf.Max(1, skyVisibilityCheckStride);
             bool runSkyVisibilityCheck = visibilityStride <= 1 || (_skyCheckCounter++ % visibilityStride) == 0;
             if (runSkyVisibilityCheck &&
                 Physics.Raycast(pos + Vector3.up * raycastOffset, Vector3.up, out hit, 30f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
@@ -326,18 +327,18 @@ public class SnowParticleSystem : MonoBehaviour
             }
 
             // 2D Base Layer Support (对于地形)
-            if (SnowAccumulationManager.Instance == null)
+            if (snowManager == null)
             {
                 GameObject managerGO = new GameObject("[SYSTEM] SnowAccumulationManager");
-                var manager = managerGO.AddComponent<SnowAccumulationManager>();
-                manager.mapCenter = pos;
+                snowManager = managerGO.AddComponent<SnowAccumulationManager>();
+                snowManager.mapCenter = pos;
             }
             
-            if (SnowAccumulationManager.Instance != null)
+            if (snowManager != null)
             {
                 // 【核心修复】：为地形使用超大的柔和笔刷半径（3.5米）！
                 // 这能保证落下的雪花能迅速且均匀地在地面晕染开来并连成一大片，彻底消灭“一块一块的斑秃”感！
-                SnowAccumulationManager.Instance.AddSnowAtPoint(pos, 3.5f, particleSnowAmount * 0.6f);
+                snowManager.AddSnowAtPoint(pos, 3.5f, particleSnowAmount * 0.6f);
             }
         }
     }
