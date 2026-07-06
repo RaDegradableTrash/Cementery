@@ -8,6 +8,8 @@ public class WiperButtonIndicator : MonoBehaviour
 
     private Color inactiveEmissionColor = Color.black;
     private bool hasEmission;
+    private bool lastIsActive;
+    private bool hasAppliedVisual;
     private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
 
     private void Awake()
@@ -63,6 +65,15 @@ public class WiperButtonIndicator : MonoBehaviour
                 break;
             }
         }
+
+        if (hasAppliedVisual && isActive == lastIsActive)
+        {
+            return;
+        }
+
+        hasAppliedVisual = true;
+        lastIsActive = isActive;
+
         Material mat = targetRenderer.material;
         if (isActive)
         {
