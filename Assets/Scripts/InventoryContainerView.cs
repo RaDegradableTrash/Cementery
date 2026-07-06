@@ -40,6 +40,10 @@ public class InventoryContainerView : MonoBehaviour
 
     private Transform _placedItemsRoot;
     private Dictionary<ItemInstance, GameObject> _placedVisuals = new Dictionary<ItemInstance, GameObject>();
+    private readonly Dictionary<ItemInstance, Renderer[]> _placedVisualRenderers = new Dictionary<ItemInstance, Renderer[]>();
+    private Transform _cubeSpaceTransform;
+    private Renderer _cubeSpaceRenderer;
+    private Material _cubeSpaceMaterial;
 
     void Start()
     {
@@ -113,6 +117,7 @@ public class InventoryContainerView : MonoBehaviour
         if (planeMaterialOverride != null && _gridRenderer != null)
             _gridRenderer.sharedMaterial = planeMaterialOverride;
 
+        CacheCubeSpace();
         EnsureGridLineRoot();
     }
 
@@ -147,38 +152,47 @@ public class InventoryContainerView : MonoBehaviour
         gridPlane.localScale = scale;
 
         // 让外围长方体 CubeSpace_PackStorage 始终包裹并对齐该网格空间
-        Transform cubeSpace = transform.Find("CubeSpace_PackStorage");
-        if (cubeSpace == null)
+        CacheCubeSpace();
+        if (_cubeSpaceTransform != null)
         {
-            GameObject obj = GameObject.Find("CubeSpace_PackStorage");
-            if (obj != null)
-                cubeSpace = obj.transform;
-        }
-
-        if (cubeSpace != null)
-        {
-            cubeSpace.localPosition = new Vector3(
+            _cubeSpaceTransform.localPosition = new Vector3(
                 (inventorySystem.gridWidth - 1f) * 0.5f,
                 (inventorySystem.gridHeight - 1f) * 0.5f,
                 (inventorySystem.gridDepth - 1f) * 0.5f
             );
-            cubeSpace.localScale = new Vector3(
+            _cubeSpaceTransform.localScale = new Vector3(
                 inventorySystem.gridWidth,
                 inventorySystem.gridHeight,
                 inventorySystem.gridDepth
             );
-            MakeCubeSpaceTransparent(cubeSpace);
+            MakeCubeSpaceTransparent();
         }
     }
 
-    private void MakeCubeSpaceTransparent(Transform cubeSpace)
+    private void CacheCubeSpace()
     {
-        if (cubeSpace == null) return;
-        Renderer r = cubeSpace.GetComponent<Renderer>();
-        if (r == null) return;
+        if (_cubeSpaceTransform != null)
+            return;
 
-        Material mat = r.material;
+        _cubeSpaceTransform = transform.Find("CubeSpace_PackStorage");
+        if (_cubeSpaceTransform == null)
+        {
+            GameObject obj = GameObject.Find("CubeSpace_PackStorage");
+            if (obj != null)
+                _cubeSpaceTransform = obj.transform;
+        }
+
+        if (_cubeSpaceTransform != null)
+            _cubeSpaceRenderer = _cubeSpaceTransform.GetComponent<Renderer>();
+    }
+
+    private void MakeCubeSpaceTransparent()
+    {
+        if (_cubeSpaceRenderer == null) return;
+
+        Material mat = _cubeSpaceMaterial != null ? _cubeSpaceMaterial : _cubeSpaceRenderer.material;
         if (mat == null) return;
+        _cubeSpaceMaterial = mat;
 
         if (mat.HasProperty("_Surface")) mat.SetFloat("_Surface", 1f);
         if (mat.HasProperty("_Blend")) mat.SetFloat("_Blend", 0f);
@@ -501,6 +515,7 @@ public class InventoryContainerView : MonoBehaviour
         
         SetLayerRecursively(visual, gameObject.layer);
         _placedVisuals[instance] = visual;
+        _placedVisualRenderers[instance] = renderers;
     }
 
     void HandleItemRemoved(ItemInstance instance)
@@ -514,6 +529,7 @@ public class InventoryContainerView : MonoBehaviour
             }
             _placedVisuals.Remove(instance);
         }
+        _placedVisualRenderers.Remove(instance);
     }
 
     void RefreshAllPlacedItems()
@@ -527,6 +543,7 @@ public class InventoryContainerView : MonoBehaviour
             }
         }
         _placedVisuals.Clear();
+        _placedVisualRenderers.Clear();
         
         if (inventorySystem == null) return;
         
@@ -560,10 +577,15 @@ public class InventoryContainerView : MonoBehaviour
             GameObject visual = kvp.Value;
             if (visual == null) continue;
 
-            Renderer[] renderers = visual.GetComponentsInChildren<Renderer>(true);
+            if (!_placedVisualRenderers.TryGetValue(kvp.Key, out Renderer[] renderers) || renderers == null)
+            {
+                renderers = visual.GetComponentsInChildren<Renderer>(true);
+                _placedVisualRenderers[kvp.Key] = renderers;
+            }
+
             foreach (var r in renderers)
             {
-                if (!r.enabled) continue;
+                if (r == null || !r.enabled) continue;
                 if (r.bounds.IntersectRay(ray, out float dist))
                 {
                     if (dist < nearestDist)
