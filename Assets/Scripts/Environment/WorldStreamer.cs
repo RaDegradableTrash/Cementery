@@ -36,6 +36,8 @@ namespace EnvironmentSystem
         [Min(1)] public int maxConcurrentLoads = 1;
         [Tooltip("Minimum time between starting additive chunk scene loads. Small spacing smooths activation spikes while moving fast.")]
         [Min(0f)] public float loadStartInterval = 0.1f;
+        [Tooltip("Minimum time between allowing loaded chunk scenes to activate. This smooths the heavier activation frame.")]
+        [Min(0f)] public float loadActivationInterval = 0.12f;
 
         private HashSet<string> _requestedChunks = new HashSet<string>();
         private HashSet<string> _loadedChunks = new HashSet<string>();
@@ -50,6 +52,7 @@ namespace EnvironmentSystem
         private int _cachedOffsetRange = int.MinValue;
         private Coroutine _drainLoadQueueRoutine;
         private float _nextLoadStartTime;
+        private float _nextLoadActivationTime;
 
         // Cache DesertTerrainChunk size so it is not recalculated every streaming check.
         private float _chunkSizeCacheTime = -99f;
@@ -359,15 +362,34 @@ namespace EnvironmentSystem
                 yield break;
             }
 
+            asyncLoad.allowSceneActivation = false;
+            while (asyncLoad.progress < 0.9f)
+            {
+                yield return null;
+            }
+
+            if (loadActivationInterval > 0f && Time.time < _nextLoadActivationTime)
+            {
+                yield return new WaitForSeconds(_nextLoadActivationTime - Time.time);
+            }
+
+            _nextLoadActivationTime = Time.time + loadActivationInterval;
             asyncLoad.allowSceneActivation = true;
             while (!asyncLoad.isDone)
             {
                 yield return null;
             }
+
             if (verboseLogging)
             {
                 Debug.Log($"[WorldStreamer] Loaded chunk: {sceneName}");
             }
+
+            if (!_requestedChunks.Contains(sceneName))
+            {
+                UnloadChunk(sceneName);
+            }
+
             _activeLoads = Mathf.Max(0, _activeLoads - 1);
             DrainLoadQueue();
         }
