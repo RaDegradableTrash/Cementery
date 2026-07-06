@@ -13,8 +13,14 @@ namespace EnvironmentSystem
         [Tooltip("The margin distance inside the collider bounds where the fog fades to full strength.")]
         public float fadeMargin = 5f;
 
+        [Header("Performance")]
+        [SerializeField, Min(0.02f)] private float localFogRefreshInterval = 0.05f;
+
         private BoxCollider _boxCollider;
         private Camera _mainCamera;
+        private AuraFogSystemManager _fogManager;
+        private float _nextFogManagerLookupTime;
+        private float _nextLocalFogApplyTime;
 
 #if AURA_2_PRESENT
         private Aura2API.AuraVolume _auraVolume;
@@ -25,6 +31,7 @@ namespace EnvironmentSystem
             _boxCollider = GetComponent<BoxCollider>();
             _boxCollider.isTrigger = true;
             _mainCamera = Camera.main;
+            _fogManager = FindFirstObjectByType<AuraFogSystemManager>();
 
 #if AURA_2_PRESENT
             if (!TryGetComponent(out _auraVolume))
@@ -50,6 +57,12 @@ namespace EnvironmentSystem
 
             if (isInside)
             {
+                float now = Time.unscaledTime;
+                if (now < _nextLocalFogApplyTime)
+                    return;
+
+                _nextLocalFogApplyTime = now + Mathf.Max(0.02f, localFogRefreshInterval);
+
                 // Calculate fade coefficient based on distance to the closest boundary of the box
                 float fadeFactor = CalculateFadeFactor(camPos);
                 ApplyLocalFogDensity(fadeFactor);
@@ -94,7 +107,7 @@ namespace EnvironmentSystem
             }
 #else
             // Fallback: Boost native fog density dynamically when player walks into low-lying dense fog areas
-            AuraFogSystemManager manager = FindFirstObjectByType<AuraFogSystemManager>();
+            AuraFogSystemManager manager = ResolveFogManager();
             if (manager != null && manager.activePreset != null)
             {
                 float baseDensity = manager.activePreset.nativeFogDensity;
@@ -103,6 +116,20 @@ namespace EnvironmentSystem
                 RenderSettings.fogColor = Color.Lerp(RenderSettings.fogColor, volumeColor, factor);
             }
 #endif
+        }
+
+        private AuraFogSystemManager ResolveFogManager()
+        {
+            if (_fogManager != null)
+                return _fogManager;
+
+            float now = Time.unscaledTime;
+            if (now < _nextFogManagerLookupTime)
+                return null;
+
+            _nextFogManagerLookupTime = now + 1f;
+            _fogManager = FindFirstObjectByType<AuraFogSystemManager>();
+            return _fogManager;
         }
 
         private void OnDrawGizmos()
