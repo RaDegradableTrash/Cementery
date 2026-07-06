@@ -28,9 +28,50 @@ public class WiperButtonIndicator : MonoBehaviour
         UpdateVisual();
     }
 
-    private void Update()
+    private void OnEnable()
     {
+        SubscribeToWipers();
         UpdateVisual();
+    }
+
+    private void OnDisable()
+    {
+        UnsubscribeFromWipers();
+    }
+
+    private void SubscribeToWipers()
+    {
+        if (wiperControls == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < wiperControls.Length; i++)
+        {
+            WiperControl control = wiperControls[i];
+            if (control != null)
+            {
+                control.OnModeChanged -= UpdateVisual;
+                control.OnModeChanged += UpdateVisual;
+            }
+        }
+    }
+
+    private void UnsubscribeFromWipers()
+    {
+        if (wiperControls == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < wiperControls.Length; i++)
+        {
+            WiperControl control = wiperControls[i];
+            if (control != null)
+            {
+                control.OnModeChanged -= UpdateVisual;
+            }
+        }
     }
 
     private void CacheEmissionColor()

@@ -23,6 +23,7 @@ public class WiperControl : MonoBehaviour
     private bool pendingOff;
 
     public WiperMode CurrentMode => currentMode;
+    public event System.Action OnModeChanged;
 
     private void Awake()
     {
@@ -69,6 +70,7 @@ public class WiperControl : MonoBehaviour
                 currentMode = WiperMode.Off;
                 pauseTimer = 0f;
                 ApplyAngle(0f);
+                OnModeChanged?.Invoke();
                 return;
             }
 
@@ -111,6 +113,7 @@ public class WiperControl : MonoBehaviour
         currentMode = mode;
         pendingOff = false;
         pauseTimer = 0f;
+        OnModeChanged?.Invoke();
     }
 
     public void CycleMode()
