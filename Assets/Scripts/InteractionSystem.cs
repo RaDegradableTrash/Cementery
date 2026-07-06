@@ -82,6 +82,10 @@ public class InteractionSystem : MonoBehaviour
     private Transform _carriedTransform;
     private WorldObject _carriedWo;
     private Rigidbody _carriedRb;
+    private Kelp _carriedKelp;
+    private KelpLeaf _carriedKelpLeaf;
+    private Fuel _carriedFuel;
+    private PlantPot _carriedPlantPot;
 
     private Collider[] _carriedCols;
     private Collider[] _playerCols;
@@ -1232,7 +1236,7 @@ public class InteractionSystem : MonoBehaviour
         // 4. 左键松开执行放下或 Tab 放置
         if (Input.GetMouseButtonUp(0) && _carriedRb != null)
         {
-            if (_carriedWo != null && _carriedWo.GetComponent<Kelp>() != null)
+            if (_carriedKelp != null)
             {
                 PlantPot pot = GetLookedAtPot();
                 if (pot != null && pot.CanPlant())
@@ -1275,8 +1279,7 @@ public class InteractionSystem : MonoBehaviour
                 if (_carriedWo != null)
                 {
                     // ── 叶片燃料：通过组件类型精准识别 KelpLeaf，不依赖物体名称 ──────────
-                    KelpLeaf kelpLeaf = _carriedWo.GetComponent<KelpLeaf>();
-                    if (kelpLeaf != null)
+                    if (_carriedKelpLeaf != null)
                     {
                         // 每片叶片固定加注 5 单位燃料（5% of maxCapacity=100）
                         const float leafFuelValue = 5f;
@@ -1301,8 +1304,7 @@ public class InteractionSystem : MonoBehaviour
                     // ─────────────────────────────────────────────────────────────────────
 
                     // ── 燃料罐/瓶：通过组件类型精准识别 Fuel ─────────────────────────────────
-                    Fuel fuelItem = _carriedWo.GetComponent<Fuel>();
-                    if (fuelItem != null)
+                    if (_carriedFuel != null)
                     {
                         // 燃料罐固定加注 80 单位燃料（80% of maxCapacity=100）
                         const float fuelValue = 80f;
@@ -1526,6 +1528,22 @@ public class InteractionSystem : MonoBehaviour
 
     public WorldObject CarriedWorldObject => _carriedWo;
 
+    private void CacheCarriedComponents()
+    {
+        _carriedKelp = _carriedWo != null ? _carriedWo.GetComponent<Kelp>() : null;
+        _carriedKelpLeaf = _carriedWo != null ? _carriedWo.GetComponent<KelpLeaf>() : null;
+        _carriedFuel = _carriedWo != null ? _carriedWo.GetComponent<Fuel>() : null;
+        _carriedPlantPot = _carriedWo != null ? _carriedWo.GetComponent<PlantPot>() : null;
+    }
+
+    private void ClearCarriedComponentCache()
+    {
+        _carriedKelp = null;
+        _carriedKelpLeaf = null;
+        _carriedFuel = null;
+        _carriedPlantPot = null;
+    }
+
     public void ConsumeCarriedObjectSilently()
     {
         if (_carriedRb == null) return;
@@ -1538,6 +1556,7 @@ public class InteractionSystem : MonoBehaviour
         _carriedTransform = null;
         _carriedWo = null;
         _carriedRb = null;
+        ClearCarriedComponentCache();
         _carriedCols = null;
         _playerCols = null;
         _carriedOriginalMaterials = null;
@@ -1602,6 +1621,7 @@ public class InteractionSystem : MonoBehaviour
         _carriedRb = rb;
         _carriedTransform = rb.transform;
         _carriedWo = wo;
+        CacheCarriedComponents();
 
         bool wasKinematic = _carriedRb.isKinematic;
         if (_carriedWo != null && _carriedWo.isPlacedAndAttached)
@@ -1774,6 +1794,7 @@ public class InteractionSystem : MonoBehaviour
         _carriedTransform = null;
         _carriedWo = null;
         _carriedRb = null;
+        ClearCarriedComponentCache();
         _carriedCols = null;
         _playerCols = null;
         _carriedOriginalMaterials = null;
@@ -1795,7 +1816,7 @@ public class InteractionSystem : MonoBehaviour
                 if (enabled)
                 {
                     Kelp k = _carriedCols[i].GetComponentInParent<Kelp>();
-                    if (k != null && _carriedWo != null && _carriedWo.GetComponent<PlantPot>() != null)
+                    if (k != null && _carriedPlantPot != null)
                     {
                         continue;
                     }
