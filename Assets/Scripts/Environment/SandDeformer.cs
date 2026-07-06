@@ -32,6 +32,11 @@ namespace EnvironmentSystem
         private Vector3 _lastGroundPoint;
         private Vector3 _lastGroundCheckPosition;
         private bool _hasGroundCheckPosition;
+        private float _cachedGroundCheckInterval;
+        private float _cachedMovementThresholdSq;
+        private float _cachedStampSpacingSq;
+        private float _lastCachedGroundCheckInterval = float.NaN;
+        private float _lastCachedStampSpacing = float.NaN;
 
         private void Start()
         {
@@ -45,6 +50,8 @@ namespace EnvironmentSystem
             {
                 groundLayer = LayerMask.GetMask("Default", "Terrain");
             }
+
+            RefreshDerivedSettings();
         }
 
         private void Update()
@@ -66,13 +73,13 @@ namespace EnvironmentSystem
 
             if (Time.time >= _nextGroundCheckTime)
             {
-                _nextGroundCheckTime = Time.time + Mathf.Max(0.02f, groundCheckInterval);
+                RefreshDerivedSettings();
+                _nextGroundCheckTime = Time.time + _cachedGroundCheckInterval;
                 bool shouldRunGroundCheck = true;
 
                 if (_wheelCollider == null && !_isFirstFrame && _hasGroundCheckPosition)
                 {
-                    float movementThreshold = Mathf.Max(0.02f, Mathf.Min(stampSpacing * 0.25f, 0.1f));
-                    shouldRunGroundCheck = (currentPos - _lastGroundCheckPosition).sqrMagnitude >= movementThreshold * movementThreshold;
+                    shouldRunGroundCheck = (currentPos - _lastGroundCheckPosition).sqrMagnitude >= _cachedMovementThresholdSq;
                 }
 
                 if (shouldRunGroundCheck)
@@ -124,8 +131,7 @@ namespace EnvironmentSystem
                 }
                 else
                 {
-                    float minDistance = Mathf.Max(0.01f, stampSpacing);
-                    if ((groundPoint - _lastStampPosition).sqrMagnitude >= minDistance * minDistance)
+                    if ((groundPoint - _lastStampPosition).sqrMagnitude >= _cachedStampSpacingSq)
                     {
                         _lastStampPosition = groundPoint;
                         _manager.RegisterDeformation(groundPoint, radius, depth, rimWidth, rimHeight, lifetime);
@@ -137,6 +143,25 @@ namespace EnvironmentSystem
                 // Reset frame tracking if air-borne (e.g. jumping or vehicle flying)
                 _isFirstFrame = true;
             }
+        }
+
+        private void RefreshDerivedSettings()
+        {
+            if (Mathf.Approximately(_lastCachedGroundCheckInterval, groundCheckInterval) &&
+                Mathf.Approximately(_lastCachedStampSpacing, stampSpacing))
+            {
+                return;
+            }
+
+            _lastCachedGroundCheckInterval = groundCheckInterval;
+            _lastCachedStampSpacing = stampSpacing;
+            _cachedGroundCheckInterval = Mathf.Max(0.02f, groundCheckInterval);
+
+            float movementThreshold = Mathf.Max(0.02f, Mathf.Min(stampSpacing * 0.25f, 0.1f));
+            _cachedMovementThresholdSq = movementThreshold * movementThreshold;
+
+            float minDistance = Mathf.Max(0.01f, stampSpacing);
+            _cachedStampSpacingSq = minDistance * minDistance;
         }
     }
 }
