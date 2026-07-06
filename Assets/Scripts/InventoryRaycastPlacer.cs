@@ -76,7 +76,7 @@ public class InventoryRaycastPlacer : MonoBehaviour
     private readonly List<Renderer> _previewCellTiles = new List<Renderer>();
     private readonly HashSet<Vector2Int> _previewFootprintCells = new HashSet<Vector2Int>();
     private readonly Dictionary<Vector2Int, bool> _previewFootprintBlocked = new Dictionary<Vector2Int, bool>();
-    private readonly HashSet<Vector2Int> _occupiedFailFlashCells = new HashSet<Vector2Int>();
+    private readonly HashSet<int> _occupiedFailFlashCells = new HashSet<int>();
     private Transform _cellRoot;
     private Material _runtimeCellMaterial;
     private int _cachedCellWidth = -1;
@@ -456,7 +456,7 @@ public class InventoryRaycastPlacer : MonoBehaviour
             if (!inventorySystem.IsOccupied(pos))
                 continue;
 
-            _occupiedFailFlashCells.Add(new Vector2Int(pos.x, pos.z));
+            _occupiedFailFlashCells.Add(PackCellKey(pos.x, pos.z));
         }
 
         if (_occupiedFailFlashCells.Count <= 0)
@@ -1014,8 +1014,7 @@ public class InventoryRaycastPlacer : MonoBehaviour
         if (!IsOccupiedFailFlashActive())
             return false;
 
-        Vector2Int key = new Vector2Int(x, z);
-        if (!_occupiedFailFlashCells.Contains(key))
+        if (!_occupiedFailFlashCells.Contains(PackCellKey(x, z)))
             return false;
 
         float elapsed = Time.unscaledTime - _occupiedFailFlashStartTime;
@@ -1041,6 +1040,14 @@ public class InventoryRaycastPlacer : MonoBehaviour
     {
         _occupiedFailFlashStartTime = -1f;
         _occupiedFailFlashCells.Clear();
+    }
+
+    static int PackCellKey(int x, int z)
+    {
+        unchecked
+        {
+            return (x * 397) ^ z;
+        }
     }
 
     void SetCellOverlayVisible(bool visible)
