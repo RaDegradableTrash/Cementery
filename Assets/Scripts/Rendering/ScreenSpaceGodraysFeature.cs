@@ -86,10 +86,17 @@ public class ScreenSpaceGodraysPass : ScriptableRenderPass
     private static readonly int SunScreenPosId = Shader.PropertyToID("_SunScreenPos");
     private static readonly int SamplesId = Shader.PropertyToID("_Samples");
 
-    // Cached directional light – looked up once per second to avoid FindObjectsOfType every frame.
+    // Cached directional light; only search the scene again after the cache is invalid.
     private Light _cachedSunLight;
-    private float _lightCacheTime = -10f;
-    private const float LightCacheInterval = 2f;
+    private float _nextLightSearchTime;
+    private const float LightSearchInterval = 8f;
+
+    private bool _hasCachedMaterialSettings;
+    private float _lastThreshold;
+    private float _lastBlurWidth;
+    private float _lastIntensity;
+    private Color _lastRayColor;
+    private int _lastSamples;
 
 
     public ScreenSpaceGodraysPass(ScreenSpaceGodraysFeature.GodraySettings settings)
@@ -112,9 +119,10 @@ public class ScreenSpaceGodraysPass : ScriptableRenderPass
             {
                 _material = CoreUtils.CreateEngineMaterial(_settings.godraysShader);
             }
+
+            _hasCachedMaterialSettings = false;
         }
     }
-
     public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
     {
         ConfigureTarget(renderingData.cameraData.renderer.cameraColorTargetHandle);
@@ -139,34 +147,10 @@ public class ScreenSpaceGodraysPass : ScriptableRenderPass
 
         Camera camera = renderingData.cameraData.camera;
 
-        // Resolve sun direction – prefer RenderSettings.sun, then cached light.
-        Vector3 lightDir = Vector3.up;
-
-        if (RenderSettings.sun != null)
+        if (!TryResolveLightDirection(out Vector3 lightDir))
         {
-            lightDir = -RenderSettings.sun.transform.forward;
+            return;
         }
-        else
-        {
-            // Refresh cached light every LightCacheInterval seconds (NOT every frame)
-            if (Time.time - _lightCacheTime > LightCacheInterval || _cachedSunLight == null)
-            {
-                _lightCacheTime = Time.time;
-                _cachedSunLight = null;
-                Light[] lights = GameObject.FindObjectsOfType<Light>();
-                foreach (var l in lights)
-                {
-                    if (l.type == LightType.Directional && l.enabled)
-                    {
-                        _cachedSunLight = l;
-                        break;
-                    }
-                }
-            }
-            if (_cachedSunLight != null)
-                lightDir = -_cachedSunLight.transform.forward;
-        }
-
 
         // Project the virtual sun position 1000m away onto the viewport
         Vector3 sunWorldPos = camera.transform.position + lightDir * 1000.0f;
@@ -181,13 +165,8 @@ public class ScreenSpaceGodraysPass : ScriptableRenderPass
 
         CommandBuffer cmd = CommandBufferPool.Get("Screen Space Godrays");
 
-        // Pass settings to material
-        _material.SetFloat(ThresholdId, _settings.threshold);
-        _material.SetFloat(BlurWidthId, _settings.blurWidth);
-        _material.SetFloat(IntensityId, _settings.intensity);
-        _material.SetColor(RayColorId, _settings.rayColor);
+        ApplyMaterialSettings();
         _material.SetVector(SunScreenPosId, new Vector4(sunViewportPos.x, sunViewportPos.y, 0, 0));
-        _material.SetInt(SamplesId, _settings.samples);
 
         RTHandle cameraColorTarget = renderingData.cameraData.renderer.cameraColorTargetHandle;
 
@@ -202,6 +181,71 @@ public class ScreenSpaceGodraysPass : ScriptableRenderPass
 
         context.ExecuteCommandBuffer(cmd);
         CommandBufferPool.Release(cmd);
+    }
+
+    private bool TryResolveLightDirection(out Vector3 lightDir)
+    {
+        lightDir = Vector3.up;
+
+        Light renderSun = RenderSettings.sun;
+        if (renderSun != null && renderSun.enabled)
+        {
+            lightDir = -renderSun.transform.forward;
+            _cachedSunLight = renderSun;
+            return true;
+        }
+
+        if (_cachedSunLight != null && _cachedSunLight.enabled && _cachedSunLight.type == LightType.Directional)
+        {
+            lightDir = -_cachedSunLight.transform.forward;
+            return true;
+        }
+
+        if (Time.time < _nextLightSearchTime)
+        {
+            return false;
+        }
+
+        _nextLightSearchTime = Time.time + LightSearchInterval;
+        _cachedSunLight = null;
+        Light[] lights = GameObject.FindObjectsOfType<Light>();
+        foreach (Light light in lights)
+        {
+            if (light.type == LightType.Directional && light.enabled)
+            {
+                _cachedSunLight = light;
+                lightDir = -light.transform.forward;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void ApplyMaterialSettings()
+    {
+        if (_hasCachedMaterialSettings
+            && Mathf.Approximately(_lastThreshold, _settings.threshold)
+            && Mathf.Approximately(_lastBlurWidth, _settings.blurWidth)
+            && Mathf.Approximately(_lastIntensity, _settings.intensity)
+            && _lastRayColor == _settings.rayColor
+            && _lastSamples == _settings.samples)
+        {
+            return;
+        }
+
+        _material.SetFloat(ThresholdId, _settings.threshold);
+        _material.SetFloat(BlurWidthId, _settings.blurWidth);
+        _material.SetFloat(IntensityId, _settings.intensity);
+        _material.SetColor(RayColorId, _settings.rayColor);
+        _material.SetInt(SamplesId, _settings.samples);
+
+        _lastThreshold = _settings.threshold;
+        _lastBlurWidth = _settings.blurWidth;
+        _lastIntensity = _settings.intensity;
+        _lastRayColor = _settings.rayColor;
+        _lastSamples = _settings.samples;
+        _hasCachedMaterialSettings = true;
     }
 
     public override void OnCameraCleanup(CommandBuffer cmd)
