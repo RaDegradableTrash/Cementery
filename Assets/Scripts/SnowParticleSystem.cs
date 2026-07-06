@@ -18,6 +18,9 @@ public class SnowParticleSystem : MonoBehaviour
     private int _collisionFrame = -1;
     private int _processedCollisionEventsThisFrame;
     private int _skyCheckCounter;
+    private float _nextTargetSearchTime;
+    private RVSystem.RVController _cachedRv;
+    private Camera _cachedCamera;
 
     private void Awake()
     {
@@ -61,15 +64,25 @@ public class SnowParticleSystem : MonoBehaviour
 
     private Transform FindPlayer()
     {
+        if (Time.time < _nextTargetSearchTime)
+            return null;
+
+        _nextTargetSearchTime = Time.time + 0.75f;
+
         GameObject player = GameObject.FindGameObjectWithTag("Player");
         if (player != null && player.activeInHierarchy)
             return player.transform;
 
-        var rv = FindObjectOfType<RVSystem.RVController>();
-        if (rv != null && rv.gameObject.activeInHierarchy)
-            return rv.transform;
+        if (_cachedRv == null || !_cachedRv.gameObject.activeInHierarchy)
+            _cachedRv = FindObjectOfType<RVSystem.RVController>();
 
-        return Camera.main != null ? Camera.main.transform : null;
+        if (_cachedRv != null && _cachedRv.gameObject.activeInHierarchy)
+            return _cachedRv.transform;
+
+        if (_cachedCamera == null || !_cachedCamera.gameObject.activeInHierarchy)
+            _cachedCamera = Camera.main;
+
+        return _cachedCamera != null ? _cachedCamera.transform : null;
     }
 
     private void ConfigureParticleSystemProgrammatically()

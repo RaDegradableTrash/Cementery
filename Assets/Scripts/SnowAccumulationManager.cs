@@ -32,6 +32,8 @@ public class SnowAccumulationManager : MonoBehaviour
     private float _occlusionTimer;
     private float _globalSnowTimer;
     private float _shaderParamTimer;
+    private float _nextTrackingTargetSearchTime;
+    private bool _snowDebugGreenEnabled;
 
     private void Awake()
     {
@@ -255,14 +257,11 @@ public class SnowAccumulationManager : MonoBehaviour
             DebugSnowHeight();
         }
 
-        // 调试按键：按住 ] 键将雪变为绿色
-        if (Input.GetKey(KeyCode.RightBracket))
+        bool debugGreen = Input.GetKey(KeyCode.RightBracket);
+        if (debugGreen != _snowDebugGreenEnabled)
         {
-            Shader.SetGlobalFloat("_SnowDebugGreen", 1f);
-        }
-        else
-        {
-            Shader.SetGlobalFloat("_SnowDebugGreen", 0f);
+            _snowDebugGreenEnabled = debugGreen;
+            Shader.SetGlobalFloat("_SnowDebugGreen", debugGreen ? 1f : 0f);
         }
     }
 
@@ -271,6 +270,11 @@ public class SnowAccumulationManager : MonoBehaviour
         // Re-use the already-assigned playerCar reference if it is still valid
         if (playerCar != null && playerCar.gameObject.activeInHierarchy)
             return playerCar;
+
+        if (Time.time < _nextTrackingTargetSearchTime)
+            return null;
+
+        _nextTrackingTargetSearchTime = Time.time + 0.75f;
 
         // Otherwise search in the same priority order as WorldStreamer
         GameObject player = GameObject.FindGameObjectWithTag("Player");
