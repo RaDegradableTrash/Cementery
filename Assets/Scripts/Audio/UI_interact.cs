@@ -27,14 +27,13 @@ public class CategorizedAudioController : MonoBehaviour
     void Start()
     {
         if (audioSource == null) audioSource = GetComponent<AudioSource>();
+        if (audioSource == null || soundEffect == null)
+            enabled = false;
     }
 
     void Update()
     {
-        // 核心逻辑：先通过我们自定义的逻辑过滤出最终要监听的 KeyCode
-        KeyCode actualKey = GetActualKeyCode();
-
-        if (Input.GetKeyDown(actualKey))
+        if (Input.GetKeyDown(selectedKey))
         {
             PlaySound();
         }
@@ -53,9 +52,6 @@ public class CategorizedAudioController : MonoBehaviour
 
     private void PlaySound()
     {
-        if (audioSource != null && soundEffect != null)
-        {
-            audioSource.PlayOneShot(soundEffect);
-        }
+        audioSource.PlayOneShot(soundEffect);
     }
 }
