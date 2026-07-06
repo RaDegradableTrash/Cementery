@@ -19,7 +19,12 @@ public class FuelCan : MonoBehaviour
     private WorldObject worldObject;
     private CarControl targetCar; // 缓存目标车辆
     private Camera cachedMainCamera;
+    private Transform cachedMainCameraTransform;
+    private Transform fuelDisplayTransform;
     private float nextCameraLookupTime;
+    private float nextDisplayFacingUpdateTime;
+    private int lastDisplayedFuelPercent = int.MinValue;
+    private Color lastDisplayColor;
     
     public float FuelAmount => fuelAmount;
     public bool IsEmpty => fuelAmount <= 0f;
@@ -50,6 +55,8 @@ public class FuelCan : MonoBehaviour
         }
 
         // 更新显示
+        if (fuelDisplay != null)
+            fuelDisplayTransform = fuelDisplay.transform;
         UpdateFuelDisplay();
     }
     
@@ -62,14 +69,18 @@ public class FuelCan : MonoBehaviour
         }
         
         // 当油桶被拿起时，更新显示面向玩家（可选）
-        if (worldObject.IsCarried && fuelDisplay != null)
+        if (worldObject.IsCarried && fuelDisplayTransform != null && Time.time >= nextDisplayFacingUpdateTime)
         {
+            nextDisplayFacingUpdateTime = Time.time + 0.05f;
+
             // 让文字面向主相机
             Camera mainCamera = GetCachedMainCamera();
             if (mainCamera != null)
             {
-                fuelDisplay.transform.LookAt(mainCamera.transform);
-                fuelDisplay.transform.Rotate(0, 180, 0);
+                Transform cameraTransform = cachedMainCameraTransform != null ? cachedMainCameraTransform : mainCamera.transform;
+                Vector3 direction = fuelDisplayTransform.position - cameraTransform.position;
+                if (direction.sqrMagnitude > 0.0001f)
+                    fuelDisplayTransform.rotation = Quaternion.LookRotation(direction, Vector3.up);
             }
         }
     }
@@ -88,6 +99,7 @@ public class FuelCan : MonoBehaviour
 
         nextCameraLookupTime = Time.time + 0.5f;
         cachedMainCamera = Camera.main;
+        cachedMainCameraTransform = cachedMainCamera != null ? cachedMainCamera.transform : null;
         return cachedMainCamera;
     }
     
@@ -187,20 +199,35 @@ public class FuelCan : MonoBehaviour
     {
         if (fuelDisplay != null)
         {
-            fuelDisplay.text = $"{fuelAmount:F0}%";
+            if (fuelDisplayTransform == null)
+                fuelDisplayTransform = fuelDisplay.transform;
+
+            int fuelPercent = Mathf.RoundToInt(fuelAmount);
+            if (lastDisplayedFuelPercent != fuelPercent)
+            {
+                fuelDisplay.text = $"{fuelPercent}%";
+                lastDisplayedFuelPercent = fuelPercent;
+            }
             
             // 根据剩余油量改变颜色
+            Color targetColor;
             if (fuelAmount <= 0)
             {
-                fuelDisplay.color = Color.red;
+                targetColor = Color.red;
             }
             else if (fuelAmount < 30)
             {
-                fuelDisplay.color = Color.yellow;
+                targetColor = Color.yellow;
             }
             else
             {
-                fuelDisplay.color = Color.green;
+                targetColor = Color.green;
+            }
+
+            if (lastDisplayColor != targetColor || fuelDisplay.color != targetColor)
+            {
+                fuelDisplay.color = targetColor;
+                lastDisplayColor = targetColor;
             }
         }
     }
