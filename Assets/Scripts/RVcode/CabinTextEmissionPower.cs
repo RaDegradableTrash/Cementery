@@ -16,6 +16,8 @@ public class CabinTextEmissionPower : MonoBehaviour
     private float currentHdr;
     private bool hasEmission;
     private bool hasOriginalEmission;
+    private bool hasAppliedEmission;
+    private float lastAppliedHdr = float.NaN;
     private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
 
     private void Awake()
@@ -32,12 +34,17 @@ public class CabinTextEmissionPower : MonoBehaviour
 
         CacheBaseEmission();
         currentHdr = offEmissionHdr;
-        ApplyEmission(currentHdr);
+        ApplyEmission(currentHdr, true);
     }
 
     private void OnDisable()
     {
         RestoreOriginalEmission();
+    }
+
+    private void OnEnable()
+    {
+        hasAppliedEmission = false;
     }
 
     private void OnDestroy()
@@ -98,12 +105,20 @@ public class CabinTextEmissionPower : MonoBehaviour
         targetMaterial.SetColor(EmissionColorId, originalEmissionColor);
     }
 
-    private void ApplyEmission(float hdr)
+    private void ApplyEmission(float hdr, bool force = false)
     {
         if (!hasEmission)
         {
             return;
         }
+
+        if (!force && hasAppliedEmission && Mathf.Abs(lastAppliedHdr - hdr) < 0.001f)
+        {
+            return;
+        }
+
+        hasAppliedEmission = true;
+        lastAppliedHdr = hdr;
 
         float intensity = Mathf.Pow(2f, hdr);
         targetMaterial.EnableKeyword("_EMISSION");

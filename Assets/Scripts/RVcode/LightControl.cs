@@ -42,6 +42,8 @@ public class LightControl : MonoBehaviour
     private Renderer[] headRenderers;
     private Light[] headLights;
     private Color[] baseHeadEmissionColors;
+    private bool lastPowerState;
+    private bool lastBrakeState;
 
     private void Awake()
     {
@@ -71,8 +73,10 @@ public class LightControl : MonoBehaviour
             if (light != null) light.shadows = LightShadows.None;
         }
 
-        ApplyPowerState(false);
-        ApplyBrakeState(false, false);
+        lastPowerState = startProcedure == null || startProcedure.HasAnyBatteryOn();
+        lastBrakeState = false;
+        ApplyPowerState(lastPowerState);
+        ApplyBrakeState(lastBrakeState, lastPowerState);
     }
 
     public bool ControlsLight(Light light)
@@ -109,9 +113,19 @@ public class LightControl : MonoBehaviour
     {
         bool hasPower = startProcedure == null || startProcedure.HasAnyBatteryOn();
         bool braking = hasPower && Input.GetKey(KeyCode.S);
+        bool powerChanged = hasPower != lastPowerState;
 
-        ApplyPowerState(hasPower);
-        ApplyBrakeState(braking, hasPower);
+        if (powerChanged)
+        {
+            lastPowerState = hasPower;
+            ApplyPowerState(hasPower);
+        }
+
+        if (braking != lastBrakeState || powerChanged)
+        {
+            lastBrakeState = braking;
+            ApplyBrakeState(braking, hasPower);
+        }
     }
 
     private void CacheBaseEmissionColors(Renderer[] renderers, Color[] cache)

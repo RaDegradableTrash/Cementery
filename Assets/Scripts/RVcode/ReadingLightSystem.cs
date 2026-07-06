@@ -18,6 +18,27 @@ public class ReadingLightSystem : MonoBehaviour
         }
     }
 
+    private void OnEnable()
+    {
+        if (startProcedure != null)
+        {
+            startProcedure.OnStateChanged += HandleStartProcedureChanged;
+        }
+    }
+
+    private void OnDisable()
+    {
+        if (startProcedure != null)
+        {
+            startProcedure.OnStateChanged -= HandleStartProcedureChanged;
+        }
+    }
+
+    private void HandleStartProcedureChanged()
+    {
+        OnStateChanged?.Invoke();
+    }
+
     public bool IsLightOn(int index)
     {
         if (index < 0 || index >= states.Length)
