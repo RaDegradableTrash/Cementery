@@ -130,7 +130,7 @@ public class InventoryCameraController : MonoBehaviour
             return;
 
         SetInventoryActive(false);
-        if (aggressivelyCullOutOfViewRenderers)
+        if (aggressivelyCullOutOfViewRenderers && !cullOnlyWhenInventoryOpen)
             RebuildRendererCache();
     }
 
