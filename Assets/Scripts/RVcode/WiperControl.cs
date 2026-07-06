@@ -37,12 +37,14 @@ public class WiperControl : MonoBehaviour
         }
 
         ApplyAngle(0f);
+        enabled = false;
     }
 
     private void Update()
     {
         if (currentMode == WiperMode.Off && !pendingOff)
         {
+            enabled = false;
             return;
         }
 
@@ -71,6 +73,7 @@ public class WiperControl : MonoBehaviour
                 pauseTimer = 0f;
                 ApplyAngle(0f);
                 OnModeChanged?.Invoke();
+                enabled = false;
                 return;
             }
 
@@ -107,12 +110,14 @@ public class WiperControl : MonoBehaviour
         {
             pendingOff = true;
             pauseTimer = 0f;
+            enabled = true;
             return;
         }
 
         currentMode = mode;
         pendingOff = false;
         pauseTimer = 0f;
+        enabled = true;
         OnModeChanged?.Invoke();
     }
 
