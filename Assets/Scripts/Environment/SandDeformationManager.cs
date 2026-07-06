@@ -164,7 +164,7 @@ namespace EnvironmentSystem
             bool sawPlayerOrWheel = false;
             bool addedDeformer = false;
 
-            var wheelColliders = Object.FindObjectsOfType<WheelCollider>(true);
+            var wheelColliders = Object.FindObjectsByType<WheelCollider>(FindObjectsInactive.Include, FindObjectsSortMode.None);
             foreach (var wc in wheelColliders)
             {
                 if (wc == null)
@@ -211,7 +211,7 @@ namespace EnvironmentSystem
             if (!autoBindLoosePropDeformers)
                 return sawPlayerOrWheel && !addedDeformer;
 
-            var allRigidbodies = Object.FindObjectsOfType<Rigidbody>(true);
+            var allRigidbodies = Object.FindObjectsByType<Rigidbody>(FindObjectsInactive.Include, FindObjectsSortMode.None);
             foreach (var rb in allRigidbodies)
             {
                 if (rb != null && 
