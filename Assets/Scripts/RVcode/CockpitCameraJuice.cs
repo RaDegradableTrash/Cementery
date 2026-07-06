@@ -18,11 +18,13 @@ public class CockpitCameraJuice : MonoBehaviour
     private Vector3 lastVelocity;
     private Vector3 localAcceleration;
     private Vector3 originalLocalPos;
+    private Transform _cachedTransform;
     private float vibrationTimer;
 
     void Start()
     {
-        originalLocalPos = transform.localPosition;
+        _cachedTransform = transform;
+        originalLocalPos = _cachedTransform.localPosition;
         if (carRigidbody == null) carRigidbody = GetComponentInParent<Rigidbody>();
     }
 
@@ -66,9 +68,14 @@ public class CockpitCameraJuice : MonoBehaviour
         float engineFactor = carControl != null ? (carControl.SmoothEngineRpm / 2500f) : 0.2f;
         
         float shakeY = Mathf.Sin(vibrationTimer) * (idleVibration * engineFactor);
-        // 路面颠簸：速度越快，上下无规则抖动越明显
-        shakeY += (Random.value - 0.5f) * (currentSpeed * speedBumpFactor * 0.01f); 
-        float shakeX = (Random.value - 0.5f) * (currentSpeed * speedBumpFactor * 0.005f);
+        float shakeX = 0f;
+        float roadShake = currentSpeed * speedBumpFactor;
+        if (roadShake > 0.001f)
+        {
+            // 路面颠簸：速度越快，上下无规则抖动越明显
+            shakeY += (Random.value - 0.5f) * (roadShake * 0.01f);
+            shakeX = (Random.value - 0.5f) * (roadShake * 0.005f);
+        }
 
         Vector3 targetVibrationPos = new Vector3(shakeX, shakeY, 0);
 
@@ -76,6 +83,11 @@ public class CockpitCameraJuice : MonoBehaviour
         Vector3 finalLocalPos = originalLocalPos + targetInertiaPos + targetVibrationPos;
         
         // 平滑插值，让相机有“肉身肌肉缓冲”的沉浸感
-        transform.localPosition = Vector3.Lerp(transform.localPosition, finalLocalPos, Time.deltaTime * smoothSpeed);
+        Vector3 currentLocalPos = _cachedTransform.localPosition;
+        Vector3 nextLocalPos = Vector3.Lerp(currentLocalPos, finalLocalPos, Time.deltaTime * smoothSpeed);
+        if ((nextLocalPos - currentLocalPos).sqrMagnitude > 0.0000001f)
+        {
+            _cachedTransform.localPosition = nextLocalPos;
+        }
     }
 }
