@@ -11,12 +11,15 @@ public class WiperButtonIndicator : MonoBehaviour
     private bool lastIsActive;
     private bool hasAppliedVisual;
     private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
+    private static WiperControl[] s_cachedWiperControls;
+    private static float s_nextWiperControlCacheRefreshTime;
+    private const float WiperControlCacheRefreshInterval = 1f;
 
     private void Awake()
     {
         if (wiperControls == null || wiperControls.Length == 0)
         {
-            wiperControls = FindObjectsOfType<WiperControl>();
+            wiperControls = GetCachedWiperControls();
         }
 
         if (targetRenderer == null)
@@ -26,6 +29,18 @@ public class WiperButtonIndicator : MonoBehaviour
 
         CacheEmissionColor();
         UpdateVisual();
+    }
+
+    private static WiperControl[] GetCachedWiperControls()
+    {
+        if (s_cachedWiperControls != null && Time.time < s_nextWiperControlCacheRefreshTime)
+        {
+            return s_cachedWiperControls;
+        }
+
+        s_nextWiperControlCacheRefreshTime = Time.time + WiperControlCacheRefreshInterval;
+        s_cachedWiperControls = FindObjectsOfType<WiperControl>();
+        return s_cachedWiperControls;
     }
 
     private void OnEnable()
