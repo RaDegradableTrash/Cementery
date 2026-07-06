@@ -34,6 +34,8 @@ public class SimpleLight : MonoBehaviour
     private static LightControl[] s_cachedLightControls;
     private static float s_nextLightControlCacheRefreshTime;
     private const float LightControlCacheRefreshInterval = 1f;
+    private static readonly Renderer[] EmptyRenderers = new Renderer[0];
+    private static readonly Light[] EmptyLights = new Light[0];
     public event System.Action OnStateChanged;
 
     private void Awake()
@@ -56,7 +58,7 @@ public class SimpleLight : MonoBehaviour
             }
             else
             {
-                targetRenderers = new Renderer[0];
+                targetRenderers = EmptyRenderers;
             }
         }
 
@@ -73,7 +75,7 @@ public class SimpleLight : MonoBehaviour
             }
             else
             {
-                targetLights = new Light[0];
+                targetLights = EmptyLights;
             }
         }
 
