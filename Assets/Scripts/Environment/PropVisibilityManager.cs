@@ -32,6 +32,10 @@ namespace EnvironmentSystem
         private float _cachedCheckInterval = -1f;
 
         private Transform _playerTransform;
+        private RVSystem.RVController _cachedRv;
+        private Camera _cachedCamera;
+        private float _nextTargetSearchTime;
+        private const float TargetSearchInterval = 0.75f;
 
         // ── Lifecycle ─────────────────────────────────────────────────────────
 
@@ -64,16 +68,26 @@ namespace EnvironmentSystem
 
         private Transform FindPlayer()
         {
+            if (Time.time < _nextTargetSearchTime)
+                return null;
+
+            _nextTargetSearchTime = Time.time + TargetSearchInterval;
+
             // Priority: tagged Player → RV → Main Camera
             GameObject player = GameObject.FindGameObjectWithTag("Player");
             if (player != null && player.activeInHierarchy)
                 return player.transform;
 
-            var rv = FindObjectOfType<RVSystem.RVController>();
-            if (rv != null && rv.gameObject.activeInHierarchy)
-                return rv.transform;
+            if (_cachedRv == null || !_cachedRv.gameObject.activeInHierarchy)
+                _cachedRv = FindObjectOfType<RVSystem.RVController>();
 
-            return Camera.main != null ? Camera.main.transform : null;
+            if (_cachedRv != null && _cachedRv.gameObject.activeInHierarchy)
+                return _cachedRv.transform;
+
+            if (_cachedCamera == null || !_cachedCamera.gameObject.activeInHierarchy)
+                _cachedCamera = Camera.main;
+
+            return _cachedCamera != null ? _cachedCamera.transform : null;
         }
 
         private IEnumerator VisibilityLoop()
