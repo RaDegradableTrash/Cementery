@@ -247,7 +247,8 @@ public class SnowParticleSystem : MonoBehaviour
 
         int numCollisionEvents = Mathf.Min(partSystem.GetCollisionEvents(other, collisionEvents), remainingBudget);
         _processedCollisionEventsThisFrame += numCollisionEvents;
-        CollisionTargetInfo targetInfo = GetCollisionTargetInfo(other);
+        int targetCacheKey = other.GetInstanceID();
+        CollisionTargetInfo targetInfo = GetCollisionTargetInfo(other, targetCacheKey);
         bool isTerrain = targetInfo.isTerrain;
 
         for (int i = 0; i < numCollisionEvents; i++)
@@ -297,7 +298,7 @@ public class SnowParticleSystem : MonoBehaviour
                 {
                     dynamicObj = other.transform.root.gameObject.AddComponent<DynamicSnowObject>();
                     targetInfo.dynamicSnowObject = dynamicObj;
-                    _collisionTargetCache[other.GetInstanceID()] = targetInfo;
+                    _collisionTargetCache[targetCacheKey] = targetInfo;
                 }
                 
                 if (dynamicObj != null)
@@ -325,9 +326,8 @@ public class SnowParticleSystem : MonoBehaviour
         }
     }
 
-    private CollisionTargetInfo GetCollisionTargetInfo(GameObject other)
+    private CollisionTargetInfo GetCollisionTargetInfo(GameObject other, int key)
     {
-        int key = other.GetInstanceID();
         if (_collisionTargetCache.TryGetValue(key, out CollisionTargetInfo info))
         {
             return info;
