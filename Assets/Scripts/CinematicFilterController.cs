@@ -14,6 +14,7 @@ public class CinematicFilterController : MonoBehaviour
 
     private Color _tealShadows;
     private Color _orangeMidtones;
+    private float _lastAppliedIntensity = -1f;
 
     void Start()
     {
@@ -32,11 +33,12 @@ public class CinematicFilterController : MonoBehaviour
         // Parse hex colors for Teal & Orange grading
         ColorUtility.TryParseHtmlString("#1be2adff", out _tealShadows);
         ColorUtility.TryParseHtmlString("#f78c29ff", out _orangeMidtones);
+        SetCinematicLook(true);
     }
 
     void Update()
     {
-        SetCinematicLook();
+        SetCinematicLook(false);
     }
 
     /// <summary>
@@ -45,18 +47,28 @@ public class CinematicFilterController : MonoBehaviour
     /// </summary>
     public void SetCinematicLook()
     {
+        SetCinematicLook(true);
+    }
+
+    private void SetCinematicLook(bool force)
+    {
         if (_profile == null) return;
+        float clampedIntensity = Mathf.Clamp01(filterIntensity);
+        if (!force && Mathf.Abs(clampedIntensity - _lastAppliedIntensity) < 0.001f)
+            return;
+
+        _lastAppliedIntensity = clampedIntensity;
 
         // 1. Film Grain
         if (_profile.TryGet(out FilmGrain grain))
         {
             grain.intensity.overrideState = true;
             // Medium intensity (0.3)
-            grain.intensity.value = Mathf.Lerp(0f, 0.3f, filterIntensity);
+            grain.intensity.value = Mathf.Lerp(0f, 0.3f, clampedIntensity);
             
             grain.response.overrideState = true;
             // Lower response means visible mostly in darker areas/midtones
-            grain.response.value = Mathf.Lerp(0.8f, 0.5f, filterIntensity); 
+            grain.response.value = Mathf.Lerp(0.8f, 0.5f, clampedIntensity);
         }
 
         // 2. Teal & Orange Grade
@@ -66,19 +78,19 @@ public class CinematicFilterController : MonoBehaviour
             // Shadows to Teal
             Vector4 baseShadows = new Vector4(1f, 1f, 1f, 0f);
             Vector4 targetShadows = new Vector4(_tealShadows.r, _tealShadows.g, _tealShadows.b, 0f);
-            smh.shadows.value = Vector4.Lerp(baseShadows, targetShadows, filterIntensity);
+            smh.shadows.value = Vector4.Lerp(baseShadows, targetShadows, clampedIntensity);
 
             smh.midtones.overrideState = true;
             // Midtones to Warm Orange
             Vector4 baseMidtones = new Vector4(1f, 1f, 1f, 0f);
             Vector4 targetMidtones = new Vector4(_orangeMidtones.r, _orangeMidtones.g, _orangeMidtones.b, 0f);
-            smh.midtones.value = Vector4.Lerp(baseMidtones, targetMidtones, filterIntensity);
+            smh.midtones.value = Vector4.Lerp(baseMidtones, targetMidtones, clampedIntensity);
 
             smh.highlights.overrideState = true;
             // Highlights to Warm Orange
             Vector4 baseHighlights = new Vector4(1f, 1f, 1f, 0f);
             Vector4 targetHighlights = new Vector4(_orangeMidtones.r, _orangeMidtones.g, _orangeMidtones.b, 0f);
-            smh.highlights.value = Vector4.Lerp(baseHighlights, targetHighlights, filterIntensity);
+            smh.highlights.value = Vector4.Lerp(baseHighlights, targetHighlights, clampedIntensity);
         }
 
         // 3 & 4. High-light Suppression and Low Contrast Shadows
@@ -89,14 +101,14 @@ public class CinematicFilterController : MonoBehaviour
             Vector4 baseLift = new Vector4(1f, 1f, 1f, 0f);
             // Positive w component lifts the shadows (greys out blacks)
             Vector4 targetLift = new Vector4(1f, 1f, 1f, 0.05f); 
-            lgg.lift.value = Vector4.Lerp(baseLift, targetLift, filterIntensity);
+            lgg.lift.value = Vector4.Lerp(baseLift, targetLift, clampedIntensity);
 
             // Highlight Suppression (Gain) -> Prevent highlights from over-exposing
             lgg.gain.overrideState = true;
             Vector4 baseGain = new Vector4(1f, 1f, 1f, 0f);
             // Negative w component reduces gain (suppresses highlights)
             Vector4 targetGain = new Vector4(1f, 1f, 1f, -0.08f); 
-            lgg.gain.value = Vector4.Lerp(baseGain, targetGain, filterIntensity);
+            lgg.gain.value = Vector4.Lerp(baseGain, targetGain, clampedIntensity);
         }
 
         // 5. Soft Lighting (Bloom)
@@ -104,11 +116,11 @@ public class CinematicFilterController : MonoBehaviour
         {
             bloom.intensity.overrideState = true;
             // Low intensity (0.4)
-            bloom.intensity.value = Mathf.Lerp(0f, 0.4f, filterIntensity);
+            bloom.intensity.value = Mathf.Lerp(0f, 0.4f, clampedIntensity);
 
             bloom.scatter.overrideState = true;
             // High scatter (0.7) for a hazy, soft look
-            bloom.scatter.value = Mathf.Lerp(0.5f, 0.7f, filterIntensity);
+            bloom.scatter.value = Mathf.Lerp(0.5f, 0.7f, clampedIntensity);
         }
     }
 }

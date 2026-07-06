@@ -13,6 +13,8 @@ namespace EnvironmentSystem
         public static SandDeformationManager Instance { get; private set; }
 
         private const int MaxDeformers = 128;
+        private const float DefaultSweepInterval = 8f;
+        private const float WebGlSweepInterval = 12f;
 
         // Circular buffer arrays passed to Shader
         private Vector4[] _deformerPositions = new Vector4[MaxDeformers];
@@ -21,6 +23,13 @@ namespace EnvironmentSystem
         private float[] _maxLifetimes = new float[MaxDeformers];
         
         private int _currentIndex = 0;
+        [Header("Runtime Binding")]
+        [Tooltip("Periodically attach deformers to player and vehicle wheels that appear after scene load.")]
+        public bool autoBindPlayerAndVehicleDeformers = true;
+        [Tooltip("Attach sand deformers to loose rigidbody props. Leave off for normal gameplay; it can add many raycasting components.")]
+        public bool autoBindLoosePropDeformers = false;
+        [Tooltip("Enable logs when runtime deformers are attached.")]
+        public bool verboseBindingLogs = false;
 
         // Shader Property IDs for lightning-fast GPU uploads
         private static readonly int DeformerPositionsId = Shader.PropertyToID("_DeformerPositions");
@@ -93,11 +102,9 @@ namespace EnvironmentSystem
 
         private void Update()
         {
-            // 🌟 Second Insurance: Periodically sweep the scene to auto-bind dynamically spawned, 
-            // enabled, or respawned players and vehicles at runtime (every 4 seconds on WebGL, 1.2 on PC)
-            if (Time.time >= _nextSweepTime)
+            if (autoBindPlayerAndVehicleDeformers && Time.time >= _nextSweepTime)
             {
-                float interval = Application.platform == RuntimePlatform.WebGLPlayer ? 4.0f : 1.2f;
+                float interval = Application.platform == RuntimePlatform.WebGLPlayer ? WebGlSweepInterval : DefaultSweepInterval;
                 _nextSweepTime = Time.time + interval;
                 AutoBindDynamicDeformers();
             }
@@ -134,43 +141,6 @@ namespace EnvironmentSystem
 
         private void AutoBindDynamicDeformers()
         {
-            // WebGL Performance Guard: Skip extremely heavy scene-wide FindObjectsOfType searches
-            if (Application.platform == RuntimePlatform.WebGLPlayer)
-            {
-                var webglWheelColliders = Object.FindObjectsOfType<WheelCollider>(true);
-                foreach (var wc in webglWheelColliders)
-                {
-                    if (wc != null && wc.GetComponent<SandDeformer>() == null)
-                    {
-                        var deformer = wc.gameObject.AddComponent<SandDeformer>();
-                        deformer.radius = 0.58f;
-                        deformer.depth = 0.22f;
-                        deformer.rimWidth = 0.22f;
-                        deformer.rimHeight = 0.065f;
-                        deformer.stampSpacing = 0.75f;
-                        deformer.lifetime = 32f;
-                    }
-                }
-
-                var webglPlayers = GameObject.FindGameObjectsWithTag("Player");
-                foreach (var player in webglPlayers)
-                {
-                    if (player != null && player.GetComponent<SandDeformer>() == null)
-                    {
-                        var deformer = player.AddComponent<SandDeformer>();
-                        deformer.radius = 0.35f;
-                        deformer.depth = 0.12f;
-                        deformer.rimWidth = 0.12f;
-                        deformer.rimHeight = 0.035f;
-                        deformer.stampSpacing = 0.6f;
-                        deformer.lifetime = 24f;
-                    }
-                }
-                return;
-            }
-
-            // 1. Detect and bind to ALL WheelColliders universally in the entire scene!
-            // Decouples the system from any specific class names (RVController, CarControl, etc.)
             var wheelColliders = Object.FindObjectsOfType<WheelCollider>(true);
             foreach (var wc in wheelColliders)
             {
@@ -183,12 +153,11 @@ namespace EnvironmentSystem
                     deformer.depth = 0.22f;
                     deformer.rimWidth = 0.22f;
                     deformer.rimHeight = 0.065f;
-                    deformer.stampSpacing = 0.75f; // Extremely optimized spacing for extended persistence!
+                    deformer.stampSpacing = 0.75f;
                     deformer.lifetime = 32f;
                 }
             }
 
-            // 2. Detect and bind to the Player character dynamically by Tag
             var players = GameObject.FindGameObjectsWithTag("Player");
             foreach (var player in players)
             {
@@ -201,29 +170,14 @@ namespace EnvironmentSystem
                     deformer.depth = 0.12f;
                     deformer.rimWidth = 0.12f;
                     deformer.rimHeight = 0.035f;
-                    deformer.stampSpacing = 0.6f; // Balanced spacing for character footprints
-                    deformer.lifetime = 24f;
-                }
-            }
-
-            // 3. Backup: Detect Player character dynamically by PlayerController script name
-            var allBehaviors = Object.FindObjectsOfType<MonoBehaviour>();
-            foreach (var mb in allBehaviors)
-            {
-                if (mb != null && mb.GetType().Name == "PlayerController" && mb.GetComponent<SandDeformer>() == null)
-                {
-                    var deformer = mb.gameObject.AddComponent<SandDeformer>();
-                    
-                    deformer.radius = 0.35f;
-                    deformer.depth = 0.12f;
-                    deformer.rimWidth = 0.12f;
-                    deformer.rimHeight = 0.035f;
                     deformer.stampSpacing = 0.6f;
                     deformer.lifetime = 24f;
                 }
             }
 
-            // 4. Detect and bind to generic heavy physical props (boxes, barrels, boulders, loose Rigidbodies)
+            if (!autoBindLoosePropDeformers)
+                return;
+
             var allRigidbodies = Object.FindObjectsOfType<Rigidbody>(true);
             foreach (var rb in allRigidbodies)
             {
@@ -247,7 +201,10 @@ namespace EnvironmentSystem
                         deformer.stampSpacing = deformer.radius * 0.5f;
                         deformer.lifetime = 20f;
 
-                        Debug.Log($"[SandDeformationManager] Dynamically registered interactive prop: '{rb.name}' with footprint radius {deformer.radius:F2}m (mass: {rb.mass}kg).");
+                        if (verboseBindingLogs)
+                        {
+                            Debug.Log($"[SandDeformationManager] Dynamically registered interactive prop: '{rb.name}' with footprint radius {deformer.radius:F2}m (mass: {rb.mass}kg).");
+                        }
                     }
                 }
             }

@@ -18,15 +18,25 @@ namespace EnvironmentSystem
         [Header("Grounded Triggers")]
         public float stampSpacing = 0.25f; // Draw new footprint every X meters moved
         public LayerMask groundLayer;      // Layer to cast raycast against
+        [Min(0.02f)]
+        [Tooltip("Minimum time between ground checks. Higher values reduce raycast cost on many deformers.")]
+        public float groundCheckInterval = 0.08f;
 
         private Vector3 _lastStampPosition;
         private bool _isFirstFrame = true;
         private WheelCollider _wheelCollider; // Optional: auto-detected if attached to a wheel
+        private Collider _cachedCollider;
+        private SandDeformationManager _manager;
+        private float _nextGroundCheckTime;
+        private bool _lastGrounded;
+        private Vector3 _lastGroundPoint;
 
         private void Start()
         {
             // Auto-detect WheelCollider to draw incredibly smooth tire tracks
             _wheelCollider = GetComponent<WheelCollider>();
+            _cachedCollider = GetComponent<Collider>();
+            _manager = SandDeformationManager.Instance;
             
             // Build ground layer default if not assigned
             if (groundLayer == 0)
@@ -38,45 +48,54 @@ namespace EnvironmentSystem
         private void Update()
         {
             // Defensive runtime check to ensure global manager is active
-            if (SandDeformationManager.Instance == null)
+            if (_manager == null)
             {
-                GameObject managerObj = new GameObject("[SandDeformationManager]");
-                managerObj.AddComponent<SandDeformationManager>();
+                _manager = SandDeformationManager.Instance;
+                if (_manager == null)
+                {
+                    GameObject managerObj = new GameObject("[SandDeformationManager]");
+                    _manager = managerObj.AddComponent<SandDeformationManager>();
+                }
             }
 
             Vector3 currentPos = transform.position;
-            bool isGrounded = false;
-            Vector3 groundPoint = currentPos;
+            bool isGrounded = _lastGrounded;
+            Vector3 groundPoint = _lastGroundPoint;
 
-            // 1. Wheel-specific Grounding check
-            if (_wheelCollider != null)
+            if (Time.time >= _nextGroundCheckTime)
             {
-                WheelHit hit;
-                isGrounded = _wheelCollider.GetGroundHit(out hit);
-                groundPoint = hit.point;
-            }
-            // 2. Raycast-specific Grounding check for Player feet or generic rigidbodies
-            else
-            {
-                RaycastHit hit;
-                float startHeight = 0.5f;
-                float rayDistance = 1.8f;
+                _nextGroundCheckTime = Time.time + Mathf.Max(0.02f, groundCheckInterval);
+                isGrounded = false;
+                groundPoint = currentPos;
 
-                // Adjust raycast starting height and distance dynamically based on physical bounds
-                var col = GetComponent<Collider>();
-                if (col != null)
+                if (_wheelCollider != null)
                 {
-                    float extentsY = col.bounds.extents.y;
-                    startHeight = extentsY + 0.2f;
-                    rayDistance = extentsY * 2.0f + 0.6f;
-                }
-
-                // Raycast from slightly above top of bounds downward to catch local sand surface
-                if (Physics.Raycast(currentPos + Vector3.up * startHeight, Vector3.down, out hit, rayDistance, groundLayer))
-                {
-                    isGrounded = true;
+                    WheelHit hit;
+                    isGrounded = _wheelCollider.GetGroundHit(out hit);
                     groundPoint = hit.point;
                 }
+                else
+                {
+                    RaycastHit hit;
+                    float startHeight = 0.5f;
+                    float rayDistance = 1.8f;
+
+                    if (_cachedCollider != null)
+                    {
+                        float extentsY = _cachedCollider.bounds.extents.y;
+                        startHeight = extentsY + 0.2f;
+                        rayDistance = extentsY * 2.0f + 0.6f;
+                    }
+
+                    if (Physics.Raycast(currentPos + Vector3.up * startHeight, Vector3.down, out hit, rayDistance, groundLayer))
+                    {
+                        isGrounded = true;
+                        groundPoint = hit.point;
+                    }
+                }
+
+                _lastGrounded = isGrounded;
+                _lastGroundPoint = groundPoint;
             }
 
             // 3. Register stamp on coordinate delta
@@ -86,15 +105,15 @@ namespace EnvironmentSystem
                 {
                     _lastStampPosition = groundPoint;
                     _isFirstFrame = false;
-                    SandDeformationManager.Instance.RegisterDeformation(groundPoint, radius, depth, rimWidth, rimHeight, lifetime);
+                    _manager.RegisterDeformation(groundPoint, radius, depth, rimWidth, rimHeight, lifetime);
                 }
                 else
                 {
-                    float distMoved = Vector3.Distance(groundPoint, _lastStampPosition);
-                    if (distMoved >= stampSpacing)
+                    float minDistance = Mathf.Max(0.01f, stampSpacing);
+                    if ((groundPoint - _lastStampPosition).sqrMagnitude >= minDistance * minDistance)
                     {
                         _lastStampPosition = groundPoint;
-                        SandDeformationManager.Instance.RegisterDeformation(groundPoint, radius, depth, rimWidth, rimHeight, lifetime);
+                        _manager.RegisterDeformation(groundPoint, radius, depth, rimWidth, rimHeight, lifetime);
                     }
                 }
             }

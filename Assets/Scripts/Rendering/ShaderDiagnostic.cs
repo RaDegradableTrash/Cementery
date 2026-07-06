@@ -3,7 +3,9 @@ using UnityEngine;
 public class ShaderDiagnostic : MonoBehaviour
 {
     private float _timer = 0f;
+    [SerializeField] private bool runInPlayerBuilds = false;
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void AutoInitialize()
     {
@@ -12,14 +14,24 @@ public class ShaderDiagnostic : MonoBehaviour
         DontDestroyOnLoad(go);
         Debug.LogWarning("[ShaderDiagnostic] Auto-Bootstrapper successfully initialized. Scanning will run shortly...");
     }
+#endif
 
     void Start()
     {
+        if (!ShouldRun())
+        {
+            enabled = false;
+            return;
+        }
+
         RunDiagnostic();
     }
 
     void Update()
     {
+        if (!ShouldRun())
+            return;
+
         // Poll every 3 seconds to print streamed-in chunk material details
         _timer += Time.deltaTime;
         if (_timer >= 3.0f)
@@ -31,6 +43,9 @@ public class ShaderDiagnostic : MonoBehaviour
 
     public void RunDiagnostic()
     {
+        if (!ShouldRun())
+            return;
+
         Shader triplanarShader = Shader.Find("Environment/URPTriplanarEnvironment");
         Debug.LogWarning($"[ShaderDiagnostic] Shader.Find('Environment/URPTriplanarEnvironment') found: {triplanarShader != null}");
 
@@ -80,5 +95,14 @@ public class ShaderDiagnostic : MonoBehaviour
         }
         
         Debug.LogWarning("==========================================================================");
+    }
+
+    private bool ShouldRun()
+    {
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        return true;
+#else
+        return runInPlayerBuilds;
+#endif
     }
 }
