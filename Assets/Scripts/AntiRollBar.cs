@@ -13,10 +13,17 @@ namespace RVSystem
         void Start()
         {
             _rb = GetComponent<Rigidbody>();
+            if (_rb == null || wheelL == null || wheelR == null)
+            {
+                enabled = false;
+            }
         }
 
         void FixedUpdate()
         {
+            if (_rb == null || _rb.IsSleeping())
+                return;
+
             WheelHit hit;
             float travelL = 1.0f;
             float travelR = 1.0f;
