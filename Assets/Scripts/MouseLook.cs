@@ -447,7 +447,7 @@ public void SetBaseRotation(Quaternion targetRotation)
     {
         _yaw += mouseX;
         _thirdPersonPitch = Mathf.Clamp(
-            _thirdPersonPitch + mouseY,
+            _thirdPersonPitch - mouseY,
             Mathf.Min(thirdPersonMinPitch, thirdPersonMaxPitch),
             Mathf.Max(thirdPersonMinPitch, thirdPersonMaxPitch));
         _thirdPersonRoll = Mathf.Clamp(
