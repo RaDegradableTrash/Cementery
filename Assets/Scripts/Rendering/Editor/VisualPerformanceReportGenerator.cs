@@ -63,7 +63,10 @@ namespace Cementery.Rendering.Editor
             Summary summary = new Summary
             {
                 MaxCpuFrameMs = -1f,
-                MaxGpuFrameMs = -1f
+                MaxGpuFrameMs = -1f,
+                MaxGcAllocatedKb = -1f,
+                MaxMainThreadMs = -1f,
+                MaxRenderThreadMs = -1f
             };
             for (int i = 1; i < lines.Length; i++)
             {
@@ -96,6 +99,15 @@ namespace Cementery.Rendering.Editor
                 summary.MaxGpuFrameMs = Mathf.Max(summary.MaxGpuFrameMs, gpuFrameMs);
                 summary.StartMemoryMb = summary.SampleRows == 1 ? memoryMb : summary.StartMemoryMb;
                 summary.EndMemoryMb = memoryMb;
+
+                if (TryParseOptional(columns, 10, out float gcAllocatedKb))
+                    summary.MaxGcAllocatedKb = Mathf.Max(summary.MaxGcAllocatedKb, gcAllocatedKb);
+
+                if (TryParseOptional(columns, 11, out float mainThreadMs))
+                    summary.MaxMainThreadMs = Mathf.Max(summary.MaxMainThreadMs, mainThreadMs);
+
+                if (TryParseOptional(columns, 12, out float renderThreadMs))
+                    summary.MaxRenderThreadMs = Mathf.Max(summary.MaxRenderThreadMs, renderThreadMs);
             }
 
             return summary;
@@ -130,6 +142,9 @@ namespace Cementery.Rendering.Editor
             builder.AppendLine($"| Worst single frame | {summary.MaxWorstMs:F2} ms |");
             builder.AppendLine($"| Peak CPU frame timing | {FormatOptionalTiming(summary.MaxCpuFrameMs)} |");
             builder.AppendLine($"| Peak GPU frame timing | {FormatOptionalTiming(summary.MaxGpuFrameMs)} |");
+            builder.AppendLine($"| Peak GC allocated in frame | {FormatOptionalKilobytes(summary.MaxGcAllocatedKb)} |");
+            builder.AppendLine($"| Peak main thread counter | {FormatOptionalTiming(summary.MaxMainThreadMs)} |");
+            builder.AppendLine($"| Peak render thread counter | {FormatOptionalTiming(summary.MaxRenderThreadMs)} |");
             builder.AppendLine($"| Managed memory delta | {memoryDeltaMb:F2} MB |");
             builder.AppendLine();
             builder.AppendLine("## Budget Verdict");
@@ -179,6 +194,7 @@ namespace Cementery.Rendering.Editor
             AppendCheck(builder, "Frame timing stats enabled", Contains(projectSettings, "enableFrameTimingStats: 1"), ProjectSettingsPath, ref failures);
             AppendCheck(builder, "Gameplay post-processing is camera-gated", ContainsAll(bootstrapper, "renderPostProcessing = true", "targetTexture != null", "CameraRenderType.Base"), BootstrapperPath, ref failures);
             AppendCheck(builder, "Sampler writes frame-time CSV", ContainsAll(sampler, "visual-performance-samples.csv", "p95", "FrameTimingManager"), SamplerPath, ref failures);
+            AppendCheck(builder, "Sampler records profiling counters", ContainsAll(sampler, "ProfilerRecorder", "GC Allocated In Frame", "Main Thread", "Render Thread"), SamplerPath, ref warnings, true);
             AppendCheck(builder, "Color space is Linear", Contains(projectSettings, "m_ActiveColorSpace: 1"), "Project is currently Gamma if this warns; migrate only after material/lighting review.", ref warnings, true);
 
             builder.AppendLine();
@@ -242,9 +258,20 @@ namespace Cementery.Rendering.Editor
             return float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out result);
         }
 
+        private static bool TryParseOptional(string[] columns, int index, out float result)
+        {
+            result = -1f;
+            return columns.Length > index && TryParse(columns[index], out result) && result >= 0f;
+        }
+
         private static string FormatOptionalTiming(float value)
         {
             return value < 0f ? "Unavailable" : $"{value:F2} ms";
+        }
+
+        private static string FormatOptionalKilobytes(float value)
+        {
+            return value < 0f ? "Unavailable" : $"{value:F2} KB";
         }
 
         private static string FormatVerdict(bool pass)
@@ -263,6 +290,9 @@ namespace Cementery.Rendering.Editor
             public float MaxWorstMs;
             public float MaxCpuFrameMs;
             public float MaxGpuFrameMs;
+            public float MaxGcAllocatedKb;
+            public float MaxMainThreadMs;
+            public float MaxRenderThreadMs;
             public float StartMemoryMb;
             public float EndMemoryMb;
         }

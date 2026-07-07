@@ -16,6 +16,7 @@ Generated: 2026-07-07 21:51:31
 | Frame timing stats enabled | PASS | ProjectSettings/ProjectSettings.asset |
 | Gameplay post-processing is camera-gated | PASS | Assets/Scripts/Rendering/VisualPipelineBootstrapper.cs |
 | Sampler writes frame-time CSV | PASS | Assets/Scripts/Rendering/VisualPerformanceSampler.cs |
+| Sampler records profiling counters | PASS | Assets/Scripts/Rendering/VisualPerformanceSampler.cs |
 | Color space is Linear | WARN | Project is currently Gamma if this warns; migrate only after material/lighting review. |
 
 ## Verdict

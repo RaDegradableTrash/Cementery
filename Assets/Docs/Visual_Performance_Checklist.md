@@ -24,7 +24,7 @@ Use this checklist before merging render pipeline, post-processing, camera, UI a
 
 - In the Unity Editor, run `Cementery > Performance > Validate Visual Pipeline Setup` and commit or attach `Assets/Docs/Visual_Pipeline_Validation.md` with the PR evidence.
 - Unity Profiler recording with CPU Timeline, Rendering, Memory, and GC Alloc columns visible.
-- In Editor Play Mode or a development build, collect `visual-performance-samples.csv` from `Application.persistentDataPath` after running the route. The sampler records average, p95, worst frame time, latest CPU/GPU frame timing when available, and managed-memory trend.
+- In Editor Play Mode or a development build, collect `visual-performance-samples.csv` from `Application.persistentDataPath` after running the route. The sampler records average, p95, worst frame time, latest CPU/GPU frame timing when available, managed-memory trend, GC allocation, and optional main/render thread counters.
 - In the Unity Editor, run `Cementery > Performance > Generate Visual Performance Report` to convert the CSV into `Assets/Docs/Visual_Performance_Last_Run.md`.
 - Frame Debugger or RenderDoc pass count when render pipeline, post-processing, cloud, fog, or shadow settings change.
 - Before/after screenshots for day, sunset, night, and fog/cloud-heavy states.
@@ -68,8 +68,8 @@ Follow-up issues:
 - The reusable vibrant gameplay volume profile is `Assets/New Volume Profile.asset`.
 - `Assets/Scenes/Main_Persistent.unity` now uses that reusable volume profile on its global Volume.
 - `Assets/Scripts/Rendering/VisualPipelineBootstrapper.cs` enables URP post-processing only on base, world-facing gameplay cameras so inventory, storage, preview, render texture, overlay, and reflection cameras do not pay for the global profile.
-- `Assets/Scripts/Rendering/VisualPerformanceSampler.cs` writes development/editor CSV samples with average, p95, worst frame time, and managed memory trend for visual PR evidence.
-- `Assets/Scripts/Rendering/Editor/VisualPerformanceReportGenerator.cs` converts sampler CSV output into `Assets/Docs/Visual_Performance_Last_Run.md` for review.
+- `Assets/Scripts/Rendering/VisualPerformanceSampler.cs` writes development/editor CSV samples with average, p95, worst frame time, CPU/GPU frame timing, managed memory trend, GC allocation, and main/render thread counters when Unity exposes them.
+- `Assets/Scripts/Rendering/Editor/VisualPerformanceReportGenerator.cs` converts sampler CSV output into `Assets/Docs/Visual_Performance_Last_Run.md` for review and remains compatible with older 10-column sample files.
 - `Cementery > Performance > Validate Visual Pipeline Setup` writes `Assets/Docs/Visual_Pipeline_Validation.md` and checks the renderer asset, vibrant volume wiring, camera-gated post-processing, frame timing stats, and sampler presence before runtime profiling.
 - `ProjectSettings/ProjectSettings.asset` has frame timing stats enabled so CPU/GPU frame timing can be captured where the runtime supports it.
 - Known expensive visual systems to watch: custom volumetric clouds, snow accumulation, silhouette/outline rendering, fog volumes, screen shatter, and additive chunk loading.
