@@ -1,38 +1,38 @@
 # Visual Performance Last Run
 
-Generated: 2026-07-07 23:04:25
+Generated: 2026-07-07 23:26:48
 Source CSV: `/Users/ra/Library/Application Support/Dustland/Cementery/visual-performance-samples.csv`
 Screenshot directory: `/Users/ra/Library/Application Support/Dustland/Cementery/visual-evidence-route`
 Profiler capture: `/Users/ra/Library/Application Support/Dustland/Cementery/visual-evidence-route.raw`
-CSV session starts at data line: 259
+CSV session starts at data line: 388
 
 ## Summary
 
 | Metric | Value |
 | --- | --- |
 | Scene | Main_Persistent |
-| Sample rows | 12 |
-| Duration | 42.42 s |
-| Average frame time | 263.35 ms |
-| Worst p95 frame time | 3835.55 ms |
-| Worst single frame | 3835.55 ms |
-| Steady-state rows | 9 after 10s warmup |
-| Steady-state average frame time | 25.85 ms |
-| Steady-state worst p95 frame time | 31.11 ms |
-| Steady-state worst single frame | 165.33 ms |
-| Peak CPU frame timing | 100.70 ms |
-| Peak GPU frame timing | 23.20 ms |
-| Peak GC allocated in frame | 6714.74 KB |
-| Peak main thread counter | 1000.29 ms |
+| Sample rows | 16 |
+| Duration | 61.17 s |
+| Average frame time | 28.02 ms |
+| Worst p95 frame time | 1808.17 ms |
+| Worst single frame | 2765.62 ms |
+| Steady-state rows | 14 after 10s warmup |
+| Steady-state average frame time | 15.10 ms |
+| Steady-state worst p95 frame time | 22.45 ms |
+| Steady-state worst single frame | 270.69 ms |
+| Peak CPU frame timing | 66.05 ms |
+| Peak GPU frame timing | 19.09 ms |
+| Peak GC allocated in frame | 630.42 KB |
+| Peak main thread counter | 24.78 ms |
 | Peak render thread counter | Unavailable |
-| Managed memory delta | 80.95 MB |
+| Managed memory delta | 16.01 MB |
 | Time-of-day range | 0.020 to 0.480 |
-| Fog enabled samples | 9 / 12 |
+| Fog enabled samples | 7 / 16 |
 | Peak fog density | 0.0140 |
 | Fog distance range | 0.00 to 300.00 |
 | Peak ambient intensity | 1.20 |
 | Route screenshots | 4 / 4 |
-| Profiler capture size | 621.40 MB |
+| Profiler capture size | 619.60 MB |
 
 ## Budget Verdict
 
