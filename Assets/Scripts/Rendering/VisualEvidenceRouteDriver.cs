@@ -2,6 +2,7 @@ using System.Collections;
 using System.IO;
 using UnityEngine;
 using UnityEngine.Profiling;
+using UnityEngine.SceneManagement;
 
 namespace Cementery.Rendering
 {
@@ -9,6 +10,7 @@ namespace Cementery.Rendering
     {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
         private const float DefaultPhaseDurationSeconds = 10f;
+        private const float SceneWarmupSeconds = 2.5f;
         private const string ScreenshotDirectoryName = "visual-evidence-route";
         private const string ProfilerCaptureFileName = "visual-evidence-route.raw";
 
@@ -38,20 +40,41 @@ namespace Cementery.Rendering
         private Coroutine _phaseSampleRoutine;
         private string _screenshotDirectory;
         private string _profilerCapturePath;
+        private Camera _evidenceCamera;
 
         private void Awake()
         {
             DontDestroyOnLoad(gameObject);
             PrepareScreenshotDirectory();
             BeginProfilerCapture();
+            StartCoroutine(StartRouteWhenSceneReady());
+        }
+
+        private IEnumerator StartRouteWhenSceneReady()
+        {
             _dayNightController = FindFirstObjectByType<DayNightSkyboxController>(FindObjectsInactive.Include);
+            if (_dayNightController == null)
+            {
+                AsyncOperation load = SceneManager.LoadSceneAsync("Main_Persistent", LoadSceneMode.Additive);
+                if (load != null)
+                {
+                    while (!load.isDone)
+                        yield return null;
+                }
+
+                _dayNightController = FindFirstObjectByType<DayNightSkyboxController>(FindObjectsInactive.Include);
+            }
+
             if (_dayNightController == null)
             {
                 Debug.LogWarning("VisualEvidenceRouteDriver: no DayNightSkyboxController was found, so the evidence route cannot run.");
                 Destroy(gameObject);
-                return;
+                yield break;
             }
 
+            yield return new WaitForSecondsRealtime(SceneWarmupSeconds);
+
+            ConfigureEvidenceCamera();
             _originalAutoAdvance = _dayNightController.autoAdvance;
             _originalControlFog = _dayNightController.controlFog;
             _originalTimeOfDay = _dayNightController.timeOfDay;
@@ -82,6 +105,9 @@ namespace Cementery.Rendering
         private void OnDestroy()
         {
             EndProfilerCapture();
+            if (_evidenceCamera != null)
+                Destroy(_evidenceCamera.gameObject);
+
             if (restoreOriginalState)
                 RestoreOriginalState();
         }
@@ -157,10 +183,70 @@ namespace Cementery.Rendering
             if (string.IsNullOrEmpty(_screenshotDirectory))
                 PrepareScreenshotDirectory();
 
+            ConfigureEvidenceCamera();
             string filename = $"visual-evidence-{_phaseIndex + 1:00}-{SanitizeFilename(phaseName)}.png";
             string screenshotPath = Path.Combine(_screenshotDirectory, filename);
             ScreenCapture.CaptureScreenshot(screenshotPath);
             return screenshotPath;
+        }
+
+        private void ConfigureEvidenceCamera()
+        {
+            Camera source = Camera.main != null ? Camera.main : FindFirstObjectByType<Camera>(FindObjectsInactive.Exclude);
+            if (_evidenceCamera == null)
+            {
+                GameObject cameraObject = new GameObject("VisualEvidenceRouteCamera");
+                DontDestroyOnLoad(cameraObject);
+                _evidenceCamera = cameraObject.AddComponent<Camera>();
+                _evidenceCamera.depth = 1000f;
+                _evidenceCamera.fieldOfView = source != null ? source.fieldOfView : 60f;
+                _evidenceCamera.nearClipPlane = 0.1f;
+                _evidenceCamera.farClipPlane = 1200f;
+                _evidenceCamera.clearFlags = CameraClearFlags.Skybox;
+                _evidenceCamera.cullingMask = source != null ? source.cullingMask : ~0;
+            }
+
+            Vector3 forward = source != null ? Vector3.ProjectOnPlane(source.transform.forward, Vector3.up).normalized : Vector3.forward;
+            if (forward.sqrMagnitude < 0.01f)
+                forward = Vector3.forward;
+
+            Vector3 origin = source != null ? source.transform.position : Vector3.zero;
+            Vector3 target = TryFindNearbyRendererBounds(origin, 120f, out Bounds bounds)
+                ? bounds.center + Vector3.up * Mathf.Clamp(bounds.extents.y * 0.35f, 1.5f, 8f)
+                : origin + forward * 24f;
+
+            float distance = Mathf.Clamp(bounds.extents.magnitude * 0.45f, 22f, 55f);
+            Vector3 position = target - forward * distance + Vector3.up * Mathf.Clamp(distance * 0.35f, 8f, 18f);
+            _evidenceCamera.transform.SetPositionAndRotation(position, Quaternion.LookRotation(target - position, Vector3.up));
+        }
+
+        private static bool TryFindNearbyRendererBounds(Vector3 origin, float radius, out Bounds bounds)
+        {
+            Renderer[] renderers = FindObjectsByType<Renderer>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            bounds = default;
+            bool hasBounds = false;
+            float radiusSquared = radius * radius;
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                Renderer renderer = renderers[i];
+                if (renderer == null || !renderer.enabled || renderer.bounds.size.sqrMagnitude < 0.01f)
+                    continue;
+
+                if ((renderer.bounds.center - origin).sqrMagnitude > radiusSquared)
+                    continue;
+
+                if (!hasBounds)
+                {
+                    bounds = renderer.bounds;
+                    hasBounds = true;
+                }
+                else
+                {
+                    bounds.Encapsulate(renderer.bounds);
+                }
+            }
+
+            return hasBounds;
         }
 
         private void BeginProfilerCapture()

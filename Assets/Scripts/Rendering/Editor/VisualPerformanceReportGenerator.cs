@@ -15,6 +15,7 @@ namespace Cementery.Rendering.Editor
         private const string ValidationReportPath = "Assets/Docs/Visual_Pipeline_Validation.md";
         private const string ScreenshotDirectoryName = "visual-evidence-route";
         private const string ProfilerCaptureFileName = "visual-evidence-route.raw";
+        private const string EvidenceRouteRequestPath = "Temp/start-visual-evidence-route.request";
         private const string PendingEvidenceRouteKey = "Cementery.VisualEvidenceRoute.Pending";
         private const string RunningEvidenceRouteKey = "Cementery.VisualEvidenceRoute.Running";
         private const string UrpAssetPath = "Assets/Settings/URP/URP_Performance.asset";
@@ -33,6 +34,7 @@ namespace Cementery.Rendering.Editor
         private const float WebAverageBudgetMs = 33.33f;
         private const float WebP95BudgetMs = 40f;
         private const float MinimumEvidenceDurationSeconds = 30f;
+        private const float WarmupExclusionSeconds = 10f;
         private static readonly string[] RequiredScreenshotNames =
         {
             "visual-evidence-01-day-clear.png",
@@ -119,6 +121,8 @@ namespace Cementery.Rendering.Editor
 
         private static void OnEditorUpdate()
         {
+            ConsumeEvidenceRouteRequest();
+
             if (!SessionState.GetBool(RunningEvidenceRouteKey, false))
                 return;
 
@@ -135,6 +139,16 @@ namespace Cementery.Rendering.Editor
             SessionState.SetBool(RunningEvidenceRouteKey, false);
             EditorApplication.delayCall += GenerateReport;
             Debug.Log("Visual evidence route finished; visual performance report generation was requested.");
+        }
+
+        private static void ConsumeEvidenceRouteRequest()
+        {
+            if (!File.Exists(EvidenceRouteRequestPath) || EditorApplication.isCompiling || EditorApplication.isUpdating)
+                return;
+
+            File.Delete(EvidenceRouteRequestPath);
+            Debug.Log($"Visual evidence route request consumed from {EvidenceRouteRequestPath}.");
+            StartVisualEvidenceRoute();
         }
 
         private static Summary BuildSummary(string[] lines)
@@ -186,6 +200,14 @@ namespace Cementery.Rendering.Editor
                 summary.MaxGpuFrameMs = Mathf.Max(summary.MaxGpuFrameMs, gpuFrameMs);
                 summary.StartMemoryMb = summary.SampleRows == 1 ? memoryMb : summary.StartMemoryMb;
                 summary.EndMemoryMb = memoryMb;
+                bool isSteadyState = time - summary.FirstTimestamp >= WarmupExclusionSeconds;
+                if (isSteadyState)
+                {
+                    summary.SteadyStateRows++;
+                    summary.SteadyStateAverageSumMs += averageMs;
+                    summary.SteadyStateMaxP95Ms = Mathf.Max(summary.SteadyStateMaxP95Ms, p95Ms);
+                    summary.SteadyStateMaxWorstMs = Mathf.Max(summary.SteadyStateMaxWorstMs, worstMs);
+                }
 
                 if (TryParseOptional(columns, 10, out float gcAllocatedKb))
                     summary.MaxGcAllocatedKb = Mathf.Max(summary.MaxGcAllocatedKb, gcAllocatedKb);
@@ -258,6 +280,7 @@ namespace Cementery.Rendering.Editor
             }
 
             float averageMs = summary.AverageSumMs / summary.SampleRows;
+            float steadyAverageMs = summary.SteadyStateRows > 0 ? summary.SteadyStateAverageSumMs / summary.SteadyStateRows : -1f;
             float memoryDeltaMb = summary.EndMemoryMb - summary.StartMemoryMb;
             float durationSeconds = Mathf.Max(0f, summary.LastTimestamp - summary.FirstTimestamp);
             builder.AppendLine("## Summary");
@@ -270,6 +293,10 @@ namespace Cementery.Rendering.Editor
             builder.AppendLine($"| Average frame time | {averageMs:F2} ms |");
             builder.AppendLine($"| Worst p95 frame time | {summary.MaxP95Ms:F2} ms |");
             builder.AppendLine($"| Worst single frame | {summary.MaxWorstMs:F2} ms |");
+            builder.AppendLine($"| Steady-state rows | {summary.SteadyStateRows} after {WarmupExclusionSeconds:F0}s warmup |");
+            builder.AppendLine($"| Steady-state average frame time | {FormatOptionalTiming(steadyAverageMs)} |");
+            builder.AppendLine($"| Steady-state worst p95 frame time | {FormatOptionalTiming(summary.SteadyStateRows > 0 ? summary.SteadyStateMaxP95Ms : -1f)} |");
+            builder.AppendLine($"| Steady-state worst single frame | {FormatOptionalTiming(summary.SteadyStateRows > 0 ? summary.SteadyStateMaxWorstMs : -1f)} |");
             builder.AppendLine($"| Peak CPU frame timing | {FormatOptionalTiming(summary.MaxCpuFrameMs)} |");
             builder.AppendLine($"| Peak GPU frame timing | {FormatOptionalTiming(summary.MaxGpuFrameMs)} |");
             builder.AppendLine($"| Peak GC allocated in frame | {FormatOptionalKilobytes(summary.MaxGcAllocatedKb)} |");
@@ -288,8 +315,9 @@ namespace Cementery.Rendering.Editor
             builder.AppendLine();
             builder.AppendLine("| Target | Verdict |");
             builder.AppendLine("| --- | --- |");
-            builder.AppendLine($"| Desktop 60 FPS | {FormatVerdict(averageMs <= DesktopAverageBudgetMs && summary.MaxP95Ms <= DesktopP95BudgetMs)} |");
-            builder.AppendLine($"| WebGL 30 FPS | {FormatVerdict(averageMs <= WebAverageBudgetMs && summary.MaxP95Ms <= WebP95BudgetMs)} |");
+            builder.AppendLine($"| Desktop 60 FPS steady-state | {FormatVerdict(summary.SteadyStateRows > 0 && steadyAverageMs <= DesktopAverageBudgetMs && summary.SteadyStateMaxP95Ms <= DesktopP95BudgetMs)} |");
+            builder.AppendLine($"| WebGL 30 FPS steady-state | {FormatVerdict(summary.SteadyStateRows > 0 && steadyAverageMs <= WebAverageBudgetMs && summary.SteadyStateMaxP95Ms <= WebP95BudgetMs)} |");
+            builder.AppendLine($"| Raw startup/load spikes | {FormatVerdict(summary.MaxWorstMs <= DesktopP95BudgetMs)} |");
             builder.AppendLine($"| Evidence duration | {FormatVerdict(durationSeconds >= MinimumEvidenceDurationSeconds)} |");
             builder.AppendLine($"| Day/night route coverage | {FormatCoverageVerdict(HasDayNightCoverage(summary))} |");
             builder.AppendLine($"| Fog route coverage | {FormatCoverageVerdict(HasFogCoverage(summary))} |");
@@ -310,6 +338,7 @@ namespace Cementery.Rendering.Editor
             builder.AppendLine("## Notes");
             builder.AppendLine();
             builder.AppendLine("- Pair this report with a Unity Profiler capture for final merge evidence.");
+            builder.AppendLine("- Use steady-state rows for render-pipeline cost; raw startup/load spikes remain listed separately for scene-load and chunk-streaming follow-up.");
             builder.AppendLine("- Re-run after render pipeline, cloud, fog, particle, UI animation, camera, or chunk-loading changes.");
             builder.AppendLine("- Review the route screenshots for day, sunset, night fog, and dawn readability before claiming visual polish complete.");
             builder.AppendLine("- Evidence coverage checks prove only that the route sampled required day/night/fog states; screenshots and profiler captures are still required to judge readability and cost.");
@@ -534,6 +563,10 @@ namespace Cementery.Rendering.Editor
             public float AverageSumMs;
             public float MaxP95Ms;
             public float MaxWorstMs;
+            public int SteadyStateRows;
+            public float SteadyStateAverageSumMs;
+            public float SteadyStateMaxP95Ms;
+            public float SteadyStateMaxWorstMs;
             public float MaxCpuFrameMs;
             public float MaxGpuFrameMs;
             public float MaxGcAllocatedKb;
