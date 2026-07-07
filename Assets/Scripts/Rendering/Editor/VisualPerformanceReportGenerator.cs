@@ -32,6 +32,13 @@ namespace Cementery.Rendering.Editor
         private const float WebAverageBudgetMs = 33.33f;
         private const float WebP95BudgetMs = 40f;
         private const float MinimumEvidenceDurationSeconds = 30f;
+        private static readonly string[] RequiredScreenshotNames =
+        {
+            "visual-evidence-01-day-clear.png",
+            "visual-evidence-02-sunset-haze.png",
+            "visual-evidence-03-night-fog.png",
+            "visual-evidence-04-dawn-fog.png"
+        };
 
         static VisualPerformanceReportGenerator()
         {
@@ -229,11 +236,14 @@ namespace Cementery.Rendering.Editor
         private static string BuildReport(string samplePath, Summary summary)
         {
             StringBuilder builder = new StringBuilder(2048);
+            string screenshotDirectory = Path.Combine(Application.persistentDataPath, ScreenshotDirectoryName);
+            int screenshotCount = CountExistingRequiredScreenshots(screenshotDirectory);
+            bool hasScreenshotCoverage = screenshotCount == RequiredScreenshotNames.Length;
             builder.AppendLine("# Visual Performance Last Run");
             builder.AppendLine();
             builder.AppendLine($"Generated: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
             builder.AppendLine($"Source CSV: `{samplePath}`");
-            builder.AppendLine($"Screenshot directory: `{Path.Combine(Application.persistentDataPath, ScreenshotDirectoryName)}`");
+            builder.AppendLine($"Screenshot directory: `{screenshotDirectory}`");
             builder.AppendLine($"CSV session starts at data line: {summary.SessionStartLine}");
             builder.AppendLine();
 
@@ -267,6 +277,7 @@ namespace Cementery.Rendering.Editor
             builder.AppendLine($"| Peak fog density | {FormatOptionalFloat(summary.MaxFogDensity, "F4")} |");
             builder.AppendLine($"| Fog distance range | {FormatFogDistanceRange(summary)} |");
             builder.AppendLine($"| Peak ambient intensity | {FormatOptionalFloat(summary.MaxAmbientIntensity, "F2")} |");
+            builder.AppendLine($"| Route screenshots | {screenshotCount} / {RequiredScreenshotNames.Length} |");
             builder.AppendLine();
             builder.AppendLine("## Budget Verdict");
             builder.AppendLine();
@@ -277,6 +288,18 @@ namespace Cementery.Rendering.Editor
             builder.AppendLine($"| Evidence duration | {FormatVerdict(durationSeconds >= MinimumEvidenceDurationSeconds)} |");
             builder.AppendLine($"| Day/night route coverage | {FormatCoverageVerdict(HasDayNightCoverage(summary))} |");
             builder.AppendLine($"| Fog route coverage | {FormatCoverageVerdict(HasFogCoverage(summary))} |");
+            builder.AppendLine($"| Screenshot route coverage | {FormatCoverageVerdict(hasScreenshotCoverage)} |");
+            builder.AppendLine();
+            builder.AppendLine("## Screenshot Evidence");
+            builder.AppendLine();
+            builder.AppendLine("| Screenshot | Status |");
+            builder.AppendLine("| --- | --- |");
+            for (int i = 0; i < RequiredScreenshotNames.Length; i++)
+            {
+                string screenshotPath = Path.Combine(screenshotDirectory, RequiredScreenshotNames[i]);
+                builder.AppendLine($"| `{RequiredScreenshotNames[i]}` | {(File.Exists(screenshotPath) ? "FOUND" : "MISSING")} |");
+            }
+
             builder.AppendLine();
             builder.AppendLine("## Notes");
             builder.AppendLine();
@@ -331,6 +354,7 @@ namespace Cementery.Rendering.Editor
             AppendCheck(builder, "Evidence route captures phase screenshots", ContainsAll(evidenceRouteDriver, "ScreenCapture.CaptureScreenshot", "visual-evidence-route", "visual-evidence-"), EvidenceRouteDriverPath, ref failures);
             AppendCheck(builder, "Evidence route can launch from Edit Mode", ContainsAll(reportGenerator, "SessionState", "EnteredPlayMode", "Visual evidence route queued"), ReportGeneratorPath, ref failures);
             AppendCheck(builder, "Evidence route auto-generates report", ContainsAll(reportGenerator, "RunningEvidenceRouteKey", "GenerateReport", "visual performance report generation was requested"), ReportGeneratorPath, ref failures);
+            AppendCheck(builder, "Report gates screenshot evidence", ContainsAll(reportGenerator, "Screenshot route coverage", "RequiredScreenshotNames", "CountExistingRequiredScreenshots"), ReportGeneratorPath, ref failures);
             AppendCheck(builder, "Report gates latest-session visual evidence", ContainsAll(sampler, "time_of_day") && ContainsAll(reportGenerator, "FindLatestHeaderLine", "Day/night route coverage", "Fog route coverage", "MinimumEvidenceDurationSeconds"), ReportGeneratorPath, ref failures);
             AppendCheck(builder, "Color space is Linear", Contains(projectSettings, "m_ActiveColorSpace: 1"), ProjectSettingsPath, ref failures);
             AppendCheck(builder, "Lights use linear intensity", Contains(graphicsSettings, "m_LightsUseLinearIntensity: 1"), GraphicsSettingsPath, ref failures);
@@ -457,6 +481,18 @@ namespace Cementery.Rendering.Editor
         private static bool HasFogCoverage(Summary summary)
         {
             return summary.VisualStateRows > 0 && summary.FogEnabledRows > 0 && summary.MaxFogDensity >= 0.004f;
+        }
+
+        private static int CountExistingRequiredScreenshots(string screenshotDirectory)
+        {
+            int count = 0;
+            for (int i = 0; i < RequiredScreenshotNames.Length; i++)
+            {
+                if (File.Exists(Path.Combine(screenshotDirectory, RequiredScreenshotNames[i])))
+                    count++;
+            }
+
+            return count;
         }
 
         private struct Summary
