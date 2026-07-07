@@ -7,11 +7,14 @@ using UnityEngine;
 
 namespace Cementery.Rendering.Editor
 {
+    [InitializeOnLoad]
     public static class VisualPerformanceReportGenerator
     {
         private const string SampleFileName = "visual-performance-samples.csv";
         private const string ReportPath = "Assets/Docs/Visual_Performance_Last_Run.md";
         private const string ValidationReportPath = "Assets/Docs/Visual_Pipeline_Validation.md";
+        private const string PendingEvidenceRouteKey = "Cementery.VisualEvidenceRoute.Pending";
+        private const string RunningEvidenceRouteKey = "Cementery.VisualEvidenceRoute.Running";
         private const string UrpAssetPath = "Assets/Settings/URP/URP_Performance.asset";
         private const string RendererAssetPath = "Assets/Settings/URP/URP_Performance_Renderer.asset";
         private const string MainScenePath = "Assets/Scenes/Main_Persistent.unity";
@@ -28,6 +31,12 @@ namespace Cementery.Rendering.Editor
         private const float WebAverageBudgetMs = 33.33f;
         private const float WebP95BudgetMs = 40f;
         private const float MinimumEvidenceDurationSeconds = 30f;
+
+        static VisualPerformanceReportGenerator()
+        {
+            EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
+            EditorApplication.update += OnEditorUpdate;
+        }
 
         [MenuItem("Cementery/Performance/Generate Visual Performance Report")]
         public static void GenerateReport()
@@ -67,7 +76,11 @@ namespace Cementery.Rendering.Editor
         {
             if (!Application.isPlaying)
             {
-                Debug.LogWarning("Enter Play Mode before starting the visual evidence route.");
+                SessionState.SetBool(PendingEvidenceRouteKey, true);
+                if (!EditorApplication.isPlayingOrWillChangePlaymode)
+                    EditorApplication.isPlaying = true;
+
+                Debug.Log("Visual evidence route queued. Unity will start it after entering Play Mode.");
                 return;
             }
 
@@ -81,8 +94,38 @@ namespace Cementery.Rendering.Editor
 
             GameObject go = new GameObject("VisualEvidenceRouteDriver");
             go.AddComponent<VisualEvidenceRouteDriver>();
+            SessionState.SetBool(RunningEvidenceRouteKey, true);
             Selection.activeObject = go;
-            Debug.Log("Visual evidence route started. Keep Play Mode running until the route completion log appears, then generate the visual performance report.");
+            Debug.Log("Visual evidence route started. Keep Play Mode running until the route completion log appears; the visual performance report will be generated automatically.");
+        }
+
+        private static void OnPlayModeStateChanged(PlayModeStateChange state)
+        {
+            if (state != PlayModeStateChange.EnteredPlayMode || !SessionState.GetBool(PendingEvidenceRouteKey, false))
+                return;
+
+            SessionState.SetBool(PendingEvidenceRouteKey, false);
+            EditorApplication.delayCall += StartVisualEvidenceRoute;
+        }
+
+        private static void OnEditorUpdate()
+        {
+            if (!SessionState.GetBool(RunningEvidenceRouteKey, false))
+                return;
+
+            if (!Application.isPlaying)
+            {
+                SessionState.SetBool(RunningEvidenceRouteKey, false);
+                return;
+            }
+
+            VisualEvidenceRouteDriver existing = UnityEngine.Object.FindFirstObjectByType<VisualEvidenceRouteDriver>(FindObjectsInactive.Include);
+            if (existing != null)
+                return;
+
+            SessionState.SetBool(RunningEvidenceRouteKey, false);
+            GenerateReport();
+            Debug.Log("Visual evidence route finished; visual performance report generation was requested.");
         }
 
         private static Summary BuildSummary(string[] lines)
@@ -282,6 +325,8 @@ namespace Cementery.Rendering.Editor
             AppendCheck(builder, "Sampler records visual route state", ContainsAll(sampler, "time_of_day", "RenderSettings.fog", "ambientIntensity"), SamplerPath, ref failures);
             AppendCheck(builder, "Evidence route driver is available", ContainsAll(evidenceRouteDriver, "VisualEvidenceRouteDriver", "day clear", "night fog"), EvidenceRouteDriverPath, ref failures);
             AppendCheck(builder, "Evidence route requests phase samples", ContainsAll(evidenceRouteDriver, "TryWriteImmediateSample", "evidence sample for"), EvidenceRouteDriverPath, ref failures);
+            AppendCheck(builder, "Evidence route can launch from Edit Mode", ContainsAll(reportGenerator, "SessionState", "EnteredPlayMode", "Visual evidence route queued"), ReportGeneratorPath, ref failures);
+            AppendCheck(builder, "Evidence route auto-generates report", ContainsAll(reportGenerator, "RunningEvidenceRouteKey", "GenerateReport", "visual performance report generation was requested"), ReportGeneratorPath, ref failures);
             AppendCheck(builder, "Report gates latest-session visual evidence", ContainsAll(sampler, "time_of_day") && ContainsAll(reportGenerator, "FindLatestHeaderLine", "Day/night route coverage", "Fog route coverage", "MinimumEvidenceDurationSeconds"), ReportGeneratorPath, ref failures);
             AppendCheck(builder, "Color space is Linear", Contains(projectSettings, "m_ActiveColorSpace: 1"), ProjectSettingsPath, ref failures);
             AppendCheck(builder, "Lights use linear intensity", Contains(graphicsSettings, "m_LightsUseLinearIntensity: 1"), GraphicsSettingsPath, ref failures);
