@@ -23,6 +23,7 @@ Use this checklist before merging render pipeline, post-processing, camera, UI a
 ## Capture Evidence
 
 - Unity Profiler recording with CPU Timeline, Rendering, Memory, and GC Alloc columns visible.
+- In Editor Play Mode or a development build, collect `visual-performance-samples.csv` from `Application.persistentDataPath` after running the route. The sampler records average, p95, worst frame time, latest CPU/GPU frame timing when available, and managed-memory trend.
 - Frame Debugger or RenderDoc pass count when render pipeline, post-processing, cloud, fog, or shadow settings change.
 - Before/after screenshots for day, sunset, night, and fog/cloud-heavy states.
 - Before/after build target and quality level listed in the PR.
@@ -65,4 +66,6 @@ Follow-up issues:
 - The reusable vibrant gameplay volume profile is `Assets/New Volume Profile.asset`.
 - `Assets/Scenes/Main_Persistent.unity` now uses that reusable volume profile on its global Volume.
 - `Assets/Scripts/Rendering/VisualPipelineBootstrapper.cs` enables URP post-processing only on base, world-facing gameplay cameras so inventory, storage, preview, render texture, overlay, and reflection cameras do not pay for the global profile.
+- `Assets/Scripts/Rendering/VisualPerformanceSampler.cs` writes development/editor CSV samples with average, p95, worst frame time, and managed memory trend for visual PR evidence.
+- `ProjectSettings/ProjectSettings.asset` has frame timing stats enabled so CPU/GPU frame timing can be captured where the runtime supports it.
 - Known expensive visual systems to watch: custom volumetric clouds, snow accumulation, silhouette/outline rendering, fog volumes, screen shatter, and additive chunk loading.
