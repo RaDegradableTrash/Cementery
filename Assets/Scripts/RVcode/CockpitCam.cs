@@ -44,19 +44,51 @@ public class CockpitCam : MonoBehaviour
 	[SerializeField] private Color lineRendererColor = new Color(0.2f, 0.9f, 1f, 1f);
 	[SerializeField] private float lineRendererWidth = 0.01f;
 
+	[Header("Vehicle Third-Person")]
+	[SerializeField] private KeyCode switchPerspectiveKey = KeyCode.V;
+	[SerializeField] private float vehicleThirdPersonDistance = 12f;
+	[SerializeField] private float vehicleThirdPersonHeight = 7f;
+	[SerializeField] private float vehicleThirdPersonLookAhead = 1.5f;
+	[SerializeField] private float vehicleThirdPersonPitch = 22f;
+	[SerializeField] private float vehicleThirdPersonMinPitch = -10f;
+	[SerializeField] private float vehicleThirdPersonMaxPitch = 45f;
+	[SerializeField] private float vehicleThirdPersonPositionSharpness = 10f;
+	[SerializeField] private float vehicleThirdPersonRotationSharpness = 14f;
+	[SerializeField] private float vehicleThirdPersonRecenterSpeed = 1.5f;
+	[SerializeField] private float vehicleThirdPersonCollisionRadius = 0.45f;
+	[SerializeField] private float vehicleThirdPersonCollisionPadding = 0.2f;
+	[SerializeField] private LayerMask vehicleThirdPersonCollisionMask = ~0;
+	[SerializeField] private QueryTriggerInteraction vehicleThirdPersonTriggerInteraction = QueryTriggerInteraction.Ignore;
+
 	private bool isLooking;
 	private float yaw;
 	private float pitch;
+	private bool vehicleThirdPersonActive;
+	private float vehicleThirdPersonYaw;
 	private bool lastRayHit;
 	private Vector3 lastRayOrigin;
 	private Vector3 lastRayDirection;
 	private float lastRayDistance;
 	private Vector3 lastRayHitPoint;
 	private ICockpitHighlightable currentHighlight;
+	private Furniture_SlideDoor currentDoorTarget;
+	private ICockpitInteractable lastPromptTarget;
+	private Furniture_SlideDoor lastPromptDoorTarget;
+	private bool lastPromptVisible;
+	private string lastPromptText;
+	private const int MaxCockpitRayHits = 32;
+	private readonly RaycastHit[] cockpitRayHits = new RaycastHit[MaxCockpitRayHits];
+	private readonly System.Collections.Generic.Dictionary<Collider, ICockpitInteractable> cockpitInteractableCache = new System.Collections.Generic.Dictionary<Collider, ICockpitInteractable>(64);
+	private readonly System.Collections.Generic.Dictionary<Collider, ICockpitHighlightable> cockpitHighlightCache = new System.Collections.Generic.Dictionary<Collider, ICockpitHighlightable>(64);
+	private readonly System.Collections.Generic.Dictionary<Collider, Furniture_SlideDoor> cockpitDoorCache = new System.Collections.Generic.Dictionary<Collider, Furniture_SlideDoor>(32);
+	private const int MaxCockpitComponentCacheSize = 256;
+	private Furniture_SlideDoor[] exitDoors;
+	private readonly RaycastHit[] vehicleCameraCollisionHits = new RaycastHit[8];
 
 	private GameObject activePlayer;
 	private bool isDriving;
 	private CarControl carControl;
+	private AudioListener cockpitAudioListener;
 
 	private Transform originalCameraParent;
 	private Vector3 originalCameraLocalPos;
@@ -72,6 +104,7 @@ public class CockpitCam : MonoBehaviour
 		{
 			cockpitCamera = GetComponentInChildren<Camera>();
 		}
+		cockpitAudioListener = cockpitCamera != null ? cockpitCamera.GetComponent<AudioListener>() : null;
 
 		if (rotationRoot == null)
 		{
@@ -102,7 +135,14 @@ public class CockpitCam : MonoBehaviour
 			return;
 		}
 
-		if (Input.GetMouseButtonDown(0))
+		SyncCockpitAudioListener();
+
+		if (Input.GetKeyDown(switchPerspectiveKey))
+		{
+			SetVehicleThirdPersonActive(!vehicleThirdPersonActive, true);
+		}
+
+		if (!vehicleThirdPersonActive && Input.GetMouseButtonDown(0))
 		{
 			// Left click only locks the cursor, never releases/unlocks it!
 			SetLook(true);
@@ -119,14 +159,11 @@ public class CockpitCam : MonoBehaviour
 		if (isDriving && !isExiting && Input.GetKeyDown(KeyCode.BackQuote))
 		{
 			bool doorIsOpen = false;
-			Furniture_SlideDoor[] allDoors = GetComponentsInParent<Furniture_SlideDoor>();
-			if (allDoors.Length == 0 && transform.parent != null)
+			Furniture_SlideDoor[] allDoors = GetExitDoors();
+			for (int i = 0; i < allDoors.Length; i++)
 			{
-				allDoors = transform.root.GetComponentsInChildren<Furniture_SlideDoor>();
-			}
-			foreach (var d in allDoors)
-			{
-				if (d.IsOpen)
+				Furniture_SlideDoor d = allDoors[i];
+				if (d != null && d.IsOpen)
 				{
 					doorIsOpen = true;
 					break;
@@ -141,7 +178,21 @@ public class CockpitCam : MonoBehaviour
 
 		if (isLooking)
 		{
-			UpdateLook();
+			if (vehicleThirdPersonActive)
+				UpdateVehicleThirdPersonLook();
+			else
+				UpdateLook();
+		}
+
+		if (vehicleThirdPersonActive)
+		{
+			UpdateVehicleThirdPersonCamera(false);
+			UpdateHighlight(null);
+			ClearVehiclePromptCache();
+			if (InteractionSystem.Instance != null)
+				InteractionSystem.Instance.SetExternalInteractPrompt("", false);
+			SetRayLineActive(false);
+			return;
 		}
 
 		ICockpitHighlightable highlight;
@@ -149,22 +200,35 @@ public class CockpitCam : MonoBehaviour
 		UpdateHighlight(highlight);
 		UpdateRayDebug();
 
-		// 🌟 检测车内视线是否看着车门 (Furniture_SlideDoor)
-		Furniture_SlideDoor doorTarget = GetDoorLookTarget();
-
 		// 🌟 实时刷新车内的 UI 交互提示文字
-		UpdateVehicleUiPrompt(target, doorTarget);
+		UpdateVehicleUiPrompt(target, currentDoorTarget);
 
 		// Right Click (MouseButton 1) is the core triggering logic for any camera!
 		if (target != null && (Input.GetMouseButtonDown(1) || Input.GetKeyDown(interactKey)))
 		{
 			target.Interact();
 		}
-		else if (doorTarget != null && (Input.GetMouseButtonDown(1) || Input.GetKeyDown(interactKey)))
+		else if (currentDoorTarget != null && (Input.GetMouseButtonDown(1) || Input.GetKeyDown(interactKey)))
 		{
 			// 🌟 车内直接开/关车门！
-			doorTarget.Interact();
+			currentDoorTarget.Interact();
 		}
+	}
+
+	private Furniture_SlideDoor[] GetExitDoors()
+	{
+		if (exitDoors != null)
+		{
+			return exitDoors;
+		}
+
+		exitDoors = GetComponentsInParent<Furniture_SlideDoor>();
+		if (exitDoors.Length == 0 && transform.parent != null)
+		{
+			exitDoors = transform.root.GetComponentsInChildren<Furniture_SlideDoor>();
+		}
+
+		return exitDoors;
 	}
 
 	private bool IsCameraActive()
@@ -217,6 +281,146 @@ public class CockpitCam : MonoBehaviour
 		Cursor.lockState = value ? CursorLockMode.Locked : CursorLockMode.None;
 	}
 
+	private void SetVehicleThirdPersonActive(bool active, bool snap)
+	{
+		if (vehicleThirdPersonActive == active)
+			return;
+
+		vehicleThirdPersonActive = active;
+		SetLook(true);
+		SyncCockpitAudioListener();
+
+		if (active)
+		{
+			vehicleThirdPersonYaw = 0f;
+			if (cockpitCamera != null)
+				cockpitCamera.transform.SetParent(null, true);
+			UpdateVehicleThirdPersonCamera(snap);
+			return;
+		}
+
+		RestoreCockpitCameraTransform();
+	}
+
+	private void RestoreCockpitCameraTransform()
+	{
+		if (cockpitCamera == null || rotationRoot == null)
+			return;
+
+		cockpitCamera.transform.SetParent(rotationRoot);
+		cockpitCamera.transform.localPosition = Vector3.zero;
+		cockpitCamera.transform.localRotation = Quaternion.identity;
+		rotationRoot.localRotation = Quaternion.Euler(pitch, yaw, 0f);
+	}
+
+	private void UpdateVehicleThirdPersonLook()
+	{
+		float mouseX = Input.GetAxis("Mouse X");
+		float mouseY = Input.GetAxis("Mouse Y");
+
+		vehicleThirdPersonYaw += mouseX * lookSensitivity;
+		float yDelta = mouseY * lookSensitivity * (invertY ? -1f : 1f);
+		vehicleThirdPersonPitch = Mathf.Clamp(vehicleThirdPersonPitch + yDelta, vehicleThirdPersonMinPitch, vehicleThirdPersonMaxPitch);
+
+		if (Mathf.Abs(mouseX) < 0.001f)
+		{
+			vehicleThirdPersonYaw = Mathf.LerpAngle(vehicleThirdPersonYaw, 0f, vehicleThirdPersonRecenterSpeed * Time.deltaTime);
+		}
+	}
+
+	private void LateUpdate()
+	{
+		if (isDriving && vehicleThirdPersonActive)
+			UpdateVehicleThirdPersonCamera(false);
+	}
+
+	private void UpdateVehicleThirdPersonCamera(bool snap)
+	{
+		if (cockpitCamera == null)
+			return;
+
+		SyncCockpitAudioListener();
+
+		Transform vehicleRoot = carControl != null ? carControl.transform : transform.root;
+		if (vehicleRoot == null)
+			vehicleRoot = transform;
+
+		float orbitYaw = vehicleRoot.eulerAngles.y + vehicleThirdPersonYaw;
+		float orbitPitch = Mathf.Clamp(
+			vehicleThirdPersonPitch,
+			Mathf.Min(vehicleThirdPersonMinPitch, vehicleThirdPersonMaxPitch),
+			Mathf.Max(vehicleThirdPersonMinPitch, vehicleThirdPersonMaxPitch));
+		Quaternion orbitRotation = Quaternion.Euler(orbitPitch, orbitYaw, 0f);
+		Vector3 lookTarget = vehicleRoot.position
+			+ Vector3.up * 2.2f
+			+ vehicleRoot.forward * vehicleThirdPersonLookAhead;
+		Vector3 desiredPosition = lookTarget
+			+ orbitRotation * Vector3.back * Mathf.Clamp(vehicleThirdPersonDistance, 8f, 32f)
+			+ Vector3.up * Mathf.Max(0.1f, vehicleThirdPersonHeight);
+		Vector3 correctedPosition = ResolveVehicleCameraCollision(lookTarget, desiredPosition, vehicleRoot);
+		Vector3 lookDirection = lookTarget - correctedPosition;
+		if (lookDirection.sqrMagnitude < 0.001f)
+			lookDirection = vehicleRoot.forward;
+
+		Quaternion desiredRotation = Quaternion.LookRotation(lookDirection.normalized, Vector3.up);
+		if (snap || Time.deltaTime <= 0f)
+		{
+			cockpitCamera.transform.position = correctedPosition;
+			cockpitCamera.transform.rotation = desiredRotation;
+			return;
+		}
+
+		float positionLerp = 1f - Mathf.Exp(-vehicleThirdPersonPositionSharpness * Time.deltaTime);
+		float rotationLerp = 1f - Mathf.Exp(-vehicleThirdPersonRotationSharpness * Time.deltaTime);
+		cockpitCamera.transform.position = Vector3.Lerp(cockpitCamera.transform.position, correctedPosition, positionLerp);
+		cockpitCamera.transform.rotation = Quaternion.Slerp(cockpitCamera.transform.rotation, desiredRotation, rotationLerp);
+	}
+
+	private Vector3 ResolveVehicleCameraCollision(Vector3 pivot, Vector3 desiredPosition, Transform vehicleRoot)
+	{
+		Vector3 toCamera = desiredPosition - pivot;
+		float distance = toCamera.magnitude;
+		if (distance <= 0.001f)
+			return desiredPosition;
+
+		Vector3 direction = toCamera / distance;
+		int hitCount = Physics.SphereCastNonAlloc(
+			pivot,
+			Mathf.Max(0.01f, vehicleThirdPersonCollisionRadius),
+			direction,
+			vehicleCameraCollisionHits,
+			distance,
+			vehicleThirdPersonCollisionMask,
+			vehicleThirdPersonTriggerInteraction);
+
+		float nearest = distance;
+		for (int i = 0; i < hitCount; i++)
+		{
+			RaycastHit hit = vehicleCameraCollisionHits[i];
+			if (hit.collider == null || (vehicleRoot != null && hit.collider.transform.IsChildOf(vehicleRoot)))
+				continue;
+
+			nearest = Mathf.Min(nearest, hit.distance);
+		}
+
+		if (nearest >= distance)
+			return desiredPosition;
+
+		return pivot + direction * Mathf.Max(0.05f, nearest - vehicleThirdPersonCollisionPadding);
+	}
+
+	private void SyncCockpitAudioListener()
+	{
+		if (cockpitCamera == null || !cockpitCamera.enabled || !cockpitCamera.gameObject.activeInHierarchy)
+			return;
+
+		if (cockpitAudioListener == null)
+			cockpitAudioListener = cockpitCamera.GetComponent<AudioListener>();
+
+		if (cockpitAudioListener != null)
+			MouseLook.SetExclusiveAudioListener(cockpitAudioListener);
+	}
+
 	private ICockpitInteractable GetLookTarget(out ICockpitHighlightable highlight)
 	{
 		highlight = null;
@@ -238,9 +442,10 @@ public class CockpitCam : MonoBehaviour
 		lastRayDistance = interactDistance;
 		lastRayHit = false;
 		lastRayHitPoint = ray.origin + ray.direction * interactDistance;
+		currentDoorTarget = null;
 
-		RaycastHit[] hits = Physics.RaycastAll(ray, interactDistance, interactMask, QueryTriggerInteraction.Collide);
-		if (hits == null || hits.Length == 0)
+		int hitCount = Physics.RaycastNonAlloc(ray, cockpitRayHits, interactDistance, interactMask, QueryTriggerInteraction.Collide);
+		if (hitCount == 0)
 		{
 			return null;
 		}
@@ -249,13 +454,19 @@ public class CockpitCam : MonoBehaviour
 		float bestDistance = float.MaxValue;
 		ICockpitInteractable bestTarget = null;
 
-		foreach (RaycastHit hit in hits)
+		for (int i = 0; i < hitCount; i++)
 		{
+			RaycastHit hit = cockpitRayHits[i];
 			if (hit.collider != null && hit.distance < nearestAnyHit)
 			{
 				nearestAnyHit = hit.distance;
 				lastRayHitPoint = hit.point;
 				lastRayHit = true;
+			}
+
+			if (hit.collider != null && currentDoorTarget == null)
+			{
+				currentDoorTarget = GetCachedDoor(hit.collider);
 			}
 
 			if (hit.collider == null || !hit.collider.isTrigger)
@@ -268,16 +479,63 @@ public class CockpitCam : MonoBehaviour
 				continue;
 			}
 
-			ICockpitInteractable candidate = hit.collider.GetComponentInParent<ICockpitInteractable>();
+			ICockpitInteractable candidate = GetCachedInteractable(hit.collider);
 			if (candidate != null)
 			{
 				bestDistance = hit.distance;
 				bestTarget = candidate;
-				highlight = hit.collider.GetComponentInParent<ICockpitHighlightable>();
+				highlight = GetCachedHighlight(hit.collider);
 			}
 		}
 
 		return bestTarget;
+	}
+
+	private ICockpitInteractable GetCachedInteractable(Collider collider)
+	{
+		if (collider == null) return null;
+		if (cockpitInteractableCache.TryGetValue(collider, out ICockpitInteractable interactable))
+			return interactable;
+
+		EnsureCockpitComponentCacheBudget();
+		interactable = collider.GetComponentInParent<ICockpitInteractable>();
+		cockpitInteractableCache[collider] = interactable;
+		return interactable;
+	}
+
+	private ICockpitHighlightable GetCachedHighlight(Collider collider)
+	{
+		if (collider == null) return null;
+		if (cockpitHighlightCache.TryGetValue(collider, out ICockpitHighlightable highlight))
+			return highlight;
+
+		EnsureCockpitComponentCacheBudget();
+		highlight = collider.GetComponentInParent<ICockpitHighlightable>();
+		cockpitHighlightCache[collider] = highlight;
+		return highlight;
+	}
+
+	private Furniture_SlideDoor GetCachedDoor(Collider collider)
+	{
+		if (collider == null) return null;
+		if (cockpitDoorCache.TryGetValue(collider, out Furniture_SlideDoor door))
+			return door;
+
+		EnsureCockpitComponentCacheBudget();
+		door = collider.GetComponentInParent<Furniture_SlideDoor>();
+		cockpitDoorCache[collider] = door;
+		return door;
+	}
+
+	private void EnsureCockpitComponentCacheBudget()
+	{
+		int total = cockpitInteractableCache.Count + cockpitHighlightCache.Count + cockpitDoorCache.Count;
+		if (total < MaxCockpitComponentCacheSize)
+			return;
+
+		cockpitInteractableCache.Clear();
+		cockpitHighlightCache.Clear();
+		cockpitDoorCache.Clear();
 	}
 
 	private void UpdateHighlight(ICockpitHighlightable highlight)
@@ -442,13 +700,18 @@ public class CockpitCam : MonoBehaviour
 
 		if (mainCam != null)
 		{
+			MouseLook ml = mainCam.GetComponent<MouseLook>();
+			if (ml != null)
+			{
+				ml.ForceFirstPersonView();
+			}
+
 			// 2. Save original parent and transform values
 			originalCameraParent = mainCam.transform.parent;
 			originalCameraLocalPos = mainCam.transform.localPosition;
 			originalCameraLocalRot = mainCam.transform.localRotation;
 
 			// 3. Temporarily disable the MouseLook script on the main camera to stop it reading player mouse input
-			MouseLook ml = mainCam.GetComponent<MouseLook>();
 			if (ml != null)
 			{
 				ml.enabled = false;
@@ -460,6 +723,7 @@ public class CockpitCam : MonoBehaviour
 
 			// Keep reference to main camera as our active cockpit camera
 			cockpitCamera = mainCam;
+			cockpitAudioListener = cockpitCamera.GetComponent<AudioListener>();
 		}
 
 		// 5. Hide player (no need to parent to vehicle to avoid Netcode NotListeningException)
@@ -487,6 +751,7 @@ public class CockpitCam : MonoBehaviour
 		if (!isDriving) return;
 
 		isDriving = false;
+		vehicleThirdPersonActive = false;
 		
 		// Force lock the cursor upon exiting driving mode so walking first-person view works immediately!
 		if (manageCursor)
@@ -541,6 +806,7 @@ public class CockpitCam : MonoBehaviour
 		{
 			InteractionSystem.Instance.SetExternalInteractPrompt("", false);
 		}
+		ClearVehiclePromptCache();
 	}
 
 	private static float NormalizeAngle(float angle)
@@ -552,27 +818,6 @@ public class CockpitCam : MonoBehaviour
 		return angle;
 	}
 
-	// 🌟 检测视线正前方是否有车门组件 (Furniture_SlideDoor)
-	private Furniture_SlideDoor GetDoorLookTarget()
-	{
-		Camera activeCam = cockpitCamera;
-		if (activeCam == null) activeCam = Camera.main;
-		if (activeCam == null) return null;
-
-		Ray ray = new Ray(activeCam.transform.position, activeCam.transform.forward);
-		
-		// 使用 Physics.Raycast 在驾驶座视距内寻找挂载了 Furniture_SlideDoor 的车门
-		if (Physics.Raycast(ray, out RaycastHit hit, interactDistance))
-		{
-			Furniture_SlideDoor door = hit.collider.GetComponentInParent<Furniture_SlideDoor>();
-			if (door != null)
-			{
-				return door;
-			}
-		}
-		return null;
-	}
-
 	// 🌟 更新车内视角的 UI 交互提示
 	private void UpdateVehicleUiPrompt(ICockpitInteractable target, Furniture_SlideDoor doorTarget)
 	{
@@ -580,22 +825,59 @@ public class CockpitCam : MonoBehaviour
 
 		if (target != null)
 		{
+			if (lastPromptVisible && lastPromptTarget == target)
+			{
+				return;
+			}
+
 			// 用各个按钮分别的名字代替提示的右键交互信息，始终以"[ RMB ] "开头
 			string btnName = GetFriendlyButtonName(target);
 			string promptText = $"[ RMB ] {btnName}";
-			InteractionSystem.Instance.SetExternalInteractPrompt(promptText, true);
+			SetVehiclePrompt(promptText, true, target, null);
 		}
 		else if (doorTarget != null)
 		{
+			if (lastPromptVisible && lastPromptDoorTarget == doorTarget)
+			{
+				return;
+			}
+
 			// 面向车门提示可以开关车门，始终以"[ RMB ] "开头
 			string promptText = "[ RMB ] Toggle Door";
-			InteractionSystem.Instance.SetExternalInteractPrompt(promptText, true);
+			SetVehiclePrompt(promptText, true, null, doorTarget);
 		}
 		else
 		{
+			if (!lastPromptVisible)
+			{
+				return;
+			}
+
 			// 视线中没有可交互目标，隐藏提示文字
-			InteractionSystem.Instance.SetExternalInteractPrompt("", false);
+			SetVehiclePrompt("", false, null, null);
 		}
+	}
+
+	private void SetVehiclePrompt(string text, bool visible, ICockpitInteractable target, Furniture_SlideDoor doorTarget)
+	{
+		if (lastPromptVisible == visible && lastPromptText == text && lastPromptTarget == target && lastPromptDoorTarget == doorTarget)
+		{
+			return;
+		}
+
+		lastPromptVisible = visible;
+		lastPromptText = text;
+		lastPromptTarget = target;
+		lastPromptDoorTarget = doorTarget;
+		InteractionSystem.Instance.SetExternalInteractPrompt(text, visible);
+	}
+
+	private void ClearVehiclePromptCache()
+	{
+		lastPromptVisible = false;
+		lastPromptText = null;
+		lastPromptTarget = null;
+		lastPromptDoorTarget = null;
 	}
 
 	// 🌟 智能个性化英文名映射，为每个排档按钮、引擎、电瓶按钮输出简短英文！

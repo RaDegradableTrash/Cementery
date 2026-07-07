@@ -343,6 +343,8 @@ public class FuelTank : MonoBehaviour
     private void SetDisplayAlpha(float alpha)
     {
         if (displayObject == null) return;
+        if (_propBlock == null)
+            _propBlock = new MaterialPropertyBlock();
 
         Renderer[] renderers = displayObject.GetComponentsInChildren<Renderer>(true);
         foreach (var r in renderers)
