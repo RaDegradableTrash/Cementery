@@ -1,6 +1,6 @@
 # Visual Pipeline Validation
 
-Generated: 2026-07-07 22:15:35
+Generated: 2026-07-07 22:25:33
 
 ## Automated Checks
 
@@ -20,6 +20,7 @@ Generated: 2026-07-07 22:15:35
 | Sampler records profiling counters | PASS | Assets/Scripts/Rendering/VisualPerformanceSampler.cs |
 | Sampler records visual route state | PASS | Assets/Scripts/Rendering/VisualPerformanceSampler.cs |
 | Evidence route driver is available | PASS | Assets/Scripts/Rendering/VisualEvidenceRouteDriver.cs |
+| Evidence route requests phase samples | PASS | Assets/Scripts/Rendering/VisualEvidenceRouteDriver.cs |
 | Report gates latest-session visual evidence | PASS | Assets/Scripts/Rendering/Editor/VisualPerformanceReportGenerator.cs |
 | Color space is Linear | PASS | ProjectSettings/ProjectSettings.asset |
 | Lights use linear intensity | PASS | ProjectSettings/GraphicsSettings.asset |

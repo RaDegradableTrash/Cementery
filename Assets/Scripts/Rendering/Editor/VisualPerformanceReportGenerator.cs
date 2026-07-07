@@ -281,6 +281,7 @@ namespace Cementery.Rendering.Editor
             AppendCheck(builder, "Sampler records profiling counters", ContainsAll(sampler, "ProfilerRecorder", "GC Allocated In Frame", "Main Thread", "Render Thread"), SamplerPath, ref warnings, true);
             AppendCheck(builder, "Sampler records visual route state", ContainsAll(sampler, "time_of_day", "RenderSettings.fog", "ambientIntensity"), SamplerPath, ref failures);
             AppendCheck(builder, "Evidence route driver is available", ContainsAll(evidenceRouteDriver, "VisualEvidenceRouteDriver", "day clear", "night fog"), EvidenceRouteDriverPath, ref failures);
+            AppendCheck(builder, "Evidence route requests phase samples", ContainsAll(evidenceRouteDriver, "TryWriteImmediateSample", "evidence sample for"), EvidenceRouteDriverPath, ref failures);
             AppendCheck(builder, "Report gates latest-session visual evidence", ContainsAll(sampler, "time_of_day") && ContainsAll(reportGenerator, "FindLatestHeaderLine", "Day/night route coverage", "Fog route coverage", "MinimumEvidenceDurationSeconds"), ReportGeneratorPath, ref failures);
             AppendCheck(builder, "Color space is Linear", Contains(projectSettings, "m_ActiveColorSpace: 1"), ProjectSettingsPath, ref failures);
             AppendCheck(builder, "Lights use linear intensity", Contains(graphicsSettings, "m_LightsUseLinearIntensity: 1"), GraphicsSettingsPath, ref failures);

@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 
 namespace Cementery.Rendering
@@ -27,6 +28,7 @@ namespace Cementery.Rendering
         private float _phaseTimer;
         private int _phaseIndex = -1;
         private bool _restored;
+        private Coroutine _phaseSampleRoutine;
 
         private void Awake()
         {
@@ -94,15 +96,36 @@ namespace Cementery.Rendering
             RenderSettings.ambientIntensity = phase.AmbientIntensity;
 
             Debug.Log($"VisualEvidenceRouteDriver: phase {_phaseIndex + 1}/{Phases.Length} {phase.Name}, time {phase.TimeOfDay:F2}, fog {phase.FogEnabled}.");
+            QueuePhaseSample(phase.Name);
         }
 
         private void FinishRoute()
         {
+            VisualPerformanceSampler.TryWriteImmediateSample();
+
             if (restoreOriginalState)
                 RestoreOriginalState();
 
             Debug.Log("VisualEvidenceRouteDriver: route complete. Generate the visual performance report after samples are written.");
             Destroy(gameObject);
+        }
+
+        private void QueuePhaseSample(string phaseName)
+        {
+            if (_phaseSampleRoutine != null)
+                StopCoroutine(_phaseSampleRoutine);
+
+            _phaseSampleRoutine = StartCoroutine(WriteSampleAfterFrame(phaseName));
+        }
+
+        private IEnumerator WriteSampleAfterFrame(string phaseName)
+        {
+            yield return null;
+            yield return new WaitForEndOfFrame();
+
+            bool wroteSample = VisualPerformanceSampler.TryWriteImmediateSample();
+            Debug.Log($"VisualEvidenceRouteDriver: evidence sample for {phaseName} {(wroteSample ? "written" : "unavailable")}.");
+            _phaseSampleRoutine = null;
         }
 
         private void RestoreOriginalState()

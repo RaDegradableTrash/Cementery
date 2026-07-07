@@ -27,6 +27,18 @@ namespace Cementery.Rendering
         private string _samplePath;
         private DayNightSkyboxController _dayNightController;
 
+        public static bool TryWriteImmediateSample()
+        {
+            VisualPerformanceSampler sampler = FindFirstObjectByType<VisualPerformanceSampler>(FindObjectsInactive.Include);
+            if (sampler == null)
+                return false;
+
+            bool wroteSample = sampler.WriteReport();
+            sampler._elapsedSinceReport = 0f;
+            sampler._worstFrameMs = 0f;
+            return wroteSample;
+        }
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()
         {
@@ -86,10 +98,10 @@ namespace Cementery.Rendering
             _worstFrameMs = 0f;
         }
 
-        private void WriteReport()
+        private bool WriteReport()
         {
             if (_sampleCount == 0)
-                return;
+                return false;
 
             float total = 0f;
             for (int i = 0; i < _sampleCount; i++)
@@ -125,6 +137,7 @@ namespace Cementery.Rendering
             string line = $"{Time.realtimeSinceStartup:F2},{sceneName},{averageMs:F2},{p95Ms:F2},{_worstFrameMs:F2},{cpuFrameMs:F2},{gpuFrameMs:F2},{_sampleCount},{totalMemoryMb:F2},{memoryDeltaMb:F2},{gcAllocatedKb:F2},{mainThreadMs:F2},{renderThreadMs:F2},{timeOfDay:F3},{fogEnabled:F0},{RenderSettings.fogDensity:F4},{RenderSettings.fogStartDistance:F2},{RenderSettings.fogEndDistance:F2},{RenderSettings.ambientIntensity:F2}\n";
             File.AppendAllText(_samplePath, line);
             Debug.Log($"VisualPerformanceSampler: avg {averageMs:F2} ms, p95 {p95Ms:F2} ms, worst {_worstFrameMs:F2} ms, CPU {cpuFrameMs:F2} ms, GPU {gpuFrameMs:F2} ms, GC {gcAllocatedKb:F2} KB, main {mainThreadMs:F2} ms, render {renderThreadMs:F2} ms, time {timeOfDay:F3}, fog {RenderSettings.fog}, samples {_sampleCount}, csv {_samplePath}");
+            return true;
         }
 
         private float ReadTimeOfDay()
