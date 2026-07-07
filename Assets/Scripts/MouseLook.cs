@@ -47,7 +47,7 @@ public class MouseLook : MonoBehaviour
 
     [Header("Perspective")]
     [SerializeField] private KeyCode perspectiveToggleKey = KeyCode.V;
-    [SerializeField] private bool startInThirdPerson = false;
+    [SerializeField] private bool startInThirdPerson = true;
     [SerializeField] private float thirdPersonDistance = 6.5f;
     [SerializeField] private float thirdPersonHeight = 1.2f;
     [SerializeField] private float thirdPersonLookAtHeight = 1.1f;
@@ -55,8 +55,11 @@ public class MouseLook : MonoBehaviour
     [SerializeField] private float thirdPersonDefaultPitch = 32f;
     [SerializeField] private float thirdPersonMinPitch = 18f;
     [SerializeField] private float thirdPersonMaxPitch = 58f;
-    [SerializeField] private float thirdPersonPositionSharpness = 14f;
-    [SerializeField] private float thirdPersonRotationSharpness = 18f;
+    [SerializeField] private float thirdPersonPositionSharpness = 9f;
+    [SerializeField] private float thirdPersonRotationSharpness = 14f;
+    [SerializeField] private float thirdPersonMaxRoll = 8f;
+    [SerializeField] private float thirdPersonRollFromMouse = 0.45f;
+    [SerializeField] private float thirdPersonRollReturnSharpness = 7f;
     [SerializeField] private float thirdPersonCollisionRadius = 0.28f;
     [SerializeField] private float thirdPersonCollisionPadding = 0.12f;
     [SerializeField] private LayerMask thirdPersonCollisionMask = ~0;
@@ -64,11 +67,13 @@ public class MouseLook : MonoBehaviour
     [SerializeField] private bool showPlayerModelInThirdPerson = true;
 
     public bool IsThirdPersonActive => _thirdPersonActive;
+    public Transform PlayerTarget => player;
 
     public void SetupCamera(Transform newPlayer, Transform newCameraHolder)
     {
         player = newPlayer;
         cameraHolder = newCameraHolder;
+        _firstPersonParent = cameraHolder;
         
         transform.SetParent(cameraHolder);
         transform.localPosition = Vector3.zero;
@@ -97,6 +102,7 @@ public class MouseLook : MonoBehaviour
 
     public void ForceFirstPersonView()
     {
+        EnsureFirstPersonParent();
         if (!_thirdPersonActive)
         {
             RestoreFirstPersonTransform();
@@ -158,6 +164,7 @@ public void SetBaseRotation(Quaternion targetRotation)
     private Rigidbody _playerRb;
     private float _yaw;
     private float _thirdPersonPitch;
+    private float _thirdPersonRoll;
     private float _lastAppliedPitch = float.NaN;
     private float _lastAppliedYaw = float.NaN;
     private int _inventoryModeCacheFrame = -1;
@@ -167,6 +174,7 @@ public void SetBaseRotation(Quaternion targetRotation)
     private readonly RaycastHit[] _thirdPersonCollisionHits = new RaycastHit[8];
     private Camera _ownCamera;
     private AudioListener _ownAudioListener;
+    private Transform _firstPersonParent;
     private float _nextAudioListenerSyncTime;
     private const float AudioListenerSyncInterval = 0.5f;
 
@@ -193,16 +201,12 @@ public void SetBaseRotation(Quaternion targetRotation)
 
         _ownCamera = GetComponent<Camera>();
         _ownAudioListener = GetComponent<AudioListener>();
+        _firstPersonParent = transform.parent;
 
         _pitch = transform.eulerAngles.x;
         if (_pitch > 180f) _pitch -= 360f;
 
-        if (player != null)
-        {
-            _playerController = player.GetComponent<PlayerController>();
-            _playerRb = player.GetComponent<Rigidbody>();
-            _yaw = player.eulerAngles.y;
-        }
+        ResolvePlayerReferences();
 
         if (cameraHolder != null)
             _holderDefaultLocalPos = cameraHolder.localPosition;
@@ -210,8 +214,8 @@ public void SetBaseRotation(Quaternion targetRotation)
         ResolveAttractPivot();
         InitializeAttractOrbitBaseline();
         CachePlayerRenderers();
-        _thirdPersonActive = startInThirdPerson;
         NormalizeThirdPersonSettings();
+        _thirdPersonActive = startInThirdPerson || ShouldDefaultToThirdPerson();
         InitializeThirdPersonOrbitPitch();
         ApplyPerspectiveImmediate();
     }
@@ -230,6 +234,7 @@ public void SetBaseRotation(Quaternion targetRotation)
 
         if (IsInventoryModeActive())
         {
+            EnsureFirstPersonParent();
             RestoreFirstPersonTransform();
             return;
         }
@@ -250,19 +255,24 @@ public void SetBaseRotation(Quaternion targetRotation)
             return;
 
         SyncOwnedAudioListener(false);
+        ResolvePlayerReferences();
 
-        if (cameraHolder == null) return;
+        if (cameraHolder != null)
+        {
+            Vector3 bob = _playerController != null
+                ? _playerController.BobOffset
+                : Vector3.zero;
 
-        Vector3 bob = _playerController != null
-            ? _playerController.BobOffset
-            : Vector3.zero;
-
-        cameraHolder.localPosition = _holderDefaultLocalPos + bob;
+            cameraHolder.localPosition = _holderDefaultLocalPos + bob;
+        }
 
         if (ShouldUseAttractOrbit())
             ApplyAttractOrbit();
         else if (_thirdPersonActive)
+        {
+            ApplyPlayerRendererVisibility();
             ApplyThirdPersonCamera(false);
+        }
         else
             RestoreFirstPersonTransform();
     }
@@ -279,11 +289,7 @@ public void SetBaseRotation(Quaternion targetRotation)
 
         if (!ShouldUseAttractOrbit() && _thirdPersonActive)
         {
-            _yaw += mouseX;
-            _thirdPersonPitch = Mathf.Clamp(
-                _thirdPersonPitch + mouseY,
-                Mathf.Min(thirdPersonMinPitch, thirdPersonMaxPitch),
-                Mathf.Max(thirdPersonMinPitch, thirdPersonMaxPitch));
+            ApplyThirdPersonLookDelta(mouseX, mouseY);
             return;
         }
 
@@ -407,7 +413,10 @@ public void SetBaseRotation(Quaternion targetRotation)
             ApplyThirdPersonCamera(true);
         }
         else
+        {
+            EnsureFirstPersonParent();
             RestoreFirstPersonTransform();
+        }
 
         SyncOwnedAudioListener(true);
     }
@@ -421,7 +430,10 @@ public void SetBaseRotation(Quaternion targetRotation)
             ApplyThirdPersonCamera(true);
         }
         else
+        {
+            EnsureFirstPersonParent();
             RestoreFirstPersonTransform();
+        }
 
         SyncOwnedAudioListener(true);
     }
@@ -429,6 +441,19 @@ public void SetBaseRotation(Quaternion targetRotation)
     KeyCode GetPerspectiveToggleKey()
     {
         return perspectiveToggleKey == KeyCode.None ? KeyCode.V : perspectiveToggleKey;
+    }
+
+    void ApplyThirdPersonLookDelta(float mouseX, float mouseY)
+    {
+        _yaw += mouseX;
+        _thirdPersonPitch = Mathf.Clamp(
+            _thirdPersonPitch + mouseY,
+            Mathf.Min(thirdPersonMinPitch, thirdPersonMaxPitch),
+            Mathf.Max(thirdPersonMinPitch, thirdPersonMaxPitch));
+        _thirdPersonRoll = Mathf.Clamp(
+            _thirdPersonRoll - mouseX * thirdPersonRollFromMouse,
+            -Mathf.Abs(thirdPersonMaxRoll),
+            Mathf.Abs(thirdPersonMaxRoll));
     }
 
     void NormalizeThirdPersonSettings()
@@ -448,6 +473,12 @@ public void SetBaseRotation(Quaternion targetRotation)
             thirdPersonPositionSharpness = 14f;
         if (thirdPersonRotationSharpness <= 0.01f)
             thirdPersonRotationSharpness = 18f;
+        if (thirdPersonMaxRoll <= 0.01f)
+            thirdPersonMaxRoll = 8f;
+        if (thirdPersonRollFromMouse <= 0.01f)
+            thirdPersonRollFromMouse = 0.45f;
+        if (thirdPersonRollReturnSharpness <= 0.01f)
+            thirdPersonRollReturnSharpness = 7f;
         if (thirdPersonCollisionRadius <= 0.01f)
             thirdPersonCollisionRadius = 0.28f;
         if (thirdPersonCollisionPadding <= 0.01f)
@@ -464,15 +495,23 @@ public void SetBaseRotation(Quaternion targetRotation)
 
     void ApplyThirdPersonCamera(bool snap)
     {
-        if (cameraHolder == null)
+        ResolvePlayerReferences();
+        if (player == null)
             return;
 
-        Transform reference = player != null ? player : cameraHolder;
+        if (transform.parent != null)
+            transform.SetParent(null, true);
+
+        Transform reference = player;
         float minPitch = Mathf.Min(thirdPersonMinPitch, thirdPersonMaxPitch);
         float maxPitch = Mathf.Max(thirdPersonMinPitch, thirdPersonMaxPitch);
         float orbitPitch = Mathf.Clamp(_thirdPersonPitch, minPitch, maxPitch);
         float distance = Mathf.Clamp(thirdPersonDistance, 4f, 9f);
         float height = Mathf.Clamp(thirdPersonHeight, 0f, 3f);
+        _thirdPersonRoll = Mathf.Lerp(
+            _thirdPersonRoll,
+            0f,
+            1f - Mathf.Exp(-thirdPersonRollReturnSharpness * Mathf.Max(0f, Time.deltaTime)));
 
         Vector3 lookTarget = reference.position + Vector3.up * Mathf.Max(0.1f, thirdPersonLookAtHeight);
         Quaternion orbitRotation = Quaternion.Euler(orbitPitch, _yaw, 0f);
@@ -484,7 +523,8 @@ public void SetBaseRotation(Quaternion targetRotation)
         if (lookDirection.sqrMagnitude < 0.001f)
             lookDirection = reference.forward;
 
-        Quaternion desiredRotation = Quaternion.LookRotation(lookDirection.normalized, Vector3.up);
+        Quaternion desiredRotation = Quaternion.LookRotation(lookDirection.normalized, Vector3.up)
+            * Quaternion.Euler(0f, 0f, _thirdPersonRoll);
 
         if (snap || Time.deltaTime <= 0f)
         {
@@ -537,6 +577,7 @@ public void SetBaseRotation(Quaternion targetRotation)
         if (cameraHolder == null)
             return;
 
+        EnsureFirstPersonParent();
         transform.localPosition = Vector3.zero;
         if (!ShouldUseAttractOrbit())
             transform.localRotation = Quaternion.Euler(_pitch, 0f, 0f);
@@ -549,7 +590,7 @@ public void SetBaseRotation(Quaternion targetRotation)
 
     void ApplyPlayerRendererVisibility()
     {
-        if (!showPlayerModelInThirdPerson)
+        if (!showPlayerModelInThirdPerson && !_thirdPersonActive)
             return;
 
         if (_playerRenderers == null || _playerRenderers.Length == 0)
@@ -607,6 +648,56 @@ public void SetBaseRotation(Quaternion targetRotation)
             if (listener.enabled != shouldEnable)
                 listener.enabled = shouldEnable;
         }
+    }
+
+    void ResolvePlayerReferences()
+    {
+        if (player == null)
+        {
+            PlayerController controller = GetComponentInParent<PlayerController>();
+            if (controller == null)
+                controller = FindObjectOfType<PlayerController>();
+
+            if (controller != null)
+                player = controller.transform;
+        }
+
+        if (cameraHolder == null)
+        {
+            if (_firstPersonParent != null)
+                cameraHolder = _firstPersonParent;
+            else if (player != null)
+                cameraHolder = FindChildByName(player, "CameraHolderEmpty");
+            else if (transform.parent != null)
+                cameraHolder = transform.parent;
+        }
+
+        if (_firstPersonParent == null && cameraHolder != null)
+            _firstPersonParent = cameraHolder;
+
+        if (player != null)
+        {
+            if (_playerController == null)
+                _playerController = player.GetComponent<PlayerController>();
+            if (_playerRb == null)
+                _playerRb = player.GetComponent<Rigidbody>();
+            if (_playerRenderers == null || _playerRenderers.Length == 0)
+                CachePlayerRenderers();
+        }
+    }
+
+    void EnsureFirstPersonParent()
+    {
+        if (cameraHolder == null)
+            ResolvePlayerReferences();
+
+        if (cameraHolder != null && transform.parent != cameraHolder)
+            transform.SetParent(cameraHolder, true);
+    }
+
+    bool ShouldDefaultToThirdPerson()
+    {
+        return player != null && !ShouldUseAttractOrbit();
     }
 
     static Transform FindChildByName(Transform root, string childName)

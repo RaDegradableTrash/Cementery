@@ -12,6 +12,10 @@ public class PlayerController : NetworkBehaviour
     [Header("Movement")]
     public float walkSpeed = 4f;
     public float sprintSpeed = 7f;
+    [SerializeField] private float thirdPersonAcceleration = 18f;
+    [SerializeField] private float thirdPersonDeceleration = 24f;
+    [SerializeField] private float thirdPersonTurnSharpness = 12f;
+    [SerializeField] private float thirdPersonStopSpeed = 0.05f;
 
     [Header("Health")]
     public int hp = 10;
@@ -291,7 +295,7 @@ public class PlayerController : NetworkBehaviour
         // Skip animation logic if dead or menu is open
         if (hp <= 0 || GameMenuManager.IsMenuOpen) return;
 
-        bool isMovingForward = _inputMove.y > 0.1f && _isGrounded;
+        bool isMovingForward = _inputMove.sqrMagnitude > 0.01f && _isGrounded;
         
         if (isMovingForward && !_isMovingForwardAnim)
         {
@@ -517,7 +521,9 @@ SimpleCircleBar.Instance.UpdateHealthBar(hp, maxHp);
     {
         bool wantsSprint = Input.GetKey(KeyCode.LeftShift);
         bool canSprint   = _stamina == null || _stamina.HasStamina;
-        bool isSprinting = wantsSprint && canSprint && _inputMove.y > 0.1f;
+        bool isThirdPerson = mouseLook != null && mouseLook.IsThirdPersonActive;
+        bool hasMoveInput = _inputMove.sqrMagnitude > 0.01f;
+        bool isSprinting = wantsSprint && canSprint && hasMoveInput;
 
         if (isSprinting)
             _stamina?.Drain();
@@ -526,12 +532,16 @@ SimpleCircleBar.Instance.UpdateHealthBar(hp, maxHp);
 
         float speed = (isSprinting ? sprintSpeed : walkSpeed) * SpeedMultiplier;
 
-        Vector3 moveDir = transform.right * _inputMove.x + transform.forward * _inputMove.y;
+        Vector3 moveDir = isThirdPerson
+            ? BuildScreenRelativeMoveDirection()
+            : transform.right * _inputMove.x + transform.forward * _inputMove.y;
         if (moveDir.sqrMagnitude > 1f)
             moveDir.Normalize();
 
         Vector3 targetVelocity = moveDir * speed;
-        
+        if (isThirdPerson)
+            ApplyThirdPersonFacing(moveDir);
+
         // --- Wall Slide Projection ---
         if (_isTouchingWall)
         {
@@ -586,17 +596,68 @@ SimpleCircleBar.Instance.UpdateHealthBar(hp, maxHp);
 
         // --- Final Velocity Assignment ---
         Vector3 currentHorizontal = new Vector3(_rb.velocity.x, 0, _rb.velocity.z);
-        Vector3 velocityChange = targetVelocity - currentHorizontal;
-        
-        float maxAccel = 150f; 
-        velocityChange = Vector3.ClampMagnitude(velocityChange, maxAccel * Time.fixedDeltaTime);
-        
-        _rb.AddForce(velocityChange, ForceMode.VelocityChange);
-        
+        Vector3 nextHorizontal;
+        if (isThirdPerson)
+        {
+            float accel = targetVelocity.sqrMagnitude > 0.01f ? thirdPersonAcceleration : thirdPersonDeceleration;
+            nextHorizontal = Vector3.MoveTowards(currentHorizontal, targetVelocity, Mathf.Max(1f, accel) * Time.fixedDeltaTime);
+            if (targetVelocity.sqrMagnitude <= 0.01f && nextHorizontal.sqrMagnitude < thirdPersonStopSpeed * thirdPersonStopSpeed)
+                nextHorizontal = Vector3.zero;
+        }
+        else
+        {
+            Vector3 velocityChange = targetVelocity - currentHorizontal;
+            float maxAccel = 150f;
+            velocityChange = Vector3.ClampMagnitude(velocityChange, maxAccel * Time.fixedDeltaTime);
+            nextHorizontal = currentHorizontal + velocityChange;
+        }
+
+        _rb.AddForce(nextHorizontal - currentHorizontal, ForceMode.VelocityChange);
+
         if (Mathf.Abs(verticalVelocity - _rb.velocity.y) > 0.001f)
         {
             _rb.velocity = new Vector3(_rb.velocity.x, verticalVelocity, _rb.velocity.z);
         }
+    }
+
+    Vector3 BuildScreenRelativeMoveDirection()
+    {
+        Transform cameraTransform = mouseLook != null ? mouseLook.transform : null;
+        Vector3 screenUp = cameraTransform != null
+            ? Vector3.ProjectOnPlane(cameraTransform.forward, Vector3.up)
+            : transform.forward;
+        Vector3 screenRight = cameraTransform != null
+            ? Vector3.ProjectOnPlane(cameraTransform.right, Vector3.up)
+            : transform.right;
+
+        if (screenUp.sqrMagnitude < 0.001f)
+            screenUp = Vector3.ProjectOnPlane(transform.forward, Vector3.up);
+        if (screenRight.sqrMagnitude < 0.001f)
+            screenRight = Vector3.Cross(Vector3.up, screenUp);
+
+        screenUp.Normalize();
+        screenRight.Normalize();
+
+        Vector3 moveDir = screenRight * _inputMove.x + screenUp * _inputMove.y;
+        if (moveDir.sqrMagnitude > 1f)
+            moveDir.Normalize();
+
+        return moveDir;
+    }
+
+    void ApplyThirdPersonFacing(Vector3 moveDir)
+    {
+        if (moveDir.sqrMagnitude <= 0.001f)
+            return;
+
+        Quaternion targetRotation = Quaternion.LookRotation(moveDir.normalized, Vector3.up);
+        float rotationLerp = 1f - Mathf.Exp(-Mathf.Max(1f, thirdPersonTurnSharpness) * Time.fixedDeltaTime);
+        Quaternion nextRotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationLerp);
+
+        if (_rb != null)
+            _rb.MoveRotation(nextRotation);
+        else
+            transform.rotation = nextRotation;
     }
 
     void CheckGrounded()
