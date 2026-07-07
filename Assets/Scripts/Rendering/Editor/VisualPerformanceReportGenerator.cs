@@ -13,6 +13,7 @@ namespace Cementery.Rendering.Editor
         private const string SampleFileName = "visual-performance-samples.csv";
         private const string ReportPath = "Assets/Docs/Visual_Performance_Last_Run.md";
         private const string ValidationReportPath = "Assets/Docs/Visual_Pipeline_Validation.md";
+        private const string ScreenshotDirectoryName = "visual-evidence-route";
         private const string PendingEvidenceRouteKey = "Cementery.VisualEvidenceRoute.Pending";
         private const string RunningEvidenceRouteKey = "Cementery.VisualEvidenceRoute.Running";
         private const string UrpAssetPath = "Assets/Settings/URP/URP_Performance.asset";
@@ -232,6 +233,7 @@ namespace Cementery.Rendering.Editor
             builder.AppendLine();
             builder.AppendLine($"Generated: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
             builder.AppendLine($"Source CSV: `{samplePath}`");
+            builder.AppendLine($"Screenshot directory: `{Path.Combine(Application.persistentDataPath, ScreenshotDirectoryName)}`");
             builder.AppendLine($"CSV session starts at data line: {summary.SessionStartLine}");
             builder.AppendLine();
 
@@ -280,6 +282,7 @@ namespace Cementery.Rendering.Editor
             builder.AppendLine();
             builder.AppendLine("- Pair this report with a Unity Profiler capture for final merge evidence.");
             builder.AppendLine("- Re-run after render pipeline, cloud, fog, particle, UI animation, camera, or chunk-loading changes.");
+            builder.AppendLine("- Review the route screenshots for day, sunset, night fog, and dawn readability before claiming visual polish complete.");
             builder.AppendLine("- Evidence coverage checks prove only that the route sampled required day/night/fog states; screenshots and profiler captures are still required to judge readability and cost.");
             return builder.ToString();
         }
@@ -325,6 +328,7 @@ namespace Cementery.Rendering.Editor
             AppendCheck(builder, "Sampler records visual route state", ContainsAll(sampler, "time_of_day", "RenderSettings.fog", "ambientIntensity"), SamplerPath, ref failures);
             AppendCheck(builder, "Evidence route driver is available", ContainsAll(evidenceRouteDriver, "VisualEvidenceRouteDriver", "day clear", "night fog"), EvidenceRouteDriverPath, ref failures);
             AppendCheck(builder, "Evidence route requests phase samples", ContainsAll(evidenceRouteDriver, "TryWriteImmediateSample", "evidence sample for"), EvidenceRouteDriverPath, ref failures);
+            AppendCheck(builder, "Evidence route captures phase screenshots", ContainsAll(evidenceRouteDriver, "ScreenCapture.CaptureScreenshot", "visual-evidence-route", "visual-evidence-"), EvidenceRouteDriverPath, ref failures);
             AppendCheck(builder, "Evidence route can launch from Edit Mode", ContainsAll(reportGenerator, "SessionState", "EnteredPlayMode", "Visual evidence route queued"), ReportGeneratorPath, ref failures);
             AppendCheck(builder, "Evidence route auto-generates report", ContainsAll(reportGenerator, "RunningEvidenceRouteKey", "GenerateReport", "visual performance report generation was requested"), ReportGeneratorPath, ref failures);
             AppendCheck(builder, "Report gates latest-session visual evidence", ContainsAll(sampler, "time_of_day") && ContainsAll(reportGenerator, "FindLatestHeaderLine", "Day/night route coverage", "Fog route coverage", "MinimumEvidenceDurationSeconds"), ReportGeneratorPath, ref failures);

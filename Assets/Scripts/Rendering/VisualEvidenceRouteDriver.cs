@@ -1,4 +1,5 @@
 using System.Collections;
+using System.IO;
 using UnityEngine;
 
 namespace Cementery.Rendering
@@ -7,6 +8,7 @@ namespace Cementery.Rendering
     {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
         private const float DefaultPhaseDurationSeconds = 10f;
+        private const string ScreenshotDirectoryName = "visual-evidence-route";
 
         private static readonly Phase[] Phases =
         {
@@ -29,10 +31,12 @@ namespace Cementery.Rendering
         private int _phaseIndex = -1;
         private bool _restored;
         private Coroutine _phaseSampleRoutine;
+        private string _screenshotDirectory;
 
         private void Awake()
         {
             DontDestroyOnLoad(gameObject);
+            PrepareScreenshotDirectory();
             _dayNightController = FindFirstObjectByType<DayNightSkyboxController>(FindObjectsInactive.Include);
             if (_dayNightController == null)
             {
@@ -124,8 +128,40 @@ namespace Cementery.Rendering
             yield return new WaitForEndOfFrame();
 
             bool wroteSample = VisualPerformanceSampler.TryWriteImmediateSample();
-            Debug.Log($"VisualEvidenceRouteDriver: evidence sample for {phaseName} {(wroteSample ? "written" : "unavailable")}.");
+            string screenshotPath = CapturePhaseScreenshot(phaseName);
+            Debug.Log($"VisualEvidenceRouteDriver: evidence sample for {phaseName} {(wroteSample ? "written" : "unavailable")}, screenshot {screenshotPath}.");
             _phaseSampleRoutine = null;
+        }
+
+        private void PrepareScreenshotDirectory()
+        {
+            _screenshotDirectory = Path.Combine(Application.persistentDataPath, ScreenshotDirectoryName);
+            Directory.CreateDirectory(_screenshotDirectory);
+
+            string[] oldScreenshots = Directory.GetFiles(_screenshotDirectory, "visual-evidence-*.png");
+            for (int i = 0; i < oldScreenshots.Length; i++)
+                File.Delete(oldScreenshots[i]);
+        }
+
+        private string CapturePhaseScreenshot(string phaseName)
+        {
+            if (string.IsNullOrEmpty(_screenshotDirectory))
+                PrepareScreenshotDirectory();
+
+            string filename = $"visual-evidence-{_phaseIndex + 1:00}-{SanitizeFilename(phaseName)}.png";
+            string screenshotPath = Path.Combine(_screenshotDirectory, filename);
+            ScreenCapture.CaptureScreenshot(screenshotPath);
+            return screenshotPath;
+        }
+
+        private static string SanitizeFilename(string value)
+        {
+            string sanitized = value.ToLowerInvariant().Replace(' ', '-');
+            char[] invalidChars = Path.GetInvalidFileNameChars();
+            for (int i = 0; i < invalidChars.Length; i++)
+                sanitized = sanitized.Replace(invalidChars[i].ToString(), string.Empty);
+
+            return sanitized;
         }
 
         private void RestoreOriginalState()
