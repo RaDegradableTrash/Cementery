@@ -120,6 +120,7 @@ public class CockpitCam : MonoBehaviour
 		SetupLineRenderer();
 		SetLook(false);
 		carControl = GetComponentInParent<CarControl>();
+		NormalizeVehicleThirdPersonSettings();
 	}
 
 	private void OnEnable()
@@ -137,7 +138,8 @@ public class CockpitCam : MonoBehaviour
 
 		SyncCockpitAudioListener();
 
-		if (Input.GetKeyDown(switchPerspectiveKey))
+		KeyCode perspectiveKey = GetVehiclePerspectiveKey();
+		if (perspectiveKey != KeyCode.None && Input.GetKeyDown(perspectiveKey))
 		{
 			SetVehicleThirdPersonActive(!vehicleThirdPersonActive, true);
 		}
@@ -286,6 +288,7 @@ public class CockpitCam : MonoBehaviour
 		if (vehicleThirdPersonActive == active)
 			return;
 
+		NormalizeVehicleThirdPersonSettings();
 		vehicleThirdPersonActive = active;
 		SetLook(true);
 		SyncCockpitAudioListener();
@@ -300,6 +303,40 @@ public class CockpitCam : MonoBehaviour
 		}
 
 		RestoreCockpitCameraTransform();
+	}
+
+	private KeyCode GetVehiclePerspectiveKey()
+	{
+		return switchPerspectiveKey == KeyCode.None ? KeyCode.V : switchPerspectiveKey;
+	}
+
+	private void NormalizeVehicleThirdPersonSettings()
+	{
+		if (vehicleThirdPersonDistance <= 0.01f)
+			vehicleThirdPersonDistance = 12f;
+		if (vehicleThirdPersonHeight <= 0.01f)
+			vehicleThirdPersonHeight = 7f;
+		if (vehicleThirdPersonLookAhead <= 0.01f)
+			vehicleThirdPersonLookAhead = 1.5f;
+		if (vehicleThirdPersonPitch <= 0.01f)
+			vehicleThirdPersonPitch = 22f;
+		if (vehicleThirdPersonMinPitch <= -0.01f && vehicleThirdPersonMaxPitch <= 0.01f)
+			vehicleThirdPersonMaxPitch = 45f;
+		else if (Mathf.Approximately(vehicleThirdPersonMinPitch, vehicleThirdPersonMaxPitch))
+		{
+			vehicleThirdPersonMinPitch = -10f;
+			vehicleThirdPersonMaxPitch = 45f;
+		}
+		if (vehicleThirdPersonPositionSharpness <= 0.01f)
+			vehicleThirdPersonPositionSharpness = 10f;
+		if (vehicleThirdPersonRotationSharpness <= 0.01f)
+			vehicleThirdPersonRotationSharpness = 14f;
+		if (vehicleThirdPersonRecenterSpeed <= 0.01f)
+			vehicleThirdPersonRecenterSpeed = 1.5f;
+		if (vehicleThirdPersonCollisionRadius <= 0.01f)
+			vehicleThirdPersonCollisionRadius = 0.45f;
+		if (vehicleThirdPersonCollisionPadding <= 0.01f)
+			vehicleThirdPersonCollisionPadding = 0.2f;
 	}
 
 	private void RestoreCockpitCameraTransform()
