@@ -19,6 +19,7 @@ Generated: 2026-07-07 22:02:00
 | Sampler records profiling counters | PASS | Assets/Scripts/Rendering/VisualPerformanceSampler.cs |
 | Sampler records visual route state | PASS | Assets/Scripts/Rendering/VisualPerformanceSampler.cs |
 | Evidence route driver is available | PASS | Assets/Scripts/Rendering/VisualEvidenceRouteDriver.cs |
+| Report gates visual evidence coverage | PASS | Assets/Scripts/Rendering/Editor/VisualPerformanceReportGenerator.cs |
 | Color space is Linear | PASS | ProjectSettings/ProjectSettings.asset |
 | Lights use linear intensity | PASS | ProjectSettings/GraphicsSettings.asset |
 

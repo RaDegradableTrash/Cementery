@@ -26,7 +26,7 @@ Use this checklist before merging render pipeline, post-processing, camera, UI a
 - In Editor Play Mode, run `Cementery > Performance > Start Visual Evidence Route` to cycle controlled day clear, sunset haze, night fog, and dawn fog states while the sampler is recording.
 - Unity Profiler recording with CPU Timeline, Rendering, Memory, and GC Alloc columns visible.
 - In Editor Play Mode or a development build, collect `visual-performance-samples.csv` from `Application.persistentDataPath` after running the route. The sampler records average, p95, worst frame time, latest CPU/GPU frame timing when available, managed-memory trend, GC allocation, optional main/render thread counters, time-of-day coverage, fog state, fog density/range, and ambient intensity.
-- In the Unity Editor, run `Cementery > Performance > Generate Visual Performance Report` to convert the CSV into `Assets/Docs/Visual_Performance_Last_Run.md`.
+- In the Unity Editor, run `Cementery > Performance > Generate Visual Performance Report` to convert the CSV into `Assets/Docs/Visual_Performance_Last_Run.md`. The report must show passing route coverage for evidence duration, day/night samples, and fog samples before it can support visual-readability claims.
 - Frame Debugger or RenderDoc pass count when render pipeline, post-processing, cloud, fog, or shadow settings change.
 - Before/after screenshots for day, sunset, night, and fog/cloud-heavy states.
 - Before/after build target and quality level listed in the PR.
@@ -75,6 +75,7 @@ Follow-up issues:
 - `Assets/Scripts/Rendering/VisualPerformanceSampler.cs` writes development/editor CSV samples with average, p95, worst frame time, CPU/GPU frame timing, managed memory trend, GC allocation, main/render thread counters when Unity exposes them, and visual-state coverage for day/night/fog readability checks.
 - `Assets/Scripts/Rendering/VisualEvidenceRouteDriver.cs` is an opt-in Play Mode route driver for repeatable day/sunset/night-fog/dawn sample coverage and restores the original visual state when finished.
 - `Assets/Scripts/Rendering/Editor/VisualPerformanceReportGenerator.cs` converts sampler CSV output into `Assets/Docs/Visual_Performance_Last_Run.md` for review and remains compatible with older 10-column sample files.
+- The generated report includes explicit evidence gates for sample duration, day/night coverage, and fog coverage so narrow runs cannot be treated as proof for visual-readability work.
 - `Cementery > Performance > Validate Visual Pipeline Setup` writes `Assets/Docs/Visual_Pipeline_Validation.md` and checks the renderer asset, vibrant volume wiring, camera-gated post-processing, frame timing stats, and sampler presence before runtime profiling.
 - `ProjectSettings/ProjectSettings.asset` has frame timing stats enabled so CPU/GPU frame timing can be captured where the runtime supports it.
 - Known expensive visual systems to watch: custom volumetric clouds, snow accumulation, silhouette/outline rendering, fog volumes, screen shatter, and additive chunk loading.

@@ -21,11 +21,13 @@ namespace Cementery.Rendering.Editor
         private const string BootstrapperPath = "Assets/Scripts/Rendering/VisualPipelineBootstrapper.cs";
         private const string SamplerPath = "Assets/Scripts/Rendering/VisualPerformanceSampler.cs";
         private const string EvidenceRouteDriverPath = "Assets/Scripts/Rendering/VisualEvidenceRouteDriver.cs";
+        private const string ReportGeneratorPath = "Assets/Scripts/Rendering/Editor/VisualPerformanceReportGenerator.cs";
         private const string VibrantVolumeGuid = "cc75cfaad567e424a8a59c3fc3927bbc";
         private const float DesktopAverageBudgetMs = 16.67f;
         private const float DesktopP95BudgetMs = 22f;
         private const float WebAverageBudgetMs = 33.33f;
         private const float WebP95BudgetMs = 40f;
+        private const float MinimumEvidenceDurationSeconds = 30f;
 
         [MenuItem("Cementery/Performance/Generate Visual Performance Report")]
         public static void GenerateReport()
@@ -183,13 +185,14 @@ namespace Cementery.Rendering.Editor
 
             float averageMs = summary.AverageSumMs / summary.SampleRows;
             float memoryDeltaMb = summary.EndMemoryMb - summary.StartMemoryMb;
+            float durationSeconds = Mathf.Max(0f, summary.LastTimestamp - summary.FirstTimestamp);
             builder.AppendLine("## Summary");
             builder.AppendLine();
             builder.AppendLine("| Metric | Value |");
             builder.AppendLine("| --- | --- |");
             builder.AppendLine($"| Scene | {summary.LastScene} |");
             builder.AppendLine($"| Sample rows | {summary.SampleRows} |");
-            builder.AppendLine($"| Duration | {Mathf.Max(0f, summary.LastTimestamp - summary.FirstTimestamp):F2} s |");
+            builder.AppendLine($"| Duration | {durationSeconds:F2} s |");
             builder.AppendLine($"| Average frame time | {averageMs:F2} ms |");
             builder.AppendLine($"| Worst p95 frame time | {summary.MaxP95Ms:F2} ms |");
             builder.AppendLine($"| Worst single frame | {summary.MaxWorstMs:F2} ms |");
@@ -211,12 +214,15 @@ namespace Cementery.Rendering.Editor
             builder.AppendLine("| --- | --- |");
             builder.AppendLine($"| Desktop 60 FPS | {FormatVerdict(averageMs <= DesktopAverageBudgetMs && summary.MaxP95Ms <= DesktopP95BudgetMs)} |");
             builder.AppendLine($"| WebGL 30 FPS | {FormatVerdict(averageMs <= WebAverageBudgetMs && summary.MaxP95Ms <= WebP95BudgetMs)} |");
+            builder.AppendLine($"| Evidence duration | {FormatVerdict(durationSeconds >= MinimumEvidenceDurationSeconds)} |");
+            builder.AppendLine($"| Day/night route coverage | {FormatCoverageVerdict(HasDayNightCoverage(summary))} |");
+            builder.AppendLine($"| Fog route coverage | {FormatCoverageVerdict(HasFogCoverage(summary))} |");
             builder.AppendLine();
             builder.AppendLine("## Notes");
             builder.AppendLine();
             builder.AppendLine("- Pair this report with a Unity Profiler capture for final merge evidence.");
             builder.AppendLine("- Re-run after render pipeline, cloud, fog, particle, UI animation, camera, or chunk-loading changes.");
-            builder.AppendLine("- Time-of-day and fog rows prove whether the run covered night/fog readability states; missing values mean the CSV was captured before visual-state sampling existed.");
+            builder.AppendLine("- Evidence coverage checks prove only that the route sampled required day/night/fog states; screenshots and profiler captures are still required to judge readability and cost.");
             return builder.ToString();
         }
 
@@ -244,6 +250,7 @@ namespace Cementery.Rendering.Editor
             string bootstrapper = ReadOptional(BootstrapperPath);
             string sampler = ReadOptional(SamplerPath);
             string evidenceRouteDriver = ReadOptional(EvidenceRouteDriverPath);
+            string reportGenerator = ReadOptional(ReportGeneratorPath);
 
             AppendCheck(builder, "URP asset exists", urpAsset != null, UrpAssetPath, ref failures);
             AppendCheck(builder, "Renderer asset exists", rendererAsset != null, RendererAssetPath, ref failures);
@@ -258,6 +265,7 @@ namespace Cementery.Rendering.Editor
             AppendCheck(builder, "Sampler records profiling counters", ContainsAll(sampler, "ProfilerRecorder", "GC Allocated In Frame", "Main Thread", "Render Thread"), SamplerPath, ref warnings, true);
             AppendCheck(builder, "Sampler records visual route state", ContainsAll(sampler, "time_of_day", "RenderSettings.fog", "ambientIntensity"), SamplerPath, ref failures);
             AppendCheck(builder, "Evidence route driver is available", ContainsAll(evidenceRouteDriver, "VisualEvidenceRouteDriver", "day clear", "night fog"), EvidenceRouteDriverPath, ref failures);
+            AppendCheck(builder, "Report gates visual evidence coverage", ContainsAll(sampler, "time_of_day") && ContainsAll(reportGenerator, "Day/night route coverage", "Fog route coverage", "MinimumEvidenceDurationSeconds"), ReportGeneratorPath, ref failures);
             AppendCheck(builder, "Color space is Linear", Contains(projectSettings, "m_ActiveColorSpace: 1"), ProjectSettingsPath, ref failures);
             AppendCheck(builder, "Lights use linear intensity", Contains(graphicsSettings, "m_LightsUseLinearIntensity: 1"), GraphicsSettingsPath, ref failures);
 
@@ -368,6 +376,21 @@ namespace Cementery.Rendering.Editor
         private static string FormatVerdict(bool pass)
         {
             return pass ? "PASS" : "NEEDS PROFILING REVIEW";
+        }
+
+        private static string FormatCoverageVerdict(bool pass)
+        {
+            return pass ? "PASS" : "NEEDS ROUTE COVERAGE";
+        }
+
+        private static bool HasDayNightCoverage(Summary summary)
+        {
+            return summary.VisualStateRows > 0 && summary.MinTimeOfDay <= 0.08f && summary.MaxTimeOfDay >= 0.45f;
+        }
+
+        private static bool HasFogCoverage(Summary summary)
+        {
+            return summary.VisualStateRows > 0 && summary.FogEnabledRows > 0 && summary.MaxFogDensity >= 0.004f;
         }
 
         private struct Summary
