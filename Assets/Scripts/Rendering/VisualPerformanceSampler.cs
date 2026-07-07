@@ -25,6 +25,7 @@ namespace Cementery.Rendering
         private float _worstFrameMs;
         private long _lastTotalMemory;
         private string _samplePath;
+        private DayNightSkyboxController _dayNightController;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()
@@ -49,8 +50,13 @@ namespace Cementery.Rendering
             {
                 File.WriteAllText(_samplePath, CsvHeader + "\n");
             }
-            string existingCsv = File.ReadAllText(_samplePath);
-            if (!existingCsv.Contains("time_of_day"))
+            string firstLine;
+            using (StreamReader reader = File.OpenText(_samplePath))
+            {
+                firstLine = reader.ReadLine();
+            }
+
+            if (firstLine == null || !firstLine.Contains("time_of_day"))
             {
                 File.AppendAllText(_samplePath, CsvHeader + "\n");
             }
@@ -123,10 +129,12 @@ namespace Cementery.Rendering
             Debug.Log($"VisualPerformanceSampler: avg {averageMs:F2} ms, p95 {p95Ms:F2} ms, worst {_worstFrameMs:F2} ms, CPU {cpuFrameMs:F2} ms, GPU {gpuFrameMs:F2} ms, GC {gcAllocatedKb:F2} KB, main {mainThreadMs:F2} ms, render {renderThreadMs:F2} ms, time {timeOfDay:F3}, fog {RenderSettings.fog}, samples {_sampleCount}, csv {_samplePath}");
         }
 
-        private static float ReadTimeOfDay()
+        private float ReadTimeOfDay()
         {
-            DayNightSkyboxController controller = FindFirstObjectByType<DayNightSkyboxController>(FindObjectsInactive.Include);
-            return controller != null ? controller.timeOfDay : -1f;
+            if (_dayNightController == null)
+                _dayNightController = FindFirstObjectByType<DayNightSkyboxController>(FindObjectsInactive.Include);
+
+            return _dayNightController != null ? _dayNightController.timeOfDay : -1f;
         }
 
         private static float ReadCounterKilobytes(ProfilerRecorder recorder)

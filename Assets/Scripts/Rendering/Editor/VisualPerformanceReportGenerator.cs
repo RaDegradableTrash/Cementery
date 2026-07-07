@@ -20,6 +20,7 @@ namespace Cementery.Rendering.Editor
         private const string GraphicsSettingsPath = "ProjectSettings/GraphicsSettings.asset";
         private const string BootstrapperPath = "Assets/Scripts/Rendering/VisualPipelineBootstrapper.cs";
         private const string SamplerPath = "Assets/Scripts/Rendering/VisualPerformanceSampler.cs";
+        private const string EvidenceRouteDriverPath = "Assets/Scripts/Rendering/VisualEvidenceRouteDriver.cs";
         private const string VibrantVolumeGuid = "cc75cfaad567e424a8a59c3fc3927bbc";
         private const float DesktopAverageBudgetMs = 16.67f;
         private const float DesktopP95BudgetMs = 22f;
@@ -57,6 +58,29 @@ namespace Cementery.Rendering.Editor
             File.WriteAllText(ValidationReportPath, report);
             AssetDatabase.ImportAsset(ValidationReportPath);
             Debug.Log($"Visual pipeline validation report written to {ValidationReportPath}");
+        }
+
+        [MenuItem("Cementery/Performance/Start Visual Evidence Route")]
+        public static void StartVisualEvidenceRoute()
+        {
+            if (!Application.isPlaying)
+            {
+                Debug.LogWarning("Enter Play Mode before starting the visual evidence route.");
+                return;
+            }
+
+            VisualEvidenceRouteDriver existing = UnityEngine.Object.FindFirstObjectByType<VisualEvidenceRouteDriver>(FindObjectsInactive.Include);
+            if (existing != null)
+            {
+                Selection.activeObject = existing.gameObject;
+                Debug.Log("Visual evidence route is already running.");
+                return;
+            }
+
+            GameObject go = new GameObject("VisualEvidenceRouteDriver");
+            go.AddComponent<VisualEvidenceRouteDriver>();
+            Selection.activeObject = go;
+            Debug.Log("Visual evidence route started. Keep Play Mode running until the route completion log appears, then generate the visual performance report.");
         }
 
         private static Summary BuildSummary(string[] lines)
@@ -219,6 +243,7 @@ namespace Cementery.Rendering.Editor
             string graphicsSettings = ReadOptional(GraphicsSettingsPath);
             string bootstrapper = ReadOptional(BootstrapperPath);
             string sampler = ReadOptional(SamplerPath);
+            string evidenceRouteDriver = ReadOptional(EvidenceRouteDriverPath);
 
             AppendCheck(builder, "URP asset exists", urpAsset != null, UrpAssetPath, ref failures);
             AppendCheck(builder, "Renderer asset exists", rendererAsset != null, RendererAssetPath, ref failures);
@@ -232,6 +257,7 @@ namespace Cementery.Rendering.Editor
             AppendCheck(builder, "Sampler writes frame-time CSV", ContainsAll(sampler, "visual-performance-samples.csv", "p95", "FrameTimingManager"), SamplerPath, ref failures);
             AppendCheck(builder, "Sampler records profiling counters", ContainsAll(sampler, "ProfilerRecorder", "GC Allocated In Frame", "Main Thread", "Render Thread"), SamplerPath, ref warnings, true);
             AppendCheck(builder, "Sampler records visual route state", ContainsAll(sampler, "time_of_day", "RenderSettings.fog", "ambientIntensity"), SamplerPath, ref failures);
+            AppendCheck(builder, "Evidence route driver is available", ContainsAll(evidenceRouteDriver, "VisualEvidenceRouteDriver", "day clear", "night fog"), EvidenceRouteDriverPath, ref failures);
             AppendCheck(builder, "Color space is Linear", Contains(projectSettings, "m_ActiveColorSpace: 1"), ProjectSettingsPath, ref failures);
             AppendCheck(builder, "Lights use linear intensity", Contains(graphicsSettings, "m_LightsUseLinearIntensity: 1"), GraphicsSettingsPath, ref failures);
 

@@ -18,6 +18,7 @@ Generated: 2026-07-07 22:02:00
 | Sampler writes frame-time CSV | PASS | Assets/Scripts/Rendering/VisualPerformanceSampler.cs |
 | Sampler records profiling counters | PASS | Assets/Scripts/Rendering/VisualPerformanceSampler.cs |
 | Sampler records visual route state | PASS | Assets/Scripts/Rendering/VisualPerformanceSampler.cs |
+| Evidence route driver is available | PASS | Assets/Scripts/Rendering/VisualEvidenceRouteDriver.cs |
 | Color space is Linear | PASS | ProjectSettings/ProjectSettings.asset |
 | Lights use linear intensity | PASS | ProjectSettings/GraphicsSettings.asset |
 
@@ -27,6 +28,6 @@ PASS: Visual pipeline setup checks passed. Runtime profiler evidence is still re
 
 ## Required Manual Evidence
 
-- Run the checklist routes in `Assets/Docs/Visual_Performance_Checklist.md`.
+- Run the checklist routes in `Assets/Docs/Visual_Performance_Checklist.md`, including `Cementery > Performance > Start Visual Evidence Route` during Play Mode.
 - Generate `Assets/Docs/Visual_Performance_Last_Run.md` from a fresh CSV sample.
 - Attach Unity Profiler CPU Timeline, Rendering, Memory, and screenshots for day, night, fog, and chunk traversal.
