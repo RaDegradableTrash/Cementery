@@ -70,3 +70,6 @@ At startup or via context menu "Validate PBR Setup Now", warnings are produced f
 - Previous non-physical shadow override logic was removed.
 - Lighting now relies on standard lit shading, probes, reflections, and shadow settings.
 - If a dynamic object still shades incorrectly in shadow transitions, increase LightProbeGroup density in that area first.
+- Use `Assets/New Volume Profile.asset` as the reusable vibrant gameplay post-processing baseline: ACES tonemapping, modest exposure, stronger contrast/saturation, warm bloom, and a light vignette.
+- Keep bloom in quarter-resolution mode with four iterations unless profiling proves there is enough GPU headroom to raise quality.
+- The URP renderer cloud feature is tuned for gameplay cost first: reduced cloud density, 85% resolution, eight near steps, and three far steps.

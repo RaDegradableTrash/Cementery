@@ -19,10 +19,14 @@ public class CinematicFilterController : MonoBehaviour
     private ShadowsMidtonesHighlights _shadowsMidtonesHighlights;
     private LiftGammaGain _liftGammaGain;
     private Bloom _bloom;
+    private ColorAdjustments _colorAdjustments;
+    private Vignette _vignette;
     private bool _hasFilmGrain;
     private bool _hasShadowsMidtonesHighlights;
     private bool _hasLiftGammaGain;
     private bool _hasBloom;
+    private bool _hasColorAdjustments;
+    private bool _hasVignette;
 
     void Start()
     {
@@ -62,6 +66,8 @@ public class CinematicFilterController : MonoBehaviour
         _hasShadowsMidtonesHighlights = _profile.TryGet(out _shadowsMidtonesHighlights);
         _hasLiftGammaGain = _profile.TryGet(out _liftGammaGain);
         _hasBloom = _profile.TryGet(out _bloom);
+        _hasColorAdjustments = _profile.TryGet(out _colorAdjustments);
+        _hasVignette = _profile.TryGet(out _vignette);
     }
 
     private void SetCinematicLook(bool force)
@@ -129,12 +135,34 @@ public class CinematicFilterController : MonoBehaviour
         if (_hasBloom)
         {
             _bloom.intensity.overrideState = true;
-            // Low intensity (0.4)
-            _bloom.intensity.value = Mathf.Lerp(0f, 0.4f, clampedIntensity);
+            _bloom.intensity.value = Mathf.Lerp(0f, 0.85f, clampedIntensity);
 
             _bloom.scatter.overrideState = true;
-            // High scatter (0.7) for a hazy, soft look
-            _bloom.scatter.value = Mathf.Lerp(0.5f, 0.7f, clampedIntensity);
+            _bloom.scatter.value = Mathf.Lerp(0.45f, 0.55f, clampedIntensity);
+        }
+
+        if (_hasColorAdjustments)
+        {
+            _colorAdjustments.postExposure.overrideState = true;
+            _colorAdjustments.postExposure.value = Mathf.Lerp(0f, 0.12f, clampedIntensity);
+
+            _colorAdjustments.contrast.overrideState = true;
+            _colorAdjustments.contrast.value = Mathf.Lerp(0f, 14f, clampedIntensity);
+
+            _colorAdjustments.saturation.overrideState = true;
+            _colorAdjustments.saturation.value = Mathf.Lerp(0f, 18f, clampedIntensity);
+
+            _colorAdjustments.colorFilter.overrideState = true;
+            _colorAdjustments.colorFilter.value = Color.Lerp(Color.white, new Color(1f, 0.965f, 0.9f, 1f), clampedIntensity);
+        }
+
+        if (_hasVignette)
+        {
+            _vignette.intensity.overrideState = true;
+            _vignette.intensity.value = Mathf.Lerp(0f, 0.18f, clampedIntensity);
+
+            _vignette.smoothness.overrideState = true;
+            _vignette.smoothness.value = Mathf.Lerp(0.2f, 0.42f, clampedIntensity);
         }
     }
 }
