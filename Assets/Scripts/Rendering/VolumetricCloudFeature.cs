@@ -81,6 +81,15 @@ public class VolumetricCloudFeature : ScriptableRendererFeature
     
     public static VolumetricCloudFeature Instance { get; private set; }
 
+    public static CloudSettings.ResolutionScale SanitizeResolutionScale(CloudSettings.ResolutionScale value)
+    {
+        return value == CloudSettings.ResolutionScale.Full ||
+            value == CloudSettings.ResolutionScale.Half ||
+            value == CloudSettings.ResolutionScale.Quarter
+                ? value
+                : CloudSettings.ResolutionScale.Full;
+    }
+
     /// <summary>
     /// Runtime API: override cloud altitude band without touching the asset.
     /// Call this from a game manager if terrain height requires different cloud layers.
@@ -164,6 +173,7 @@ public class VolumetricCloudFeature : ScriptableRendererFeature
             settings.farStepCount = Mathf.Min(settings.farStepCount, 2);
         }
 
+        settings.resolutionScale = SanitizeResolutionScale(settings.resolutionScale);
         _cloudPass.Setup(settings, _baseNoiseTex, _detailNoiseTex);
         renderer.EnqueuePass(_cloudPass);
     }
@@ -578,6 +588,7 @@ public class VolumetricCloudPass : ScriptableRenderPass
     public void Setup(VolumetricCloudFeature.CloudSettings settings, Texture3D baseNoise, Texture3D detailNoise)
     {
         _settings = settings;
+        _settings.resolutionScale = VolumetricCloudFeature.SanitizeResolutionScale(_settings.resolutionScale);
         _baseNoise = baseNoise;
         _detailNoise = detailNoise;
 
@@ -617,14 +628,15 @@ public class VolumetricCloudPass : ScriptableRenderPass
         ConfigureTarget(renderingData.cameraData.renderer.cameraColorTargetHandle);
         ConfigureInput(ScriptableRenderPassInput.Depth);
 
-        if (_settings.resolutionScale != VolumetricCloudFeature.CloudSettings.ResolutionScale.Full)
+        VolumetricCloudFeature.CloudSettings.ResolutionScale resolutionScale = VolumetricCloudFeature.SanitizeResolutionScale(_settings.resolutionScale);
+        if (resolutionScale != VolumetricCloudFeature.CloudSettings.ResolutionScale.Full)
         {
             RenderTextureDescriptor desc = renderingData.cameraData.cameraTargetDescriptor;
             desc.depthBufferBits = 0;
             desc.colorFormat = RenderTextureFormat.ARGB32;
             desc.sRGB = renderingData.cameraData.cameraTargetDescriptor.sRGB;
 
-            int scale = Mathf.Max(1, (int)_settings.resolutionScale);
+            int scale = (int)resolutionScale;
             desc.width = Mathf.Max(1, desc.width / scale);
             desc.height = Mathf.Max(1, desc.height / scale);
 
@@ -647,7 +659,8 @@ public class VolumetricCloudPass : ScriptableRenderPass
         if (colorHandle == null)
             return;
 
-        if (_settings.resolutionScale != VolumetricCloudFeature.CloudSettings.ResolutionScale.Full && _lowResCloudTexture == null)
+        VolumetricCloudFeature.CloudSettings.ResolutionScale resolutionScale = VolumetricCloudFeature.SanitizeResolutionScale(_settings.resolutionScale);
+        if (resolutionScale != VolumetricCloudFeature.CloudSettings.ResolutionScale.Full && _lowResCloudTexture == null)
             return;
 
         CommandBuffer cmd = CommandBufferPool.Get("Volumetric Clouds");
@@ -662,7 +675,7 @@ public class VolumetricCloudPass : ScriptableRenderPass
         ApplyCachedSettings();
 
         // Blit from built-in blackTexture using the custom material.
-        if (_settings.resolutionScale == VolumetricCloudFeature.CloudSettings.ResolutionScale.Full || _lowResCloudTexture == null)
+        if (resolutionScale == VolumetricCloudFeature.CloudSettings.ResolutionScale.Full || _lowResCloudTexture == null)
         {
             // Full resolution: direct composite using Pass 0 (Blend SrcAlpha OneMinusSrcAlpha)
             cmd.Blit(Texture2D.blackTexture, colorHandle, _material, 0);

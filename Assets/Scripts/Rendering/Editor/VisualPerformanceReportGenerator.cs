@@ -11,6 +11,15 @@ namespace Cementery.Rendering.Editor
     {
         private const string SampleFileName = "visual-performance-samples.csv";
         private const string ReportPath = "Assets/Docs/Visual_Performance_Last_Run.md";
+        private const string ValidationReportPath = "Assets/Docs/Visual_Pipeline_Validation.md";
+        private const string UrpAssetPath = "Assets/Settings/URP/URP_Performance.asset";
+        private const string RendererAssetPath = "Assets/Settings/URP/URP_Performance_Renderer.asset";
+        private const string MainScenePath = "Assets/Scenes/Main_Persistent.unity";
+        private const string VolumeProfilePath = "Assets/New Volume Profile.asset";
+        private const string ProjectSettingsPath = "ProjectSettings/ProjectSettings.asset";
+        private const string BootstrapperPath = "Assets/Scripts/Rendering/VisualPipelineBootstrapper.cs";
+        private const string SamplerPath = "Assets/Scripts/Rendering/VisualPerformanceSampler.cs";
+        private const string VibrantVolumeGuid = "cc75cfaad567e424a8a59c3fc3927bbc";
         private const float DesktopAverageBudgetMs = 16.67f;
         private const float DesktopP95BudgetMs = 22f;
         private const float WebAverageBudgetMs = 33.33f;
@@ -38,6 +47,15 @@ namespace Cementery.Rendering.Editor
             File.WriteAllText(ReportPath, report);
             AssetDatabase.ImportAsset(ReportPath);
             Debug.Log($"Visual performance report written to {ReportPath}");
+        }
+
+        [MenuItem("Cementery/Performance/Validate Visual Pipeline Setup")]
+        public static void ValidateVisualPipelineSetup()
+        {
+            string report = BuildValidationReport();
+            File.WriteAllText(ValidationReportPath, report);
+            AssetDatabase.ImportAsset(ValidationReportPath);
+            Debug.Log($"Visual pipeline validation report written to {ValidationReportPath}");
         }
 
         private static Summary BuildSummary(string[] lines)
@@ -126,6 +144,97 @@ namespace Cementery.Rendering.Editor
             builder.AppendLine("- Pair this report with a Unity Profiler capture for final merge evidence.");
             builder.AppendLine("- Re-run after render pipeline, cloud, fog, particle, UI animation, camera, or chunk-loading changes.");
             return builder.ToString();
+        }
+
+        private static string BuildValidationReport()
+        {
+            StringBuilder builder = new StringBuilder(4096);
+            int failures = 0;
+            int warnings = 0;
+
+            builder.AppendLine("# Visual Pipeline Validation");
+            builder.AppendLine();
+            builder.AppendLine($"Generated: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+            builder.AppendLine();
+            builder.AppendLine("## Automated Checks");
+            builder.AppendLine();
+            builder.AppendLine("| Check | Verdict | Notes |");
+            builder.AppendLine("| --- | --- | --- |");
+
+            string urpAsset = ReadOptional(UrpAssetPath);
+            string rendererAsset = ReadOptional(RendererAssetPath);
+            string mainScene = ReadOptional(MainScenePath);
+            string volumeProfile = ReadOptional(VolumeProfilePath);
+            string projectSettings = ReadOptional(ProjectSettingsPath);
+            string bootstrapper = ReadOptional(BootstrapperPath);
+            string sampler = ReadOptional(SamplerPath);
+
+            AppendCheck(builder, "URP asset exists", urpAsset != null, UrpAssetPath, ref failures);
+            AppendCheck(builder, "Renderer asset exists", rendererAsset != null, RendererAssetPath, ref failures);
+            AppendCheck(builder, "Main scene uses vibrant profile", Contains(mainScene, VibrantVolumeGuid), MainScenePath, ref failures);
+            AppendCheck(builder, "Vibrant profile has tone/color/bloom/vignette", ContainsAll(volumeProfile, "m_Name: Tonemapping", "m_Name: ColorAdjustments", "m_Name: Bloom", "m_Name: Vignette"), VolumeProfilePath, ref failures);
+            AppendCheck(builder, "Cloud resolution scale is serialized safely", Contains(rendererAsset, "resolutionScale: 1") || Contains(rendererAsset, "resolutionScale: 2") || Contains(rendererAsset, "resolutionScale: 4"), "Expected Full, Half, or Quarter.", ref failures);
+            AppendCheck(builder, "Cloud steps stay inside polish budget", Contains(rendererAsset, "maxSteps: 8") && Contains(rendererAsset, "farStepCount: 3"), "Expected current gameplay cloud budget: 8 near steps, 3 far steps.", ref warnings, true);
+            AppendCheck(builder, "SRP batcher enabled", Contains(urpAsset, "m_UseSRPBatcher: 1"), UrpAssetPath, ref warnings, true);
+            AppendCheck(builder, "Frame timing stats enabled", Contains(projectSettings, "enableFrameTimingStats: 1"), ProjectSettingsPath, ref failures);
+            AppendCheck(builder, "Gameplay post-processing is camera-gated", ContainsAll(bootstrapper, "renderPostProcessing = true", "targetTexture != null", "CameraRenderType.Base"), BootstrapperPath, ref failures);
+            AppendCheck(builder, "Sampler writes frame-time CSV", ContainsAll(sampler, "visual-performance-samples.csv", "p95", "FrameTimingManager"), SamplerPath, ref failures);
+            AppendCheck(builder, "Color space is Linear", Contains(projectSettings, "m_ActiveColorSpace: 1"), "Project is currently Gamma if this warns; migrate only after material/lighting review.", ref warnings, true);
+
+            builder.AppendLine();
+            builder.AppendLine("## Verdict");
+            builder.AppendLine();
+            if (failures == 0)
+            {
+                builder.AppendLine(warnings == 0
+                    ? "PASS: Visual pipeline setup checks passed. Runtime profiler evidence is still required before closing visual-performance work."
+                    : $"PASS WITH WARNINGS: {warnings} warning(s). Runtime profiler evidence is still required before closing visual-performance work.");
+            }
+            else
+            {
+                builder.AppendLine($"FAIL: {failures} required check(s) failed and {warnings} warning(s) were found.");
+            }
+
+            builder.AppendLine();
+            builder.AppendLine("## Required Manual Evidence");
+            builder.AppendLine();
+            builder.AppendLine("- Run the checklist routes in `Assets/Docs/Visual_Performance_Checklist.md`.");
+            builder.AppendLine("- Generate `Assets/Docs/Visual_Performance_Last_Run.md` from a fresh CSV sample.");
+            builder.AppendLine("- Attach Unity Profiler CPU Timeline, Rendering, Memory, and screenshots for day, night, fog, and chunk traversal.");
+            return builder.ToString();
+        }
+
+        private static string ReadOptional(string path)
+        {
+            return File.Exists(path) ? File.ReadAllText(path) : null;
+        }
+
+        private static bool Contains(string content, string expected)
+        {
+            return content != null && content.Contains(expected);
+        }
+
+        private static bool ContainsAll(string content, params string[] expectedValues)
+        {
+            if (content == null)
+                return false;
+
+            for (int i = 0; i < expectedValues.Length; i++)
+            {
+                if (!content.Contains(expectedValues[i]))
+                    return false;
+            }
+
+            return true;
+        }
+
+        private static void AppendCheck(StringBuilder builder, string name, bool passed, string notes, ref int count, bool warning = false)
+        {
+            string verdict = passed ? "PASS" : warning ? "WARN" : "FAIL";
+            if (!passed)
+                count++;
+
+            builder.AppendLine($"| {name} | {verdict} | {notes} |");
         }
 
         private static bool TryParse(string value, out float result)
