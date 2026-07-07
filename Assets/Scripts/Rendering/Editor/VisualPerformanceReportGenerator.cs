@@ -17,6 +17,7 @@ namespace Cementery.Rendering.Editor
         private const string MainScenePath = "Assets/Scenes/Main_Persistent.unity";
         private const string VolumeProfilePath = "Assets/New Volume Profile.asset";
         private const string ProjectSettingsPath = "ProjectSettings/ProjectSettings.asset";
+        private const string GraphicsSettingsPath = "ProjectSettings/GraphicsSettings.asset";
         private const string BootstrapperPath = "Assets/Scripts/Rendering/VisualPipelineBootstrapper.cs";
         private const string SamplerPath = "Assets/Scripts/Rendering/VisualPerformanceSampler.cs";
         private const string VibrantVolumeGuid = "cc75cfaad567e424a8a59c3fc3927bbc";
@@ -181,6 +182,7 @@ namespace Cementery.Rendering.Editor
             string mainScene = ReadOptional(MainScenePath);
             string volumeProfile = ReadOptional(VolumeProfilePath);
             string projectSettings = ReadOptional(ProjectSettingsPath);
+            string graphicsSettings = ReadOptional(GraphicsSettingsPath);
             string bootstrapper = ReadOptional(BootstrapperPath);
             string sampler = ReadOptional(SamplerPath);
 
@@ -195,7 +197,8 @@ namespace Cementery.Rendering.Editor
             AppendCheck(builder, "Gameplay post-processing is camera-gated", ContainsAll(bootstrapper, "renderPostProcessing = true", "targetTexture != null", "CameraRenderType.Base"), BootstrapperPath, ref failures);
             AppendCheck(builder, "Sampler writes frame-time CSV", ContainsAll(sampler, "visual-performance-samples.csv", "p95", "FrameTimingManager"), SamplerPath, ref failures);
             AppendCheck(builder, "Sampler records profiling counters", ContainsAll(sampler, "ProfilerRecorder", "GC Allocated In Frame", "Main Thread", "Render Thread"), SamplerPath, ref warnings, true);
-            AppendCheck(builder, "Color space is Linear", Contains(projectSettings, "m_ActiveColorSpace: 1"), "Project is currently Gamma if this warns; migrate only after material/lighting review.", ref warnings, true);
+            AppendCheck(builder, "Color space is Linear", Contains(projectSettings, "m_ActiveColorSpace: 1"), ProjectSettingsPath, ref failures);
+            AppendCheck(builder, "Lights use linear intensity", Contains(graphicsSettings, "m_LightsUseLinearIntensity: 1"), GraphicsSettingsPath, ref failures);
 
             builder.AppendLine();
             builder.AppendLine("## Verdict");

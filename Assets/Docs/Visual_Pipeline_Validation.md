@@ -1,6 +1,6 @@
 # Visual Pipeline Validation
 
-Generated: 2026-07-07 21:51:31
+Generated: 2026-07-07 22:02:00
 
 ## Automated Checks
 
@@ -17,11 +17,12 @@ Generated: 2026-07-07 21:51:31
 | Gameplay post-processing is camera-gated | PASS | Assets/Scripts/Rendering/VisualPipelineBootstrapper.cs |
 | Sampler writes frame-time CSV | PASS | Assets/Scripts/Rendering/VisualPerformanceSampler.cs |
 | Sampler records profiling counters | PASS | Assets/Scripts/Rendering/VisualPerformanceSampler.cs |
-| Color space is Linear | WARN | Project is currently Gamma if this warns; migrate only after material/lighting review. |
+| Color space is Linear | PASS | ProjectSettings/ProjectSettings.asset |
+| Lights use linear intensity | PASS | ProjectSettings/GraphicsSettings.asset |
 
 ## Verdict
 
-PASS WITH WARNINGS: 1 warning(s). Runtime profiler evidence is still required before closing visual-performance work.
+PASS: Visual pipeline setup checks passed. Runtime profiler evidence is still required before closing visual-performance work.
 
 ## Required Manual Evidence
 

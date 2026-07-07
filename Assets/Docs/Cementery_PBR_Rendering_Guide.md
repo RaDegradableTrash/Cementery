@@ -5,6 +5,7 @@ This project uses a PBR-oriented lighting workflow with built-in fallback and HD
 ## 1. Core Rules
 
 - Keep color space in Linear.
+- Keep light intensity evaluation linear so PBR materials, post-processing, and day-night lighting respond consistently.
 - Keep one physically plausible sun as the primary directional light.
 - Use Light Probes for dynamic objects crossing indoor/outdoor or shadow boundaries.
 - Use Reflection Probes for stable metal/specular behavior in shadow.
