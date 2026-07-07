@@ -624,7 +624,7 @@ public class VolumetricCloudPass : ScriptableRenderPass
             desc.colorFormat = RenderTextureFormat.ARGB32;
             desc.sRGB = renderingData.cameraData.cameraTargetDescriptor.sRGB;
 
-            int scale = (int)_settings.resolutionScale;
+            int scale = Mathf.Max(1, (int)_settings.resolutionScale);
             desc.width = Mathf.Max(1, desc.width / scale);
             desc.height = Mathf.Max(1, desc.height / scale);
 
