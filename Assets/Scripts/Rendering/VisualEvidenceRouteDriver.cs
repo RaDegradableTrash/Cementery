@@ -1,6 +1,7 @@
 using System.Collections;
 using System.IO;
 using UnityEngine;
+using UnityEngine.Profiling;
 
 namespace Cementery.Rendering
 {
@@ -9,6 +10,7 @@ namespace Cementery.Rendering
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
         private const float DefaultPhaseDurationSeconds = 10f;
         private const string ScreenshotDirectoryName = "visual-evidence-route";
+        private const string ProfilerCaptureFileName = "visual-evidence-route.raw";
 
         private static readonly Phase[] Phases =
         {
@@ -30,13 +32,18 @@ namespace Cementery.Rendering
         private float _phaseTimer;
         private int _phaseIndex = -1;
         private bool _restored;
+        private bool _originalProfilerEnabled;
+        private bool _originalProfilerBinaryLog;
+        private string _originalProfilerLogFile;
         private Coroutine _phaseSampleRoutine;
         private string _screenshotDirectory;
+        private string _profilerCapturePath;
 
         private void Awake()
         {
             DontDestroyOnLoad(gameObject);
             PrepareScreenshotDirectory();
+            BeginProfilerCapture();
             _dayNightController = FindFirstObjectByType<DayNightSkyboxController>(FindObjectsInactive.Include);
             if (_dayNightController == null)
             {
@@ -74,6 +81,7 @@ namespace Cementery.Rendering
 
         private void OnDestroy()
         {
+            EndProfilerCapture();
             if (restoreOriginalState)
                 RestoreOriginalState();
         }
@@ -106,6 +114,7 @@ namespace Cementery.Rendering
         private void FinishRoute()
         {
             VisualPerformanceSampler.TryWriteImmediateSample();
+            EndProfilerCapture();
 
             if (restoreOriginalState)
                 RestoreOriginalState();
@@ -152,6 +161,34 @@ namespace Cementery.Rendering
             string screenshotPath = Path.Combine(_screenshotDirectory, filename);
             ScreenCapture.CaptureScreenshot(screenshotPath);
             return screenshotPath;
+        }
+
+        private void BeginProfilerCapture()
+        {
+            _profilerCapturePath = Path.Combine(Application.persistentDataPath, ProfilerCaptureFileName);
+            if (File.Exists(_profilerCapturePath))
+                File.Delete(_profilerCapturePath);
+
+            _originalProfilerEnabled = Profiler.enabled;
+            _originalProfilerBinaryLog = Profiler.enableBinaryLog;
+            _originalProfilerLogFile = Profiler.logFile;
+
+            Profiler.logFile = _profilerCapturePath;
+            Profiler.enableBinaryLog = true;
+            Profiler.enabled = true;
+            Debug.Log($"VisualEvidenceRouteDriver: profiler capture started at {_profilerCapturePath}.");
+        }
+
+        private void EndProfilerCapture()
+        {
+            if (string.IsNullOrEmpty(_profilerCapturePath))
+                return;
+
+            Profiler.enabled = _originalProfilerEnabled;
+            Profiler.enableBinaryLog = _originalProfilerBinaryLog;
+            Profiler.logFile = _originalProfilerLogFile;
+            Debug.Log($"VisualEvidenceRouteDriver: profiler capture finished at {_profilerCapturePath}.");
+            _profilerCapturePath = null;
         }
 
         private static string SanitizeFilename(string value)

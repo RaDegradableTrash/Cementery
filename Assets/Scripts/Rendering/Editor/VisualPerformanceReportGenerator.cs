@@ -14,6 +14,7 @@ namespace Cementery.Rendering.Editor
         private const string ReportPath = "Assets/Docs/Visual_Performance_Last_Run.md";
         private const string ValidationReportPath = "Assets/Docs/Visual_Pipeline_Validation.md";
         private const string ScreenshotDirectoryName = "visual-evidence-route";
+        private const string ProfilerCaptureFileName = "visual-evidence-route.raw";
         private const string PendingEvidenceRouteKey = "Cementery.VisualEvidenceRoute.Pending";
         private const string RunningEvidenceRouteKey = "Cementery.VisualEvidenceRoute.Running";
         private const string UrpAssetPath = "Assets/Settings/URP/URP_Performance.asset";
@@ -132,7 +133,7 @@ namespace Cementery.Rendering.Editor
                 return;
 
             SessionState.SetBool(RunningEvidenceRouteKey, false);
-            GenerateReport();
+            EditorApplication.delayCall += GenerateReport;
             Debug.Log("Visual evidence route finished; visual performance report generation was requested.");
         }
 
@@ -237,13 +238,16 @@ namespace Cementery.Rendering.Editor
         {
             StringBuilder builder = new StringBuilder(2048);
             string screenshotDirectory = Path.Combine(Application.persistentDataPath, ScreenshotDirectoryName);
+            string profilerCapturePath = Path.Combine(Application.persistentDataPath, ProfilerCaptureFileName);
             int screenshotCount = CountExistingRequiredScreenshots(screenshotDirectory);
             bool hasScreenshotCoverage = screenshotCount == RequiredScreenshotNames.Length;
+            bool hasProfilerCapture = TryGetFileSizeBytes(profilerCapturePath, out long profilerCaptureBytes) && profilerCaptureBytes > 0L;
             builder.AppendLine("# Visual Performance Last Run");
             builder.AppendLine();
             builder.AppendLine($"Generated: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
             builder.AppendLine($"Source CSV: `{samplePath}`");
             builder.AppendLine($"Screenshot directory: `{screenshotDirectory}`");
+            builder.AppendLine($"Profiler capture: `{profilerCapturePath}`");
             builder.AppendLine($"CSV session starts at data line: {summary.SessionStartLine}");
             builder.AppendLine();
 
@@ -278,6 +282,7 @@ namespace Cementery.Rendering.Editor
             builder.AppendLine($"| Fog distance range | {FormatFogDistanceRange(summary)} |");
             builder.AppendLine($"| Peak ambient intensity | {FormatOptionalFloat(summary.MaxAmbientIntensity, "F2")} |");
             builder.AppendLine($"| Route screenshots | {screenshotCount} / {RequiredScreenshotNames.Length} |");
+            builder.AppendLine($"| Profiler capture size | {FormatBytes(profilerCaptureBytes)} |");
             builder.AppendLine();
             builder.AppendLine("## Budget Verdict");
             builder.AppendLine();
@@ -289,6 +294,7 @@ namespace Cementery.Rendering.Editor
             builder.AppendLine($"| Day/night route coverage | {FormatCoverageVerdict(HasDayNightCoverage(summary))} |");
             builder.AppendLine($"| Fog route coverage | {FormatCoverageVerdict(HasFogCoverage(summary))} |");
             builder.AppendLine($"| Screenshot route coverage | {FormatCoverageVerdict(hasScreenshotCoverage)} |");
+            builder.AppendLine($"| Profiler capture | {FormatCoverageVerdict(hasProfilerCapture)} |");
             builder.AppendLine();
             builder.AppendLine("## Screenshot Evidence");
             builder.AppendLine();
@@ -352,9 +358,11 @@ namespace Cementery.Rendering.Editor
             AppendCheck(builder, "Evidence route driver is available", ContainsAll(evidenceRouteDriver, "VisualEvidenceRouteDriver", "day clear", "night fog"), EvidenceRouteDriverPath, ref failures);
             AppendCheck(builder, "Evidence route requests phase samples", ContainsAll(evidenceRouteDriver, "TryWriteImmediateSample", "evidence sample for"), EvidenceRouteDriverPath, ref failures);
             AppendCheck(builder, "Evidence route captures phase screenshots", ContainsAll(evidenceRouteDriver, "ScreenCapture.CaptureScreenshot", "visual-evidence-route", "visual-evidence-"), EvidenceRouteDriverPath, ref failures);
+            AppendCheck(builder, "Evidence route captures profiler log", ContainsAll(evidenceRouteDriver, "Profiler.enableBinaryLog", "visual-evidence-route.raw", "profiler capture started"), EvidenceRouteDriverPath, ref failures);
             AppendCheck(builder, "Evidence route can launch from Edit Mode", ContainsAll(reportGenerator, "SessionState", "EnteredPlayMode", "Visual evidence route queued"), ReportGeneratorPath, ref failures);
             AppendCheck(builder, "Evidence route auto-generates report", ContainsAll(reportGenerator, "RunningEvidenceRouteKey", "GenerateReport", "visual performance report generation was requested"), ReportGeneratorPath, ref failures);
             AppendCheck(builder, "Report gates screenshot evidence", ContainsAll(reportGenerator, "Screenshot route coverage", "RequiredScreenshotNames", "CountExistingRequiredScreenshots"), ReportGeneratorPath, ref failures);
+            AppendCheck(builder, "Report gates profiler capture evidence", ContainsAll(reportGenerator, "Profiler capture", "TryGetFileSizeBytes", "visual-evidence-route.raw"), ReportGeneratorPath, ref failures);
             AppendCheck(builder, "Report gates latest-session visual evidence", ContainsAll(sampler, "time_of_day") && ContainsAll(reportGenerator, "FindLatestHeaderLine", "Day/night route coverage", "Fog route coverage", "MinimumEvidenceDurationSeconds"), ReportGeneratorPath, ref failures);
             AppendCheck(builder, "Color space is Linear", Contains(projectSettings, "m_ActiveColorSpace: 1"), ProjectSettingsPath, ref failures);
             AppendCheck(builder, "Lights use linear intensity", Contains(graphicsSettings, "m_LightsUseLinearIntensity: 1"), GraphicsSettingsPath, ref failures);
@@ -436,6 +444,17 @@ namespace Cementery.Rendering.Editor
             return value < 0f ? "Unavailable" : $"{value:F2} KB";
         }
 
+        private static string FormatBytes(long value)
+        {
+            if (value <= 0L)
+                return "Missing";
+
+            float kilobytes = value / 1024f;
+            return kilobytes < 1024f
+                ? $"{kilobytes:F2} KB"
+                : $"{kilobytes / 1024f:F2} MB";
+        }
+
         private static string FormatOptionalFloat(float value, string format)
         {
             return value < 0f || float.IsPositiveInfinity(value) ? "Unavailable" : value.ToString(format, CultureInfo.InvariantCulture);
@@ -493,6 +512,16 @@ namespace Cementery.Rendering.Editor
             }
 
             return count;
+        }
+
+        private static bool TryGetFileSizeBytes(string path, out long bytes)
+        {
+            bytes = 0L;
+            if (!File.Exists(path))
+                return false;
+
+            bytes = new FileInfo(path).Length;
+            return true;
         }
 
         private struct Summary
