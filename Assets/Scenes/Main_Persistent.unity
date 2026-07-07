@@ -6779,6 +6779,7 @@ MonoBehaviour:
   sunriseRedBoost: 0.78
   sunriseRedColor: {r: 1, g: 0.36, b: 0.2, a: 1}
   optimizeForStableFrameTime: 1
+  cycleApplyInterval: 0.1
   probeRendererCacheRefreshInterval: 10
   probeSyncBatchSize: 128
   useAdaptiveShadowBudget: 1
@@ -6838,7 +6839,7 @@ MonoBehaviour:
   nightReflectionIntensity: 0.35
   reflectionBounces: 1
   updateEnvironmentReflections: 1
-  reflectionUpdateInterval: 1
+  reflectionUpdateInterval: 5
   enforceDynamicProbeSampling: 1
   keepSyncingDynamicProbeSampling: 1
   probeSyncInterval: 2
@@ -11939,6 +11940,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   particleSnowRadius: 0.2
   particleSnowAmount: 0.5
+  maxCollisionEventsPerFrame: 24
+  skyVisibilityCheckStride: 4
+  enableDynamicObjectSnow: 0
 --- !u!114 &963315338
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -11951,10 +11955,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ade5adc4da55c43659f637a89acab26f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  mapResolution: 1024
+  mapResolution: 512
+  occlusionMapResolution: 256
   mapWorldSize: 100
   mapCenter: {x: 0, y: 0, z: 0}
   trackingSnapInterval: 64
+  occlusionUpdateInterval: 0.12
+  globalSnowUpdateInterval: 0.25
+  shaderParamRefreshInterval: 0.5
   modificationShader: {fileID: 4800000, guid: 1539b409392814f6680dab70ec3888fa, type: 3}
   playerCar: {fileID: 0}
   carOcclusionRadius: 3.5
@@ -16584,7 +16592,8 @@ MonoBehaviour:
   frustumExpansion: 8
   neverFrustumCullRadius: 40
   objectsCheckedPerFrame: 200
-  hiddenObjectFastRecheck: 200
+  hiddenObjectFastRecheck: 80
+  fullSweepCooldown: 0.35
   scanDelayFrames: 3
   verboseLogging: 0
 --- !u!1 &1475127543
@@ -16618,12 +16627,14 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   unloadDelay: 5
   useGridStreaming: 1
+  verboseLogging: 0
   trackingTarget: {fileID: 0}
   checkInterval: 0.5
   chunkSizeX: 256
   chunkSizeZ: 256
   sceneNamePrefix: Desert_Chunk
-  loadingRange: 3
+  loadingRange: 2
+  maxConcurrentLoads: 1
 --- !u!4 &1475127545
 Transform:
   m_ObjectHideFlags: 0

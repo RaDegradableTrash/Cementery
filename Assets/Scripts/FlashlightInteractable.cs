@@ -24,25 +24,27 @@ public class FlashlightInteractable : MonoBehaviour
     private Collider[] _colliders; // 【修改】改为数组，支持关闭自身及子物体所有的碰撞体
     private bool _isEquipped = false;
     private Transform _originalParent;
+    private Quaternion _localRotation;
+    private float _nextAttachmentRepairTime;
+    private const float AttachmentRepairInterval = 0.1f;
 
     void Awake()
     {
         _worldObject = GetComponent<WorldObject>();
         _rb = GetComponent<Rigidbody>();
-        // 【修改】获取该物体以及所有子物体上的碰撞体，防止部分碰撞体漏网导致物理冲突
-        _colliders = GetComponentsInChildren<Collider>(); 
-        _originalParent = transform.parent;
-    }
-
-    void OnEnable()
-    {
         if (_worldObject != null)
         {
             _worldObject.onInteract.AddListener(OnInteractedWith);
         }
+
+        // 【修改】获取该物体以及所有子物体上的碰撞体，防止部分碰撞体漏网导致物理冲突
+        _colliders = GetComponentsInChildren<Collider>();
+        _originalParent = transform.parent;
+        _localRotation = Quaternion.Euler(localRotationEuler);
+        enabled = false;
     }
 
-    void OnDisable()
+    void OnDestroy()
     {
         if (_worldObject != null)
         {
@@ -93,12 +95,14 @@ if (_rb != null)
         // 3. 挂载到相机
         transform.SetParent(playerCamera);
         transform.localPosition = localOffset;
-        transform.localRotation = Quaternion.Euler(localRotationEuler);
+        transform.localRotation = _localRotation;
+        _nextAttachmentRepairTime = 0f;
 
         if (flashlightLight != null) flashlightLight.enabled = true;
 
         _worldObject.interactable = false;
         _isEquipped = true;
+        enabled = true;
     }
 
     /// <summary>
@@ -140,16 +144,25 @@ if (_rb != null)
         _worldObject.TriggerDrop(playerCamera != null ? playerCamera.root.gameObject : null);
 
         _isEquipped = false;
+        enabled = false;
     }
 
     void Update()
     {
         if (_isEquipped)
         {
-            if (transform.parent == playerCamera)
+            if (transform.parent == playerCamera && Time.time >= _nextAttachmentRepairTime)
             {
-                transform.localPosition = localOffset;
-                transform.localRotation = Quaternion.Euler(localRotationEuler);
+                _nextAttachmentRepairTime = Time.time + AttachmentRepairInterval;
+                if ((transform.localPosition - localOffset).sqrMagnitude > 0.000001f)
+                {
+                    transform.localPosition = localOffset;
+                }
+
+                if (Quaternion.Angle(transform.localRotation, _localRotation) > 0.01f)
+                {
+                    transform.localRotation = _localRotation;
+                }
             }
 
             if (Input.GetKeyDown(dropKey))

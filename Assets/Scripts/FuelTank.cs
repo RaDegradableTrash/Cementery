@@ -83,8 +83,10 @@ public class FuelTank : MonoBehaviour
     private MeshFilter _fillMeshFilter;
     private Mesh _proceduralMesh;
     private Vector3[] _baseVertices;
+    private Vector3[] _animatedVertices;
     private int[] _baseTriangles;
     private Vector2[] _baseUVs;
+    private Renderer[] _displayRenderers;
     private float _currentRatio = 0f;
     private float _targetRatio = 0f;
 
@@ -95,6 +97,18 @@ public class FuelTank : MonoBehaviour
     private float _currentAlpha = 0f;
     private float _lookAwayTimer = 0f; // 1-second delay buffer when player looks away
     private MaterialPropertyBlock _propBlock;
+    private float _lastAppliedDisplayAlpha = -1f;
+    private float _lastAppliedDisplayRatio = -1f;
+    private int _lastFuelTextPercent = int.MinValue;
+    private int _lastDashboardPercent = int.MinValue;
+    private float _lastDashboardColorRatio = -1f;
+    private float _cachedFuelColorRatio = -1f;
+    private Color _cachedFuelColor;
+    private Color[] _displayRendererBaseColors;
+    private bool[] _displayRendererHasColor;
+    private bool[] _displayRendererHasBaseColor;
+    private bool _fuelBarHasColor;
+    private bool _fuelBarHasBaseColor;
 
     private void SetupMaterialTransparent(Material mat)
     {
@@ -158,11 +172,13 @@ public class FuelTank : MonoBehaviour
 
             fuelBarFillRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             fuelBarFillRenderer.receiveShadows = false;
+            CacheFuelBarMaterialProperties();
         }
 
         if (displayObject != null)
         {
-            foreach (var r in displayObject.GetComponentsInChildren<Renderer>(true))
+            _displayRenderers = displayObject.GetComponentsInChildren<Renderer>(true);
+            foreach (var r in _displayRenderers)
             {
                 if (r.material != null)
                 {
@@ -172,6 +188,7 @@ public class FuelTank : MonoBehaviour
                 r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                 r.receiveShadows = false;
             }
+            CacheDisplayRendererMaterialProperties();
         }
     }
 
@@ -188,6 +205,7 @@ public class FuelTank : MonoBehaviour
         }
         UpdateUI();
         _currentRatio = _targetRatio;
+        enabled = false;
     }
 
     private void Update()
@@ -242,6 +260,18 @@ public class FuelTank : MonoBehaviour
         // ── 🌟 核心新增：确保车内中控屏文本的每一帧动画和色彩变化同步 ───────
         UpdateCarDashboardText();
         // ────────────────────────────────────────────────────────────────────────
+
+        if (IsIdle())
+        {
+            enabled = false;
+        }
+    }
+
+    private bool IsIdle()
+    {
+        bool ratioSettled = Mathf.Abs(_currentRatio - _targetRatio) <= 0.001f;
+        bool displayHidden = displayObject == null || !displayObject.activeSelf;
+        return ratioSettled && !_isLookingAt && _lookAwayTimer <= 0f && displayHidden;
     }
 
     private void BuildBaseWaveMesh()
@@ -294,6 +324,8 @@ public class FuelTank : MonoBehaviour
         }
 
         _baseVertices = vertices;
+        _animatedVertices = new Vector3[numVerts];
+        System.Array.Copy(_baseVertices, _animatedVertices, _baseVertices.Length);
         _baseUVs = uvs;
         _baseTriangles = triangles;
 
@@ -306,8 +338,11 @@ public class FuelTank : MonoBehaviour
 
     private void AnimateWaveMesh()
     {
-        Vector3[] verts = new Vector3[_baseVertices.Length];
-        System.Array.Copy(_baseVertices, verts, _baseVertices.Length);
+        if (_animatedVertices == null || _animatedVertices.Length != _baseVertices.Length)
+        {
+            _animatedVertices = new Vector3[_baseVertices.Length];
+            System.Array.Copy(_baseVertices, _animatedVertices, _baseVertices.Length);
+        }
 
         float timeVal = Time.time * waveSpeed;
 
@@ -324,90 +359,137 @@ public class FuelTank : MonoBehaviour
 
             if (fillHeightAxis == WaveAxis.LocalX)
             {
-                verts[i * 2 + 1].x = fillOffset + wave;
+                _animatedVertices[i * 2 + 1].x = fillOffset + wave;
             }
             else if (fillHeightAxis == WaveAxis.LocalZ)
             {
-                verts[i * 2 + 1].z = fillOffset + wave;
+                _animatedVertices[i * 2 + 1].z = fillOffset + wave;
             }
             else
             {
-                verts[i * 2 + 1].y = fillOffset + wave;
+                _animatedVertices[i * 2 + 1].y = fillOffset + wave;
             }
         }
 
-        _proceduralMesh.vertices = verts;
+        _proceduralMesh.vertices = _animatedVertices;
         _proceduralMesh.RecalculateBounds();
+    }
+
+    private void CacheDisplayRendererMaterialProperties()
+    {
+        if (_displayRenderers == null)
+        {
+            _displayRendererBaseColors = null;
+            _displayRendererHasColor = null;
+            _displayRendererHasBaseColor = null;
+            return;
+        }
+
+        _displayRendererBaseColors = new Color[_displayRenderers.Length];
+        _displayRendererHasColor = new bool[_displayRenderers.Length];
+        _displayRendererHasBaseColor = new bool[_displayRenderers.Length];
+
+        for (int i = 0; i < _displayRenderers.Length; i++)
+        {
+            Renderer renderer = _displayRenderers[i];
+            Color baseColor = Color.cyan;
+            if (renderer != null)
+            {
+                Material mat = renderer.sharedMaterial;
+                if (mat != null)
+                {
+                    _displayRendererHasBaseColor[i] = mat.HasProperty("_BaseColor");
+                    _displayRendererHasColor[i] = mat.HasProperty("_Color");
+                    if (_displayRendererHasBaseColor[i])
+                        baseColor = mat.GetColor("_BaseColor");
+                    else if (_displayRendererHasColor[i])
+                        baseColor = mat.GetColor("_Color");
+                }
+            }
+            _displayRendererBaseColors[i] = baseColor;
+        }
+    }
+
+    private void CacheFuelBarMaterialProperties()
+    {
+        _fuelBarHasColor = false;
+        _fuelBarHasBaseColor = false;
+
+        if (fuelBarFillRenderer == null)
+            return;
+
+        Material mat = fuelBarFillRenderer.sharedMaterial;
+        if (mat == null)
+            return;
+
+        _fuelBarHasColor = mat.HasProperty("_Color");
+        _fuelBarHasBaseColor = mat.HasProperty("_BaseColor");
     }
 
     private void SetDisplayAlpha(float alpha)
     {
         if (displayObject == null) return;
 
-        Renderer[] renderers = displayObject.GetComponentsInChildren<Renderer>(true);
-        foreach (var r in renderers)
+        bool displayChanged = Mathf.Abs(_lastAppliedDisplayAlpha - alpha) > 0.001f
+            || Mathf.Abs(_lastAppliedDisplayRatio - _currentRatio) > 0.001f;
+        if (!displayChanged)
         {
+            return;
+        }
+
+        _lastAppliedDisplayAlpha = alpha;
+        _lastAppliedDisplayRatio = _currentRatio;
+
+        if (_displayRenderers == null || _displayRenderers.Length == 0)
+        {
+            _displayRenderers = displayObject.GetComponentsInChildren<Renderer>(true);
+            CacheDisplayRendererMaterialProperties();
+        }
+
+        for (int i = 0; i < _displayRenderers.Length; i++)
+        {
+            Renderer r = _displayRenderers[i];
+            if (r == null) continue;
             if (r == fuelBarFillRenderer) continue;
 
             r.GetPropertyBlock(_propBlock);
             
-            Color baseCol = Color.white;
-            if (r.material != null)
-            {
-                if (r.material.HasProperty("_BaseColor"))
-                    baseCol = r.material.GetColor("_BaseColor");
-                else if (r.material.HasProperty("_Color"))
-                    baseCol = r.material.GetColor("_Color");
-                else
-                    baseCol = Color.cyan;
-            }
+            Color baseCol = (_displayRendererBaseColors != null && i < _displayRendererBaseColors.Length)
+                ? _displayRendererBaseColors[i]
+                : Color.cyan;
             baseCol.a = alpha * 0.3f;
             
-            _propBlock.SetColor("_Color", baseCol);
-            _propBlock.SetColor("_BaseColor", baseCol);
+            bool hasColor = _displayRendererHasColor != null && i < _displayRendererHasColor.Length && _displayRendererHasColor[i];
+            bool hasBaseColor = _displayRendererHasBaseColor != null && i < _displayRendererHasBaseColor.Length && _displayRendererHasBaseColor[i];
+            if (hasColor) _propBlock.SetColor("_Color", baseCol);
+            if (hasBaseColor) _propBlock.SetColor("_BaseColor", baseCol);
             _propBlock.SetFloat("_Alpha", alpha);
             r.SetPropertyBlock(_propBlock);
-
-            if (r.material != null)
-            {
-                if (r.material.HasProperty("_Color"))
-                    r.material.SetColor("_Color", baseCol);
-                if (r.material.HasProperty("_BaseColor"))
-                    r.material.SetColor("_BaseColor", baseCol);
-            }
         }
 
         if (fuelBarFillRenderer != null)
         {
-            Color targetColor = fullFuelColor;
-            if (_currentRatio < 0.3f) targetColor = Color.Lerp(lowFuelColor, mediumFuelColor, _currentRatio / 0.3f);
-            else targetColor = Color.Lerp(mediumFuelColor, fullFuelColor, (_currentRatio - 0.3f) / 0.7f);
-
+            Color targetColor = GetFuelColorForCurrentRatio();
             Color holoFillColor = targetColor;
             holoFillColor.a = 0.6f * alpha;
 
             fuelBarFillRenderer.GetPropertyBlock(_propBlock);
-            _propBlock.SetColor("_Color", holoFillColor);
-            _propBlock.SetColor("_BaseColor", holoFillColor);
+            if (_fuelBarHasColor) _propBlock.SetColor("_Color", holoFillColor);
+            if (_fuelBarHasBaseColor) _propBlock.SetColor("_BaseColor", holoFillColor);
             _propBlock.SetFloat("_Alpha", alpha);
             fuelBarFillRenderer.SetPropertyBlock(_propBlock);
-
-            if (fuelBarFillRenderer.material != null)
-            {
-                if (fuelBarFillRenderer.material.HasProperty("_Color"))
-                    fuelBarFillRenderer.material.SetColor("_Color", holoFillColor);
-                if (fuelBarFillRenderer.material.HasProperty("_BaseColor"))
-                    fuelBarFillRenderer.material.SetColor("_BaseColor", holoFillColor);
-            }
         }
 
         if (fuelText != null)
         {
-            Color targetColor = fullFuelColor;
-            if (_currentRatio < 0.3f) targetColor = Color.Lerp(lowFuelColor, mediumFuelColor, _currentRatio / 0.3f);
-            else targetColor = Color.Lerp(mediumFuelColor, fullFuelColor, (_currentRatio - 0.3f) / 0.7f);
-            
-            fuelText.text = $"{(_currentRatio * 100f):F0}%";
+            Color targetColor = GetFuelColorForCurrentRatio();
+            int percent = Mathf.RoundToInt(_currentRatio * 100f);
+            if (percent != _lastFuelTextPercent)
+            {
+                _lastFuelTextPercent = percent;
+                fuelText.text = $"{percent}%";
+            }
+
             fuelText.color = new Color(targetColor.r, targetColor.g, targetColor.b, alpha * 0.5f);
         }
     }
@@ -416,12 +498,20 @@ public class FuelTank : MonoBehaviour
     private void UpdateCarDashboardText()
     {
         // 计算文本和根据油量改变颜色
-        float percent = _currentRatio * 100f;
-        string displayText = $"{percent:F0}%";
+        int percent = Mathf.RoundToInt(_currentRatio * 100f);
+        bool percentChanged = percent != _lastDashboardPercent;
+        bool colorChanged = Mathf.Abs(_lastDashboardColorRatio - _currentRatio) > 0.001f;
+        if (!percentChanged && !colorChanged)
+        {
+            return;
+        }
 
-        Color targetColor = fullFuelColor;
-        if (_currentRatio < 0.3f) targetColor = Color.Lerp(lowFuelColor, mediumFuelColor, _currentRatio / 0.3f);
-        else targetColor = Color.Lerp(mediumFuelColor, fullFuelColor, (_currentRatio - 0.3f) / 0.7f);
+        string displayText = $"{percent}%";
+
+        Color targetColor = GetFuelColorForCurrentRatio();
+
+        _lastDashboardPercent = percent;
+        _lastDashboardColorRatio = _currentRatio;
 
         // 情况一：如果你拖入的是 UI Canvas 里的 TextMeshPro
         if (carDashboardFuelText != null)
@@ -437,10 +527,24 @@ public class FuelTank : MonoBehaviour
             carDashboardFuelText3D.color = targetColor;
         }
     }
+
+    private Color GetFuelColorForCurrentRatio()
+    {
+        if (!Mathf.Approximately(_cachedFuelColorRatio, _currentRatio))
+        {
+            _cachedFuelColorRatio = _currentRatio;
+            _cachedFuelColor = _currentRatio < 0.3f
+                ? Color.Lerp(lowFuelColor, mediumFuelColor, _currentRatio / 0.3f)
+                : Color.Lerp(mediumFuelColor, fullFuelColor, (_currentRatio - 0.3f) / 0.7f);
+        }
+
+        return _cachedFuelColor;
+    }
     // ────────────────────────────────────────────────────────────────────────
 
     public void ShowUI(bool isLooking)
     {
+        enabled = true;
         if (isLooking)
         {
             _lookAwayTimer = 0f;
@@ -465,5 +569,6 @@ public class FuelTank : MonoBehaviour
     {
         float ratio = maxCapacity > 0f ? Mathf.Clamp01(currentFuel / maxCapacity) : 0f;
         _targetRatio = ratio;
+        enabled = true;
     }
 }

@@ -39,6 +39,9 @@ public class DayNightSkyboxController : MonoBehaviour
     [Header("Performance")]
     [Tooltip("Reduce runtime spikes by throttling expensive updates.")]
     public bool optimizeForStableFrameTime = true;
+    [Min(0.02f)]
+    [Tooltip("How often runtime lighting, fog, skybox, and shadow settings are refreshed while playing.")]
+    public float cycleApplyInterval = 0.1f;
 
     [Min(0.5f)] public float probeRendererCacheRefreshInterval = 10f;
     [Min(8)] public int probeSyncBatchSize = 128;
@@ -142,14 +145,39 @@ public class DayNightSkyboxController : MonoBehaviour
     private static readonly int GodrayPowerId = Shader.PropertyToID("_GodrayPower");
     private static readonly int GodrayTintId = Shader.PropertyToID("_GodrayTint");
     private static readonly int AlbedoColorId = Shader.PropertyToID("_Color");
+    private static readonly int CloudThresholdId = Shader.PropertyToID("_CloudThreshold");
+    private static readonly int CloudDensityScaleId = Shader.PropertyToID("_CloudDensityScale");
 
     private Material _runtimeSkybox;
     private bool _ownsSkyboxMaterial;
+    private bool _skyboxHasSkyTint;
+    private bool _skyboxHasGroundColor;
+    private bool _skyboxHasSunColor;
+    private bool _skyboxHasExposure;
+    private bool _skyboxHasAtmosphereThickness;
+    private bool _skyboxHasSunSize;
+    private bool _skyboxHasSunSoftness;
+    private bool _skyboxHasGodrayStrength;
+    private bool _skyboxHasGodrayPower;
+    private bool _skyboxHasGodrayTint;
     private float _reflectionTimer;
     private float _probeSyncTimer;
     private float _probeCacheRefreshTimer;
+    private float _cycleApplyTimer;
+    private float _cycleAccumulatedDelta;
     private int _probeSyncCursor;
+    private bool _duplicateDirectionalLightsChecked;
+    private float _cachedDayLengthSecondsSource = -1f;
+    private float _cachedDayLengthSeconds = 10f;
+    private float _cachedCycleApplyIntervalSource = -1f;
+    private float _cachedCycleApplyInterval = 0.02f;
+    private float _cachedProbeSyncIntervalSource = -1f;
+    private float _cachedProbeSyncInterval = 0.1f;
+    private float _cachedProbeRendererCacheRefreshIntervalSource = -1f;
+    private float _cachedProbeRendererCacheRefreshInterval = 0.5f;
     private readonly List<Renderer> _cachedDynamicRenderers = new List<Renderer>(256);
+    private readonly HashSet<Renderer> _dynamicRendererScratch = new HashSet<Renderer>();
+    private readonly List<Renderer> _rendererChildBuffer = new List<Renderer>(16);
 
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -168,7 +196,6 @@ public class DayNightSkyboxController : MonoBehaviour
         EnsureSunLight();
         EnsureRuntimeSkybox();
 
-        enforceDynamicProbeSampling = true; // Enabled to run the fix pass
         if (enforceDynamicProbeSampling)
             RebuildDynamicRendererCache();
 
@@ -183,7 +210,7 @@ public class DayNightSkyboxController : MonoBehaviour
         if (Application.isPlaying)
         {
             if (autoAdvance)
-                timeOfDay = Mathf.Repeat(timeOfDay + delta / Mathf.Max(10f, dayLengthSeconds), 1f);
+                timeOfDay = Mathf.Repeat(timeOfDay + delta / GetDayLengthSeconds(), 1f);
 
             if (enforceDynamicProbeSampling && keepSyncingDynamicProbeSampling)
             {
@@ -191,13 +218,13 @@ public class DayNightSkyboxController : MonoBehaviour
                 if (optimizeForStableFrameTime)
                     _probeCacheRefreshTimer += delta;
 
-                if (optimizeForStableFrameTime && _probeCacheRefreshTimer >= probeRendererCacheRefreshInterval)
+                if (optimizeForStableFrameTime && _probeCacheRefreshTimer >= GetProbeRendererCacheRefreshInterval())
                 {
                     _probeCacheRefreshTimer = 0f;
                     RebuildDynamicRendererCache();
                 }
 
-                if (_probeSyncTimer >= probeSyncInterval)
+                if (_probeSyncTimer >= GetProbeSyncInterval())
                 {
                     _probeSyncTimer = 0f;
                     SyncDynamicProbeSampling();
@@ -205,12 +232,72 @@ public class DayNightSkyboxController : MonoBehaviour
             }
         }
 
-        ApplyCycle(delta, false);
+        if (!Application.isPlaying || !optimizeForStableFrameTime)
+        {
+            ApplyCycle(delta, false);
+            return;
+        }
+
+        _cycleApplyTimer += delta;
+        _cycleAccumulatedDelta += delta;
+        float interval = GetCycleApplyInterval();
+        if (_cycleApplyTimer >= interval)
+        {
+            float elapsed = _cycleAccumulatedDelta;
+            _cycleApplyTimer = 0f;
+            _cycleAccumulatedDelta = 0f;
+            ApplyCycle(elapsed, false);
+        }
+    }
+
+    private float GetDayLengthSeconds()
+    {
+        if (!Mathf.Approximately(_cachedDayLengthSecondsSource, dayLengthSeconds))
+        {
+            _cachedDayLengthSecondsSource = dayLengthSeconds;
+            _cachedDayLengthSeconds = Mathf.Max(10f, dayLengthSeconds);
+        }
+
+        return _cachedDayLengthSeconds;
+    }
+
+    private float GetCycleApplyInterval()
+    {
+        if (!Mathf.Approximately(_cachedCycleApplyIntervalSource, cycleApplyInterval))
+        {
+            _cachedCycleApplyIntervalSource = cycleApplyInterval;
+            _cachedCycleApplyInterval = Mathf.Max(0.02f, cycleApplyInterval);
+        }
+
+        return _cachedCycleApplyInterval;
+    }
+
+    private float GetProbeSyncInterval()
+    {
+        if (!Mathf.Approximately(_cachedProbeSyncIntervalSource, probeSyncInterval))
+        {
+            _cachedProbeSyncIntervalSource = probeSyncInterval;
+            _cachedProbeSyncInterval = Mathf.Max(0.1f, probeSyncInterval);
+        }
+
+        return _cachedProbeSyncInterval;
+    }
+
+    private float GetProbeRendererCacheRefreshInterval()
+    {
+        if (!Mathf.Approximately(_cachedProbeRendererCacheRefreshIntervalSource, probeRendererCacheRefreshInterval))
+        {
+            _cachedProbeRendererCacheRefreshIntervalSource = probeRendererCacheRefreshInterval;
+            _cachedProbeRendererCacheRefreshInterval = Mathf.Max(0.5f, probeRendererCacheRefreshInterval);
+        }
+
+        return _cachedProbeRendererCacheRefreshInterval;
     }
 
     private void OnValidate()
     {
         dayLengthSeconds = Mathf.Max(10f, dayLengthSeconds);
+        cycleApplyInterval = Mathf.Max(0.02f, cycleApplyInterval);
         reflectionUpdateInterval = Mathf.Max(0.1f, reflectionUpdateInterval);
         probeSyncInterval = Mathf.Max(0.1f, probeSyncInterval);
 
@@ -245,7 +332,6 @@ public class DayNightSkyboxController : MonoBehaviour
 
         if (Application.isPlaying)
         {
-            enforceDynamicProbeSampling = true;
             if (enforceDynamicProbeSampling)
                 RebuildDynamicRendererCache();
 
@@ -316,8 +402,9 @@ public class DayNightSkyboxController : MonoBehaviour
         }
 
         // 3. Auto-disable any other active directional lights at runtime to prevent double-sun conflicts
-        if (sunLight != null && Application.isPlaying)
+        if (sunLight != null && Application.isPlaying && !_duplicateDirectionalLightsChecked)
         {
+            _duplicateDirectionalLightsChecked = true;
             Light[] lights = FindObjectsByType<Light>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
             for (int i = 0; i < lights.Length; i++)
             {
@@ -356,9 +443,24 @@ public class DayNightSkyboxController : MonoBehaviour
         {
             name = "Runtime_DayNightSkybox"
         };
+        CacheSkyboxProperties();
 
         RenderSettings.skybox = _runtimeSkybox;
         _ownsSkyboxMaterial = true;
+    }
+
+    private void CacheSkyboxProperties()
+    {
+        _skyboxHasSkyTint = _runtimeSkybox != null && _runtimeSkybox.HasProperty(SkyTintId);
+        _skyboxHasGroundColor = _runtimeSkybox != null && _runtimeSkybox.HasProperty(GroundColorId);
+        _skyboxHasSunColor = _runtimeSkybox != null && _runtimeSkybox.HasProperty(SunColorId);
+        _skyboxHasExposure = _runtimeSkybox != null && _runtimeSkybox.HasProperty(ExposureId);
+        _skyboxHasAtmosphereThickness = _runtimeSkybox != null && _runtimeSkybox.HasProperty(AtmosphereThicknessId);
+        _skyboxHasSunSize = _runtimeSkybox != null && _runtimeSkybox.HasProperty(SunSizeId);
+        _skyboxHasSunSoftness = _runtimeSkybox != null && _runtimeSkybox.HasProperty(SunSoftnessId);
+        _skyboxHasGodrayStrength = _runtimeSkybox != null && _runtimeSkybox.HasProperty(GodrayStrengthId);
+        _skyboxHasGodrayPower = _runtimeSkybox != null && _runtimeSkybox.HasProperty(GodrayPowerId);
+        _skyboxHasGodrayTint = _runtimeSkybox != null && _runtimeSkybox.HasProperty(GodrayTintId);
     }
 
     private void ApplyCycle(float deltaTime, bool forceReflectionUpdate)
@@ -406,8 +508,8 @@ public class DayNightSkyboxController : MonoBehaviour
         float cloudLightOcclusion = 1.0f;
         float cloudCoverageFactor = 0.0f;
         
-        float globalThreshold = Shader.GetGlobalFloat("_CloudThreshold");
-        float globalDensityScale = Shader.GetGlobalFloat("_CloudDensityScale");
+        float globalThreshold = Shader.GetGlobalFloat(CloudThresholdId);
+        float globalDensityScale = Shader.GetGlobalFloat(CloudDensityScaleId);
         if (globalDensityScale > 0.001f)
         {
             // High coverage corresponds to low threshold settings (0 = overcast, 1 = clear)
@@ -554,36 +656,36 @@ public class DayNightSkyboxController : MonoBehaviour
         float exposure = Mathf.Lerp(nightExposure, dayExposure, daylight);
         float atmosphere = Mathf.Lerp(nightAtmosphereThickness, dayAtmosphereThickness, daylight);
 
-        if (_runtimeSkybox.HasProperty(SkyTintId))
+        if (_skyboxHasSkyTint)
             _runtimeSkybox.SetColor(SkyTintId, skyColor);
-        if (_runtimeSkybox.HasProperty(GroundColorId))
+        if (_skyboxHasGroundColor)
             _runtimeSkybox.SetColor(GroundColorId, groundColor);
-        if (_runtimeSkybox.HasProperty(SunColorId))
+        if (_skyboxHasSunColor)
             _runtimeSkybox.SetColor(SunColorId, sunLight != null ? sunLight.color : Color.white);
-        if (_runtimeSkybox.HasProperty(ExposureId))
+        if (_skyboxHasExposure)
             _runtimeSkybox.SetFloat(ExposureId, exposure);
-        if (_runtimeSkybox.HasProperty(AtmosphereThicknessId))
+        if (_skyboxHasAtmosphereThickness)
             _runtimeSkybox.SetFloat(AtmosphereThicknessId, atmosphere);
-        if (_runtimeSkybox.HasProperty(SunSizeId))
+        if (_skyboxHasSunSize)
             _runtimeSkybox.SetFloat(SunSizeId, sunDiskSize);
-        if (_runtimeSkybox.HasProperty(SunSoftnessId))
+        if (_skyboxHasSunSoftness)
             _runtimeSkybox.SetFloat(SunSoftnessId, sunDiskSoftness);
-        if (_runtimeSkybox.HasProperty(GodrayStrengthId))
+        if (_skyboxHasGodrayStrength)
         {
             float strength = enableUrpSkyboxGodray ? godrayBlend * urpGodrayMaxStrength : 0f;
             _runtimeSkybox.SetFloat(GodrayStrengthId, strength);
         }
-        if (_runtimeSkybox.HasProperty(GodrayPowerId))
+        if (_skyboxHasGodrayPower)
             _runtimeSkybox.SetFloat(GodrayPowerId, urpGodrayPower);
-        if (_runtimeSkybox.HasProperty(GodrayTintId))
+        if (_skyboxHasGodrayTint)
             _runtimeSkybox.SetColor(GodrayTintId, urpGodrayTint);
     }
 
     private void ApplyAmbientAndFog(float daylight)
     {
         // Query global cloud parameters for dynamic ambient/shadow adjustments
-        float globalThreshold = Shader.GetGlobalFloat("_CloudThreshold");
-        float globalDensityScale = Shader.GetGlobalFloat("_CloudDensityScale");
+        float globalThreshold = Shader.GetGlobalFloat(CloudThresholdId);
+        float globalDensityScale = Shader.GetGlobalFloat(CloudDensityScaleId);
         float cloudCoverageFactor = 0f;
         if (globalDensityScale > 0.001f)
         {
@@ -727,7 +829,7 @@ public class DayNightSkyboxController : MonoBehaviour
     private void RebuildDynamicRendererCache()
     {
         _cachedDynamicRenderers.Clear();
-        HashSet<Renderer> unique = new HashSet<Renderer>();
+        _dynamicRendererScratch.Clear();
 
         bool includeInactive = includeInactiveRenderersForProbeSync;
 
@@ -738,7 +840,7 @@ public class DayNightSkyboxController : MonoBehaviour
         foreach (var smr in smrs)
         {
             if (smr != null && !smr.gameObject.isStatic)
-                unique.Add(smr);
+                _dynamicRendererScratch.Add(smr);
         }
 
         // 2. Renderers under Rigidbodies
@@ -748,11 +850,13 @@ public class DayNightSkyboxController : MonoBehaviour
         foreach (var rb in rbs)
         {
             if (rb == null) continue;
-            Renderer[] rbRenderers = rb.GetComponentsInChildren<Renderer>(includeInactive);
-            foreach (var r in rbRenderers)
+            _rendererChildBuffer.Clear();
+            rb.GetComponentsInChildren<Renderer>(includeInactive, _rendererChildBuffer);
+            for (int i = 0; i < _rendererChildBuffer.Count; i++)
             {
+                Renderer r = _rendererChildBuffer[i];
                 if (r != null && !r.gameObject.isStatic)
-                    unique.Add(r);
+                    _dynamicRendererScratch.Add(r);
             }
         }
 
@@ -763,15 +867,19 @@ public class DayNightSkyboxController : MonoBehaviour
         foreach (var anim in anims)
         {
             if (anim == null) continue;
-            Renderer[] animRenderers = anim.GetComponentsInChildren<Renderer>(includeInactive);
-            foreach (var r in animRenderers)
+            _rendererChildBuffer.Clear();
+            anim.GetComponentsInChildren<Renderer>(includeInactive, _rendererChildBuffer);
+            for (int i = 0; i < _rendererChildBuffer.Count; i++)
             {
+                Renderer r = _rendererChildBuffer[i];
                 if (r != null && !r.gameObject.isStatic)
-                    unique.Add(r);
+                    _dynamicRendererScratch.Add(r);
             }
         }
 
-        _cachedDynamicRenderers.AddRange(unique);
+        _cachedDynamicRenderers.AddRange(_dynamicRendererScratch);
+        _dynamicRendererScratch.Clear();
+        _rendererChildBuffer.Clear();
         _probeSyncCursor = 0;
     }
 

@@ -53,6 +53,18 @@ public class CockpitCam : MonoBehaviour
 	private float lastRayDistance;
 	private Vector3 lastRayHitPoint;
 	private ICockpitHighlightable currentHighlight;
+	private Furniture_SlideDoor currentDoorTarget;
+	private ICockpitInteractable lastPromptTarget;
+	private Furniture_SlideDoor lastPromptDoorTarget;
+	private bool lastPromptVisible;
+	private string lastPromptText;
+	private const int MaxCockpitRayHits = 32;
+	private readonly RaycastHit[] cockpitRayHits = new RaycastHit[MaxCockpitRayHits];
+	private readonly System.Collections.Generic.Dictionary<Collider, ICockpitInteractable> cockpitInteractableCache = new System.Collections.Generic.Dictionary<Collider, ICockpitInteractable>(64);
+	private readonly System.Collections.Generic.Dictionary<Collider, ICockpitHighlightable> cockpitHighlightCache = new System.Collections.Generic.Dictionary<Collider, ICockpitHighlightable>(64);
+	private readonly System.Collections.Generic.Dictionary<Collider, Furniture_SlideDoor> cockpitDoorCache = new System.Collections.Generic.Dictionary<Collider, Furniture_SlideDoor>(32);
+	private const int MaxCockpitComponentCacheSize = 256;
+	private Furniture_SlideDoor[] exitDoors;
 
 	private GameObject activePlayer;
 	private bool isDriving;
@@ -119,14 +131,11 @@ public class CockpitCam : MonoBehaviour
 		if (isDriving && !isExiting && Input.GetKeyDown(KeyCode.BackQuote))
 		{
 			bool doorIsOpen = false;
-			Furniture_SlideDoor[] allDoors = GetComponentsInParent<Furniture_SlideDoor>();
-			if (allDoors.Length == 0 && transform.parent != null)
+			Furniture_SlideDoor[] allDoors = GetExitDoors();
+			for (int i = 0; i < allDoors.Length; i++)
 			{
-				allDoors = transform.root.GetComponentsInChildren<Furniture_SlideDoor>();
-			}
-			foreach (var d in allDoors)
-			{
-				if (d.IsOpen)
+				Furniture_SlideDoor d = allDoors[i];
+				if (d != null && d.IsOpen)
 				{
 					doorIsOpen = true;
 					break;
@@ -149,22 +158,35 @@ public class CockpitCam : MonoBehaviour
 		UpdateHighlight(highlight);
 		UpdateRayDebug();
 
-		// 🌟 检测车内视线是否看着车门 (Furniture_SlideDoor)
-		Furniture_SlideDoor doorTarget = GetDoorLookTarget();
-
 		// 🌟 实时刷新车内的 UI 交互提示文字
-		UpdateVehicleUiPrompt(target, doorTarget);
+		UpdateVehicleUiPrompt(target, currentDoorTarget);
 
 		// Right Click (MouseButton 1) is the core triggering logic for any camera!
 		if (target != null && (Input.GetMouseButtonDown(1) || Input.GetKeyDown(interactKey)))
 		{
 			target.Interact();
 		}
-		else if (doorTarget != null && (Input.GetMouseButtonDown(1) || Input.GetKeyDown(interactKey)))
+		else if (currentDoorTarget != null && (Input.GetMouseButtonDown(1) || Input.GetKeyDown(interactKey)))
 		{
 			// 🌟 车内直接开/关车门！
-			doorTarget.Interact();
+			currentDoorTarget.Interact();
 		}
+	}
+
+	private Furniture_SlideDoor[] GetExitDoors()
+	{
+		if (exitDoors != null)
+		{
+			return exitDoors;
+		}
+
+		exitDoors = GetComponentsInParent<Furniture_SlideDoor>();
+		if (exitDoors.Length == 0 && transform.parent != null)
+		{
+			exitDoors = transform.root.GetComponentsInChildren<Furniture_SlideDoor>();
+		}
+
+		return exitDoors;
 	}
 
 	private bool IsCameraActive()
@@ -238,9 +260,10 @@ public class CockpitCam : MonoBehaviour
 		lastRayDistance = interactDistance;
 		lastRayHit = false;
 		lastRayHitPoint = ray.origin + ray.direction * interactDistance;
+		currentDoorTarget = null;
 
-		RaycastHit[] hits = Physics.RaycastAll(ray, interactDistance, interactMask, QueryTriggerInteraction.Collide);
-		if (hits == null || hits.Length == 0)
+		int hitCount = Physics.RaycastNonAlloc(ray, cockpitRayHits, interactDistance, interactMask, QueryTriggerInteraction.Collide);
+		if (hitCount == 0)
 		{
 			return null;
 		}
@@ -249,13 +272,19 @@ public class CockpitCam : MonoBehaviour
 		float bestDistance = float.MaxValue;
 		ICockpitInteractable bestTarget = null;
 
-		foreach (RaycastHit hit in hits)
+		for (int i = 0; i < hitCount; i++)
 		{
+			RaycastHit hit = cockpitRayHits[i];
 			if (hit.collider != null && hit.distance < nearestAnyHit)
 			{
 				nearestAnyHit = hit.distance;
 				lastRayHitPoint = hit.point;
 				lastRayHit = true;
+			}
+
+			if (hit.collider != null && currentDoorTarget == null)
+			{
+				currentDoorTarget = GetCachedDoor(hit.collider);
 			}
 
 			if (hit.collider == null || !hit.collider.isTrigger)
@@ -268,16 +297,63 @@ public class CockpitCam : MonoBehaviour
 				continue;
 			}
 
-			ICockpitInteractable candidate = hit.collider.GetComponentInParent<ICockpitInteractable>();
+			ICockpitInteractable candidate = GetCachedInteractable(hit.collider);
 			if (candidate != null)
 			{
 				bestDistance = hit.distance;
 				bestTarget = candidate;
-				highlight = hit.collider.GetComponentInParent<ICockpitHighlightable>();
+				highlight = GetCachedHighlight(hit.collider);
 			}
 		}
 
 		return bestTarget;
+	}
+
+	private ICockpitInteractable GetCachedInteractable(Collider collider)
+	{
+		if (collider == null) return null;
+		if (cockpitInteractableCache.TryGetValue(collider, out ICockpitInteractable interactable))
+			return interactable;
+
+		EnsureCockpitComponentCacheBudget();
+		interactable = collider.GetComponentInParent<ICockpitInteractable>();
+		cockpitInteractableCache[collider] = interactable;
+		return interactable;
+	}
+
+	private ICockpitHighlightable GetCachedHighlight(Collider collider)
+	{
+		if (collider == null) return null;
+		if (cockpitHighlightCache.TryGetValue(collider, out ICockpitHighlightable highlight))
+			return highlight;
+
+		EnsureCockpitComponentCacheBudget();
+		highlight = collider.GetComponentInParent<ICockpitHighlightable>();
+		cockpitHighlightCache[collider] = highlight;
+		return highlight;
+	}
+
+	private Furniture_SlideDoor GetCachedDoor(Collider collider)
+	{
+		if (collider == null) return null;
+		if (cockpitDoorCache.TryGetValue(collider, out Furniture_SlideDoor door))
+			return door;
+
+		EnsureCockpitComponentCacheBudget();
+		door = collider.GetComponentInParent<Furniture_SlideDoor>();
+		cockpitDoorCache[collider] = door;
+		return door;
+	}
+
+	private void EnsureCockpitComponentCacheBudget()
+	{
+		int total = cockpitInteractableCache.Count + cockpitHighlightCache.Count + cockpitDoorCache.Count;
+		if (total < MaxCockpitComponentCacheSize)
+			return;
+
+		cockpitInteractableCache.Clear();
+		cockpitHighlightCache.Clear();
+		cockpitDoorCache.Clear();
 	}
 
 	private void UpdateHighlight(ICockpitHighlightable highlight)
@@ -541,6 +617,7 @@ public class CockpitCam : MonoBehaviour
 		{
 			InteractionSystem.Instance.SetExternalInteractPrompt("", false);
 		}
+		ClearVehiclePromptCache();
 	}
 
 	private static float NormalizeAngle(float angle)
@@ -552,27 +629,6 @@ public class CockpitCam : MonoBehaviour
 		return angle;
 	}
 
-	// 🌟 检测视线正前方是否有车门组件 (Furniture_SlideDoor)
-	private Furniture_SlideDoor GetDoorLookTarget()
-	{
-		Camera activeCam = cockpitCamera;
-		if (activeCam == null) activeCam = Camera.main;
-		if (activeCam == null) return null;
-
-		Ray ray = new Ray(activeCam.transform.position, activeCam.transform.forward);
-		
-		// 使用 Physics.Raycast 在驾驶座视距内寻找挂载了 Furniture_SlideDoor 的车门
-		if (Physics.Raycast(ray, out RaycastHit hit, interactDistance))
-		{
-			Furniture_SlideDoor door = hit.collider.GetComponentInParent<Furniture_SlideDoor>();
-			if (door != null)
-			{
-				return door;
-			}
-		}
-		return null;
-	}
-
 	// 🌟 更新车内视角的 UI 交互提示
 	private void UpdateVehicleUiPrompt(ICockpitInteractable target, Furniture_SlideDoor doorTarget)
 	{
@@ -580,22 +636,59 @@ public class CockpitCam : MonoBehaviour
 
 		if (target != null)
 		{
+			if (lastPromptVisible && lastPromptTarget == target)
+			{
+				return;
+			}
+
 			// 用各个按钮分别的名字代替提示的右键交互信息，始终以"[ RMB ] "开头
 			string btnName = GetFriendlyButtonName(target);
 			string promptText = $"[ RMB ] {btnName}";
-			InteractionSystem.Instance.SetExternalInteractPrompt(promptText, true);
+			SetVehiclePrompt(promptText, true, target, null);
 		}
 		else if (doorTarget != null)
 		{
+			if (lastPromptVisible && lastPromptDoorTarget == doorTarget)
+			{
+				return;
+			}
+
 			// 面向车门提示可以开关车门，始终以"[ RMB ] "开头
 			string promptText = "[ RMB ] Toggle Door";
-			InteractionSystem.Instance.SetExternalInteractPrompt(promptText, true);
+			SetVehiclePrompt(promptText, true, null, doorTarget);
 		}
 		else
 		{
+			if (!lastPromptVisible)
+			{
+				return;
+			}
+
 			// 视线中没有可交互目标，隐藏提示文字
-			InteractionSystem.Instance.SetExternalInteractPrompt("", false);
+			SetVehiclePrompt("", false, null, null);
 		}
+	}
+
+	private void SetVehiclePrompt(string text, bool visible, ICockpitInteractable target, Furniture_SlideDoor doorTarget)
+	{
+		if (lastPromptVisible == visible && lastPromptText == text && lastPromptTarget == target && lastPromptDoorTarget == doorTarget)
+		{
+			return;
+		}
+
+		lastPromptVisible = visible;
+		lastPromptText = text;
+		lastPromptTarget = target;
+		lastPromptDoorTarget = doorTarget;
+		InteractionSystem.Instance.SetExternalInteractPrompt(text, visible);
+	}
+
+	private void ClearVehiclePromptCache()
+	{
+		lastPromptVisible = false;
+		lastPromptText = null;
+		lastPromptTarget = null;
+		lastPromptDoorTarget = null;
 	}
 
 	// 🌟 智能个性化英文名映射，为每个排档按钮、引擎、电瓶按钮输出简短英文！

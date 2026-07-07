@@ -37,6 +37,7 @@ public class FPSRestrictionController : MonoBehaviour, IPointerUpHandler
     }
 
     // 每一帧计算实际 FPS
+#if UNITY_EDITOR
     private void Update()
     {
         // 累加每帧消耗时间（计算平均 delta，防止数值抖动太剧烈看不清）
@@ -51,6 +52,7 @@ public class FPSRestrictionController : MonoBehaviour, IPointerUpHandler
             fpsUpdateTimer = 0.0f;
         }
     }
+#endif
 
     private void OnSliderDragging(float rawValue)
     {

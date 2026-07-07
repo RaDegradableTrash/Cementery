@@ -69,6 +69,10 @@ public class PCSSRenderPass : ScriptableRenderPass
     private static readonly int MaxPenumbraSizeId = Shader.PropertyToID("_MaxPenumbraSize");
     private static readonly int ShadowIntensityId = Shader.PropertyToID("_ShadowIntensity");
     private static readonly int ScreenSpaceShadowmapTextureId = Shader.PropertyToID("_ScreenSpaceShadowmapTexture");
+    private bool _hasCachedMaterialSettings;
+    private float _lastLightSize;
+    private float _lastMaxPenumbraSize;
+    private float _lastShadowIntensity;
 
     public PCSSRenderPass(PCSSScreenSpaceShadowFeature.PCSSSettings settings)
     {
@@ -103,9 +107,7 @@ public class PCSSRenderPass : ScriptableRenderPass
 
         CommandBuffer cmd = CommandBufferPool.Get("PCSS Shadows");
 
-        _pcssMaterial.SetFloat(LightSizeId, _settings.lightSize);
-        _pcssMaterial.SetFloat(MaxPenumbraSizeId, _settings.maxPenumbraSize);
-        _pcssMaterial.SetFloat(ShadowIntensityId, _settings.shadowIntensity);
+        ApplyMaterialSettings();
 
         // Bind the existing shadow map to a custom texture name so we can safely sample raw depth
         cmd.SetGlobalTexture("_MyMainLightShadowmapTexture", new RenderTargetIdentifier("_MainLightShadowmapTexture"));
@@ -126,6 +128,26 @@ public class PCSSRenderPass : ScriptableRenderPass
     public override void OnCameraCleanup(CommandBuffer cmd)
     {
         // Don't disable keyword here, Opaques need to read it.
+    }
+
+    private void ApplyMaterialSettings()
+    {
+        if (_hasCachedMaterialSettings
+            && Mathf.Approximately(_lastLightSize, _settings.lightSize)
+            && Mathf.Approximately(_lastMaxPenumbraSize, _settings.maxPenumbraSize)
+            && Mathf.Approximately(_lastShadowIntensity, _settings.shadowIntensity))
+        {
+            return;
+        }
+
+        _pcssMaterial.SetFloat(LightSizeId, _settings.lightSize);
+        _pcssMaterial.SetFloat(MaxPenumbraSizeId, _settings.maxPenumbraSize);
+        _pcssMaterial.SetFloat(ShadowIntensityId, _settings.shadowIntensity);
+
+        _lastLightSize = _settings.lightSize;
+        _lastMaxPenumbraSize = _settings.maxPenumbraSize;
+        _lastShadowIntensity = _settings.shadowIntensity;
+        _hasCachedMaterialSettings = true;
     }
 
     public void Dispose()

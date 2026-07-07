@@ -8,27 +8,34 @@ namespace EnvironmentSystem
     {
         public float yOffset = 0.02f;
         public Material roadMaterial;
+        [SerializeField, Min(0.1f)]
+        private float runtimeSyncCheckInterval = 1f;
 
         // Keep a serialized mesh reference to avoid lost mesh references in build/scene save
         [SerializeField]
         private Mesh localOverlayMesh;
+        private MeshFilter meshFilter;
+        private MeshRenderer meshRenderer;
+        private Transform cachedParent;
+        private MeshFilter cachedTerrainFilter;
+        private float nextRuntimeSyncCheckTime;
 
         public Mesh GetMesh()
         {
-            MeshFilter filter = GetComponent<MeshFilter>();
-            if (filter != null)
+            CacheOwnComponents();
+            if (meshFilter != null)
             {
-                return filter.sharedMesh;
+                return meshFilter.sharedMesh;
             }
             return null;
         }
 
         public void SetMesh(Mesh mesh)
         {
-            MeshFilter filter = GetComponent<MeshFilter>();
-            if (filter != null)
+            CacheOwnComponents();
+            if (meshFilter != null)
             {
-                filter.sharedMesh = mesh;
+                meshFilter.sharedMesh = mesh;
             }
             localOverlayMesh = mesh;
         }
@@ -41,11 +48,17 @@ namespace EnvironmentSystem
         {
             if (terrainMesh == null) return;
 
-            MeshFilter filter = GetComponent<MeshFilter>();
-            if (filter == null) filter = gameObject.AddComponent<MeshFilter>();
+            CacheOwnComponents();
 
-            MeshRenderer mr = GetComponent<MeshRenderer>();
-            if (mr == null) mr = gameObject.AddComponent<MeshRenderer>();
+            if (meshFilter == null)
+            {
+                meshFilter = gameObject.AddComponent<MeshFilter>();
+            }
+
+            if (meshRenderer == null)
+            {
+                meshRenderer = gameObject.AddComponent<MeshRenderer>();
+            }
 
             // Setup Material
             if (roadMaterial == null)
@@ -58,16 +71,16 @@ namespace EnvironmentSystem
                 }
             }
 
-            if (mr.sharedMaterial != roadMaterial && roadMaterial != null)
+            if (meshRenderer.sharedMaterial != roadMaterial && roadMaterial != null)
             {
-                mr.sharedMaterial = roadMaterial;
+                meshRenderer.sharedMaterial = roadMaterial;
             }
 
-            mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            mr.receiveShadows = true;
+            meshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            meshRenderer.receiveShadows = true;
 
             // Retrieve or create our unique local mesh
-            Mesh currentMesh = filter.sharedMesh;
+            Mesh currentMesh = meshFilter.sharedMesh;
             bool isNewMesh = false;
 
             // We must instantiate/create a standalone mesh if we don't have one or if it's shared with the terrain
@@ -157,7 +170,7 @@ namespace EnvironmentSystem
             currentMesh.triangles = terrainTriangles;
             currentMesh.RecalculateBounds();
 
-            filter.sharedMesh = currentMesh;
+            meshFilter.sharedMesh = currentMesh;
             localOverlayMesh = currentMesh;
 
 #if UNITY_EDITOR
@@ -173,12 +186,67 @@ namespace EnvironmentSystem
         private Vector3[] lastTerrainVertices;
         private Bounds lastTerrainBounds;
 
-        private void Update()
+        private void Awake()
+        {
+            CacheOwnComponents();
+            ScheduleNextRuntimeSyncCheck(true);
+        }
+
+        private void OnEnable()
+        {
+            ScheduleNextRuntimeSyncCheck(true);
+        }
+
+        private void OnValidate()
+        {
+            CacheOwnComponents();
+        }
+
+        private void CacheOwnComponents()
+        {
+            if (meshFilter == null)
+            {
+                TryGetComponent(out meshFilter);
+            }
+
+            if (meshRenderer == null)
+            {
+                TryGetComponent(out meshRenderer);
+            }
+        }
+
+        private MeshFilter GetTerrainFilter()
         {
             Transform parent = transform.parent;
-            if (parent == null) return;
+            if (parent == null)
+            {
+                cachedParent = null;
+                cachedTerrainFilter = null;
+                return null;
+            }
 
-            MeshFilter terrainFilter = parent.GetComponent<MeshFilter>();
+            if (cachedParent != parent || cachedTerrainFilter == null)
+            {
+                cachedParent = parent;
+                cachedTerrainFilter = parent.GetComponent<MeshFilter>();
+            }
+
+            return cachedTerrainFilter;
+        }
+
+        private void Update()
+        {
+            if (Application.isPlaying && Time.unscaledTime < nextRuntimeSyncCheckTime)
+            {
+                return;
+            }
+
+            if (Application.isPlaying)
+            {
+                ScheduleNextRuntimeSyncCheck(false);
+            }
+
+            MeshFilter terrainFilter = GetTerrainFilter();
             if (terrainFilter == null || terrainFilter.sharedMesh == null) return;
 
             Mesh terrainMesh = terrainFilter.sharedMesh;
@@ -216,6 +284,17 @@ namespace EnvironmentSystem
                     lastTerrainBounds = terrainMesh.bounds;
                 }
             }
+        }
+
+        private void ScheduleNextRuntimeSyncCheck(bool stagger)
+        {
+            if (!Application.isPlaying)
+            {
+                return;
+            }
+
+            float interval = Mathf.Max(0.1f, runtimeSyncCheckInterval);
+            nextRuntimeSyncCheckTime = Time.unscaledTime + (stagger ? Random.Range(0f, interval) : interval);
         }
     }
 }

@@ -147,8 +147,13 @@ public class CarControl : MonoBehaviour
     Rigidbody rigidBody;
     private float currentSteerAngle;
     private float currentSpeedKmh;
+    public float CurrentSpeedKmh => currentSpeedKmh;
     private float l6ThrottleCurrent;
     private readonly HashSet<WheelControl> sixLockWheelSet = new HashSet<WheelControl>();
+    private static readonly string[] ForwardGearDisplay = { "D1", "D2", "D3", "D4", "D5", "D6" };
+    private int lastDisplayedSpeedKmh = int.MinValue;
+    private int lastDisplayedRpm = int.MinValue;
+    private string lastDisplayedGear;
     
     // 引擎声音相关变量
     private float engineLoad = 0f;
@@ -367,10 +372,7 @@ public class CarControl : MonoBehaviour
 
         float displaySpeed = Mathf.Abs(forwardSpeed) * 3.6f * speedMultiplier;
         currentSpeedKmh = displaySpeed;
-        if (speedDisplay != null)
-        {
-            speedDisplay.text = Mathf.Round(displaySpeed).ToString() + "";//km/h
-        }
+        UpdateSpeedDisplay(displaySpeed);
 
         float speedFactorMotor = Mathf.InverseLerp(0, maxSpeed, forwardSpeed);
 
@@ -483,25 +485,17 @@ public class CarControl : MonoBehaviour
 
         // --- Transmission & Engine RPM Calculation ---
         float currentGearRatio = 0f;
-        string gearString = currentGear.ToString();
 
         if (currentGear == GearMode.Reverse) {
             currentGearRatio = reverseGearRatio;
-            gearString = "R";
         } else if (currentGear == GearMode.Drive || currentGear == GearMode.Sport || IsSixLockGear(currentGear)) {
             if (currentTransmissionGear < 0) currentTransmissionGear = 0;
             if (currentTransmissionGear >= forwardGearRatios.Length) currentTransmissionGear = forwardGearRatios.Length - 1;
             currentGearRatio = forwardGearRatios[currentTransmissionGear];
-            gearString = "D" + (currentTransmissionGear + 1);
-        } else if (currentGear == GearMode.Park) {
-            gearString = "P";
-        } else if (currentGear == GearMode.Neutral) {
-            gearString = "N";
         }
         
-        if (gearDisplay != null) {
-            gearDisplay.text = gearString;
-        }
+        string gearString = GetGearDisplayString();
+        UpdateGearDisplay(gearString);
 
         // ========== 用转速限制车速 ==========
         float maxEngineRpm = 2800f;
@@ -580,10 +574,7 @@ public class CarControl : MonoBehaviour
         float targetLoad = engineOn ? Mathf.Abs(appliedThrottleInput) : 0f;
         engineLoad = Mathf.Lerp(engineLoad, targetLoad, Time.deltaTime * 8f);
 
-        if (rpmDisplay != null)
-        {
-            rpmDisplay.text = Mathf.Round(smoothEngineRpm).ToString() + "";//rpm
-        }
+        UpdateRpmDisplay(smoothEngineRpm);
 
         bool steerInputActive = Mathf.Abs(hInputRaw) > 0.01f;
         float targetSteerAngle = hInputRaw * currentMaxWheelSteerAngle;
@@ -672,6 +663,72 @@ public class CarControl : MonoBehaviour
 
         // ★★★ 燃油消耗管理（会自动熄火）★★★
         HandleFuelConsumption(throttleInput);
+    }
+
+    private void UpdateSpeedDisplay(float displaySpeed)
+    {
+        if (speedDisplay == null)
+        {
+            return;
+        }
+
+        int roundedSpeed = Mathf.RoundToInt(displaySpeed);
+        if (roundedSpeed == lastDisplayedSpeedKmh)
+        {
+            return;
+        }
+
+        lastDisplayedSpeedKmh = roundedSpeed;
+        speedDisplay.text = roundedSpeed.ToString();
+    }
+
+    private void UpdateRpmDisplay(float rpm)
+    {
+        if (rpmDisplay == null)
+        {
+            return;
+        }
+
+        int roundedRpm = Mathf.RoundToInt(rpm);
+        if (roundedRpm == lastDisplayedRpm)
+        {
+            return;
+        }
+
+        lastDisplayedRpm = roundedRpm;
+        rpmDisplay.text = roundedRpm.ToString();
+    }
+
+    private void UpdateGearDisplay(string gearString)
+    {
+        if (gearDisplay == null || lastDisplayedGear == gearString)
+        {
+            return;
+        }
+
+        lastDisplayedGear = gearString;
+        gearDisplay.text = gearString;
+    }
+
+    private string GetGearDisplayString()
+    {
+        switch (currentGear)
+        {
+            case GearMode.Park:
+                return "P";
+            case GearMode.Reverse:
+                return "R";
+            case GearMode.Neutral:
+                return "N";
+            case GearMode.Drive:
+            case GearMode.Sport:
+            case GearMode.H6:
+            case GearMode.L6:
+                int index = Mathf.Clamp(currentTransmissionGear, 0, ForwardGearDisplay.Length - 1);
+                return ForwardGearDisplay[index];
+            default:
+                return string.Empty;
+        }
     }
 
     // ★★★ 燃油系统（新增自动熄火逻辑）★★★
@@ -836,6 +893,18 @@ if (!isBraking)
     void OnAudioFilterRead(float[] data, int channels)
     {
         float rpm = Mathf.Max(0, smoothEngineRpm);
+        float vol = engineMasterVolume;
+        if (data == null || data.Length == 0 || channels <= 0)
+        {
+            return;
+        }
+
+        if (vol <= 0.0001f || (rpm <= 1f && engineLoad <= 0.0001f))
+        {
+            System.Array.Clear(data, 0, data.Length);
+            return;
+        }
+
         float rpmRatio = Mathf.Clamp01(rpm / 2800f);
         
         double freqIncrement = (rpm / 60.0) * 4.0 / samplingRate;
@@ -843,7 +912,6 @@ if (!isBraking)
         double intakeIncrement = (rpm / 60.0) * 8.0 / samplingRate;
         double turboIncrement = (rpm / 60.0) * 24.0 / samplingRate;
         
-        float vol = engineMasterVolume;
         float pWidth = pulseWidth;
         float sharpness = pulseSharpness;
         float exhaustRes = exhaustResonance;

@@ -27,9 +27,16 @@ public class SimpleLight : MonoBehaviour
 
     private bool desiredOn;
     private bool lastEffectiveOn;
+    private bool hasAppliedState;
     private Color[] baseEmissionColors;
     private bool[] hasEmission;
     private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
+    private static LightControl[] s_cachedLightControls;
+    private static float s_nextLightControlCacheRefreshTime;
+    private const float LightControlCacheRefreshInterval = 1f;
+    private static readonly Renderer[] EmptyRenderers = new Renderer[0];
+    private static readonly Light[] EmptyLights = new Light[0];
+    public event System.Action OnStateChanged;
 
     private void Awake()
     {
@@ -51,7 +58,7 @@ public class SimpleLight : MonoBehaviour
             }
             else
             {
-                targetRenderers = new Renderer[0];
+                targetRenderers = EmptyRenderers;
             }
         }
 
@@ -68,7 +75,7 @@ public class SimpleLight : MonoBehaviour
             }
             else
             {
-                targetLights = new Light[0];
+                targetLights = EmptyLights;
             }
         }
 
@@ -76,9 +83,31 @@ public class SimpleLight : MonoBehaviour
 
         desiredOn = defaultOn;
         CacheEmissionColor();
-        bool effectiveOn = GetEffectiveOn();
-        ApplyState(effectiveOn);
-        lastEffectiveOn = effectiveOn;
+        RefreshState(true);
+    }
+
+    private void OnEnable()
+    {
+        if (startProcedure != null)
+        {
+            startProcedure.OnStateChanged -= HandlePowerStateChanged;
+            startProcedure.OnStateChanged += HandlePowerStateChanged;
+        }
+
+        RefreshState(!hasAppliedState);
+    }
+
+    private void OnDisable()
+    {
+        if (startProcedure != null)
+        {
+            startProcedure.OnStateChanged -= HandlePowerStateChanged;
+        }
+    }
+
+    private void HandlePowerStateChanged()
+    {
+        RefreshState(false);
     }
 
     private void PruneLightControlTargets()
@@ -88,7 +117,7 @@ public class SimpleLight : MonoBehaviour
             return;
         }
 
-        LightControl[] lightControls = FindObjectsOfType<LightControl>();
+        LightControl[] lightControls = GetCachedLightControls();
         if (lightControls == null || lightControls.Length == 0)
         {
             return;
@@ -178,7 +207,7 @@ public class SimpleLight : MonoBehaviour
             return GetComponentInChildren<Light>();
         }
 
-        LightControl[] lightControls = FindObjectsOfType<LightControl>();
+        LightControl[] lightControls = GetCachedLightControls();
         if (lightControls == null || lightControls.Length == 0)
         {
             return GetComponentInChildren<Light>();
@@ -204,7 +233,7 @@ public class SimpleLight : MonoBehaviour
             return GetComponentInChildren<Renderer>();
         }
 
-        LightControl[] lightControls = FindObjectsOfType<LightControl>();
+        LightControl[] lightControls = GetCachedLightControls();
         if (lightControls == null || lightControls.Length == 0)
         {
             return GetComponentInChildren<Renderer>();
@@ -221,6 +250,18 @@ public class SimpleLight : MonoBehaviour
         }
 
         return null;
+    }
+
+    private static LightControl[] GetCachedLightControls()
+    {
+        if (s_cachedLightControls != null && Time.time < s_nextLightControlCacheRefreshTime)
+        {
+            return s_cachedLightControls;
+        }
+
+        s_nextLightControlCacheRefreshTime = Time.time + LightControlCacheRefreshInterval;
+        s_cachedLightControls = FindObjectsOfType<LightControl>();
+        return s_cachedLightControls;
     }
 
     private static bool IsControlledByAny(LightControl[] lightControls, Light light)
@@ -259,13 +300,15 @@ public class SimpleLight : MonoBehaviour
         return false;
     }
 
-    private void Update()
+    private void RefreshState(bool force)
     {
         bool effectiveOn = GetEffectiveOn();
-        if (effectiveOn != lastEffectiveOn)
+        if (force || !hasAppliedState || effectiveOn != lastEffectiveOn)
         {
             lastEffectiveOn = effectiveOn;
+            hasAppliedState = true;
             ApplyState(effectiveOn);
+            OnStateChanged?.Invoke();
         }
     }
 
@@ -281,6 +324,7 @@ public class SimpleLight : MonoBehaviour
             return;
         }
         desiredOn = value;
+        RefreshState(false);
     }
 
     public bool IsOn()

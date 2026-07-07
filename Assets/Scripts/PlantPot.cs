@@ -13,12 +13,25 @@ public class PlantPot : MonoBehaviour
     [Header("Growth Settings")]
     [Tooltip("Time in seconds for the kelp to reach maturity.")]
     public float growthDuration = 10f;
+    [SerializeField, Tooltip("Seconds between carried-item checks for empty pots.")]
+    private float emptyPotCheckInterval = 0.15f;
+    [SerializeField, Tooltip("Seconds between planted kelp growth visual updates.")]
+    private float growthVisualUpdateInterval = 0.1f;
 
     private WorldObject _worldObject;
     private Kelp _currentPlant;
     private float _progress = 0f;
     private bool _isGrowing = false;
     private bool _isMature = false;
+    private float _nextEmptyPotCheckTime;
+    private float _nextGrowthVisualTime;
+    private bool _lastInteractable;
+    private string _lastInteractMessage;
+    private bool _hasAppliedWorldObjectState;
+    private static WorldObject s_cachedCarriedObject;
+    private static bool s_cachedCarriedObjectIsPlantable;
+    private static float s_nextCarriedObjectRefreshTime;
+    private static bool s_cachedAnyPlantableHeld;
 
     void Awake()
     {
@@ -26,8 +39,7 @@ public class PlantPot : MonoBehaviour
         _worldObject.onInteract.AddListener(OnInteract);
         
         // Initial setup
-        _worldObject.interactMessage = "Plant Kelp";
-        _worldObject.interactable = false; // Only interactable when holding Kelp plant initially
+        SetWorldObjectState(false, "Plant Kelp"); // Only interactable when holding Kelp plant initially
     }
 
     void Start()
@@ -45,29 +57,24 @@ public class PlantPot : MonoBehaviour
         // Enforce the interaction gate: empty pot interactable ONLY when holding a carried Kelp plant
         if (!HasPlant())
         {
-            bool holdingKelp = false;
-            if (InteractionSystem.Instance != null)
+            if (Time.time >= _nextEmptyPotCheckTime)
             {
-                WorldObject carried = InteractionSystem.Instance.CarriedWorldObject;
-                if (carried != null && (carried.GetComponent<Kelp>() != null || carried.GetComponent<KelpLeaf>() != null))
-                {
-                    holdingKelp = true;
-                }
+                _nextEmptyPotCheckTime = Time.time + Mathf.Max(0.01f, emptyPotCheckInterval);
+
+                bool holdingKelp = IsAnyPlantableCarriedObjectHeld();
+                SetWorldObjectState(holdingKelp, holdingKelp ? "Plant Kelp" : "");
             }
-            _worldObject.interactable = holdingKelp;
-            _worldObject.interactMessage = holdingKelp ? "Plant Kelp" : "";
         }
         else
         {
             // Pot with plant is always interactable (either to check progress or harvest)
-            _worldObject.interactable = true;
             if (_isMature)
             {
-                _worldObject.interactMessage = "Harvest Leaves";
+                SetWorldObjectState(true, "Harvest Leaves");
             }
             else
             {
-                _worldObject.interactMessage = "Check Growth Progress";
+                SetWorldObjectState(true, "Check Growth Progress");
             }
         }
 
@@ -81,8 +88,70 @@ public class PlantPot : MonoBehaviour
                 _isGrowing = false;
                 _isMature = true;
             }
-            _currentPlant.SetGrowthScale(_progress);
+
+            if (Time.time >= _nextGrowthVisualTime || _isMature)
+            {
+                _nextGrowthVisualTime = Time.time + Mathf.Max(0.01f, growthVisualUpdateInterval);
+                _currentPlant.SetGrowthScale(_progress);
+            }
         }
+    }
+
+    private void SetWorldObjectState(bool interactable, string message)
+    {
+        if (_worldObject == null)
+        {
+            return;
+        }
+
+        if (!_hasAppliedWorldObjectState || _lastInteractable != interactable)
+        {
+            _worldObject.interactable = interactable;
+            _lastInteractable = interactable;
+        }
+
+        if (!_hasAppliedWorldObjectState || _lastInteractMessage != message)
+        {
+            _worldObject.interactMessage = message;
+            _lastInteractMessage = message;
+        }
+
+        _hasAppliedWorldObjectState = true;
+    }
+
+    private static bool IsAnyPlantableCarriedObjectHeld()
+    {
+        float now = Time.time;
+        if (now < s_nextCarriedObjectRefreshTime)
+        {
+            return s_cachedAnyPlantableHeld;
+        }
+
+        s_nextCarriedObjectRefreshTime = now + 0.05f;
+        WorldObject carried = InteractionSystem.Instance != null
+            ? InteractionSystem.Instance.CarriedWorldObject
+            : null;
+        s_cachedAnyPlantableHeld = IsPlantableCarriedObject(carried);
+        return s_cachedAnyPlantableHeld;
+    }
+
+    private static bool IsPlantableCarriedObject(WorldObject carried)
+    {
+        if (carried == null)
+        {
+            s_cachedCarriedObject = null;
+            s_cachedCarriedObjectIsPlantable = false;
+            return false;
+        }
+
+        if (carried == s_cachedCarriedObject)
+        {
+            return s_cachedCarriedObjectIsPlantable;
+        }
+
+        s_cachedCarriedObject = carried;
+        s_cachedCarriedObjectIsPlantable = carried.GetComponent<Kelp>() != null || carried.GetComponent<KelpLeaf>() != null;
+        return s_cachedCarriedObjectIsPlantable;
     }
 
     public bool HasPlant()
@@ -110,6 +179,7 @@ public class PlantPot : MonoBehaviour
         _progress = 0f;
         _isGrowing = true;
         _isMature = false;
+        _nextGrowthVisualTime = 0f;
 
         // Let the plant align and disable its physics/colliders
         kelp.OnPlanted(spot);
@@ -214,8 +284,7 @@ public class PlantPot : MonoBehaviour
 
         if (_worldObject != null)
         {
-            _worldObject.interactable = false;
-            _worldObject.interactMessage = "";
+            SetWorldObjectState(false, "");
         }
     }
 }

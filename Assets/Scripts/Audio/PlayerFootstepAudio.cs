@@ -24,7 +24,14 @@ public class PlayerFootstepAudio : MonoBehaviour
 
     private AudioSource _audioSource;
     private Rigidbody _playerRb;
+    private InventoryCameraController _inventoryCameraController;
     private float _actualEndTime;
+    private float _nextInventoryCheckTime;
+    private bool _cachedInventoryActive;
+    private AudioClip _lastAssignedClip;
+    private float _lastAssignedVolume = -1f;
+    private float _cachedSpeedThreshold = -1f;
+    private float _cachedSpeedThresholdSqr;
 
     void Awake()
     {
@@ -36,6 +43,7 @@ public class PlayerFootstepAudio : MonoBehaviour
         {
             _playerRb = playerController.GetComponent<Rigidbody>();
         }
+        _inventoryCameraController = InventoryCameraController.GetPrimaryController();
     }
 
     void Start()
@@ -73,7 +81,8 @@ public class PlayerFootstepAudio : MonoBehaviour
         if (playerController == null || _playerRb == null || walkSound == null) return;
 
         // 1. 从 PlayerController 的核心状态中判断玩家目前是否能走、想走
-        bool isMoving = _playerRb.velocity.magnitude > speedThreshold;
+        float thresholdSqr = GetSpeedThresholdSqr();
+        bool isMoving = _playerRb.velocity.sqrMagnitude > thresholdSqr;
         
         // 联动 PlayerController 里的各种状态拦截
         bool canPlayFootstep = isMoving 
@@ -87,8 +96,16 @@ public class PlayerFootstepAudio : MonoBehaviour
             if (!_audioSource.isPlaying)
             {
                 // 首次触发或被停掉后重新起播
-                _audioSource.clip = walkSound;
-                _audioSource.volume = volume;
+                if (_lastAssignedClip != walkSound)
+                {
+                    _audioSource.clip = walkSound;
+                    _lastAssignedClip = walkSound;
+                }
+                if (!Mathf.Approximately(_lastAssignedVolume, volume))
+                {
+                    _audioSource.volume = volume;
+                    _lastAssignedVolume = volume;
+                }
                 _audioSource.time = trimStart; // 卡准【掐头】点
                 _audioSource.Play();
             }
@@ -116,7 +133,25 @@ public class PlayerFootstepAudio : MonoBehaviour
     private bool IsInventoryModeActive()
     {
         // 这里的逻辑直接参考了你 PlayerController 内部的判定
-        var invCam = InventoryCameraController.GetPrimaryController();
-        return invCam != null && invCam.IsInventoryActive;
+        if (Time.unscaledTime < _nextInventoryCheckTime)
+            return _cachedInventoryActive;
+
+        _nextInventoryCheckTime = Time.unscaledTime + 0.1f;
+        if (_inventoryCameraController == null)
+            _inventoryCameraController = InventoryCameraController.GetPrimaryController();
+
+        _cachedInventoryActive = _inventoryCameraController != null && _inventoryCameraController.IsInventoryActive;
+        return _cachedInventoryActive;
+    }
+
+    private float GetSpeedThresholdSqr()
+    {
+        if (!Mathf.Approximately(_cachedSpeedThreshold, speedThreshold))
+        {
+            _cachedSpeedThreshold = speedThreshold;
+            _cachedSpeedThresholdSqr = speedThreshold * speedThreshold;
+        }
+
+        return _cachedSpeedThresholdSqr;
     }
 }

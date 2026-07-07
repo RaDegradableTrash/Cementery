@@ -68,7 +68,7 @@ public class InteractionSystem : MonoBehaviour
 
 
     [Header("Debug")]
-    [SerializeField] private bool visualizeInteractionRay = true;
+    [SerializeField] private bool visualizeInteractionRay = false;
     [SerializeField] private Color interactionRayColor = new Color(1f, 0.85f, 0.1f, 1f);
 
     private MouseLook _mouseLook;
@@ -82,12 +82,20 @@ public class InteractionSystem : MonoBehaviour
     private Transform _carriedTransform;
     private WorldObject _carriedWo;
     private Rigidbody _carriedRb;
+    private Kelp _carriedKelp;
+    private KelpLeaf _carriedKelpLeaf;
+    private Fuel _carriedFuel;
+    private PlantPot _carriedPlantPot;
 
     private Collider[] _carriedCols;
     private Collider[] _playerCols;
+    private readonly HashSet<Collider> _carriedColliderSet = new HashSet<Collider>();
+    private readonly HashSet<Collider> _playerColliderSet = new HashSet<Collider>();
     private PhysicMaterial[] _carriedOriginalMaterials;
     private PhysicMaterial _carryNoFrictionMaterial;
     private CapsuleCollider _playerCol;
+    private Rigidbody _playerRb;
+    private PlayerController _playerController;
 
     private bool _rbWasKinematic;
     private bool _rbHadGravity;
@@ -112,6 +120,14 @@ public class InteractionSystem : MonoBehaviour
 
     private Coroutine _hideInfoCo;
     private Coroutine _hideCarryDistanceLimitCo;
+    private bool _carryLabelActive;
+    private bool _interactLabelActive;
+    private bool _collectLabelActive;
+    private bool _infoLabelActive;
+    private bool _carryDistanceLimitLabelActive;
+    private string _interactLabelText;
+    private string _infoLabelText;
+    private string _carryDistanceLimitLabelText;
 
     [Header("Placement Mode (Tab)")]
     [SerializeField] private LayerMask placementMask = ~0;
@@ -135,6 +151,28 @@ public class InteractionSystem : MonoBehaviour
 
     private float _timeRButtonPressed;
     private float _placementRotationOffset = 0f;
+    private const int InteractionHitBufferSize = 48;
+    private const int CarryObstacleHitBufferSize = 48;
+    private readonly RaycastHit[] _preciseHitBuffer = new RaycastHit[InteractionHitBufferSize];
+    private readonly RaycastHit[] _wideHitBuffer = new RaycastHit[InteractionHitBufferSize];
+    private readonly RaycastHit[] _carryObstacleHitBuffer = new RaycastHit[CarryObstacleHitBufferSize];
+    private const int PlacementHitBufferSize = 64;
+    private const int PlacementOverlapBufferSize = 64;
+    private readonly RaycastHit[] _placementHitBuffer = new RaycastHit[PlacementHitBufferSize];
+    private readonly Collider[] _placementOverlapBuffer = new Collider[PlacementOverlapBufferSize];
+    private readonly Vector3[] _placementCornerBuffer = new Vector3[8];
+    private const int ScanWorldObjectCacheLimit = 512;
+    private readonly Dictionary<Collider, WorldObject> _scanWorldObjectCache = new Dictionary<Collider, WorldObject>(128);
+    private Collider[] _placementGhostColliders;
+    private Renderer[] _placementGhostRenderers;
+    private bool _placementGhostActive;
+    private bool _hasPlacementMaterialState;
+    private bool _lastPlacementMaterialValid;
+    private Collider _lastScanCollider;
+    private WorldObject _cachedScanWorldObject;
+    private PremodeledContainer _cachedScanContainer;
+    private FuelTank _cachedScanFuelTank;
+    private bool _cachedScanColliderIsFuelTankPart;
 
     public static InteractionSystem Instance { get; private set; }
 
@@ -167,6 +205,8 @@ public class InteractionSystem : MonoBehaviour
         _carryNoFrictionMaterial.hideFlags = HideFlags.HideAndDontSave;
 
         _playerCol = GetComponent<CapsuleCollider>();
+        _playerRb = GetComponent<Rigidbody>();
+        _playerController = GetComponent<PlayerController>();
         ResolveAttractAimPointIfNeeded();
         InitializePlacementMaterials();
         AutoBindUI();
@@ -296,18 +336,22 @@ public class InteractionSystem : MonoBehaviour
         {
             Transform playerT = _playerCol != null ? _playerCol.transform : transform;
             Vector3 pPos = playerT.position; pPos.y = 0;
-            Vector3 aPos = _carriedRb.transform.TransformPoint(_dragAnchorLocal); aPos.y = 0;
+            Vector3 anchorWorld = _carriedRb.transform.TransformPoint(_dragAnchorLocal);
+            Vector3 aPos = anchorWorld; aPos.y = 0;
             
-            float currentDist = Vector3.Distance(pPos, aPos);
-            if (currentDist > _carryRayDistance)
+            Vector3 pullDelta = pPos - aPos;
+            float currentDistSqr = pullDelta.sqrMagnitude;
+            float carryRayDistanceSqr = _carryRayDistance * _carryRayDistance;
+            if (currentDistSqr > carryRayDistanceSqr)
             {
-                Vector3 pullForceDir = (pPos - aPos).normalized;
+                float currentDist = Mathf.Sqrt(currentDistSqr);
+                Vector3 pullForceDir = pullDelta / currentDist;
                 float stretch = currentDist - _carryRayDistance;
                 
                 // Soft spring: low constant + clamped max force for gentle, PEAK-like interaction
                 float springForce = Mathf.Min(stretch * 15f, 20f);
                 Vector3 force = pullForceDir * springForce;
-                _carriedRb.AddForceAtPosition(force, _carriedRb.transform.TransformPoint(_dragAnchorLocal), ForceMode.Acceleration);
+                _carriedRb.AddForceAtPosition(force, anchorWorld, ForceMode.Acceleration);
             }
             
             // Strong damping to prevent bouncing and launching
@@ -315,10 +359,12 @@ public class InteractionSystem : MonoBehaviour
             vel.x *= 0.85f;
             vel.z *= 0.85f;
             // Clamp max horizontal speed to prevent objects/player flying off
-            float hSpeed = new Vector2(vel.x, vel.z).magnitude;
-            if (hSpeed > 3f)
+            const float maxHorizontalSpeed = 3f;
+            const float maxHorizontalSpeedSqr = maxHorizontalSpeed * maxHorizontalSpeed;
+            float hSpeedSqr = vel.x * vel.x + vel.z * vel.z;
+            if (hSpeedSqr > maxHorizontalSpeedSqr)
             {
-                float scale = 3f / hSpeed;
+                float scale = maxHorizontalSpeed / Mathf.Sqrt(hSpeedSqr);
                 vel.x *= scale;
                 vel.z *= scale;
             }
@@ -348,7 +394,7 @@ public class InteractionSystem : MonoBehaviour
                     sep.Normalize();
 
                     // Apply gentle continuous push to player (acceleration = mass-independent)
-                    Rigidbody playerRb = _playerCol.attachedRigidbody;
+                    Rigidbody playerRb = _playerRb != null ? _playerRb : _playerCol.attachedRigidbody;
                     if (playerRb != null)
                         playerRb.AddForce(sep * 25f, ForceMode.Acceleration);
                 }
@@ -543,14 +589,7 @@ public class InteractionSystem : MonoBehaviour
         if (IsPlayerCollider(c))
             return true;
 
-        if (_carriedCols == null)
-            return false;
-
-        for (int i = 0; i < _carriedCols.Length; i++)
-            if (_carriedCols[i] == c)
-                return true;
-
-        return false;
+        return _carriedColliderSet.Contains(c);
     }
 
     bool IsGroundCollider(Collider c)
@@ -599,7 +638,42 @@ public class InteractionSystem : MonoBehaviour
             _playerCol = GetComponent<CapsuleCollider>();
 
         if (_playerCols == null || _playerCols.Length == 0)
+        {
             _playerCols = GetComponentsInChildren<Collider>(true);
+            RebuildPlayerColliderSet();
+        }
+        else if (_playerColliderSet.Count == 0)
+        {
+            RebuildPlayerColliderSet();
+        }
+    }
+
+    void RebuildPlayerColliderSet()
+    {
+        _playerColliderSet.Clear();
+        if (_playerCols == null)
+            return;
+
+        for (int i = 0; i < _playerCols.Length; i++)
+        {
+            Collider collider = _playerCols[i];
+            if (collider != null)
+                _playerColliderSet.Add(collider);
+        }
+    }
+
+    void RebuildCarriedColliderSet()
+    {
+        _carriedColliderSet.Clear();
+        if (_carriedCols == null)
+            return;
+
+        for (int i = 0; i < _carriedCols.Length; i++)
+        {
+            Collider collider = _carriedCols[i];
+            if (collider != null)
+                _carriedColliderSet.Add(collider);
+        }
     }
 
     float GetCameraCarryRangeCompensation()
@@ -704,14 +778,7 @@ public class InteractionSystem : MonoBehaviour
         if (_playerCol != null && c == _playerCol)
             return true;
 
-        if (_playerCols == null)
-            return false;
-
-        for (int i = 0; i < _playerCols.Length; i++)
-            if (_playerCols[i] == c)
-                return true;
-
-        return false;
+        return _playerColliderSet.Contains(c);
     }
 
     void SetCarryPlayerCollisionIgnored(bool ignored)
@@ -789,16 +856,16 @@ public class InteractionSystem : MonoBehaviour
         // we should prioritize the exact collider hit by the line-of-sight ray.
         // This avoids issues where a thick SphereCast overlaps surrounding colliders
         // at close range and fails to target the correct object.
-        RaycastHit[] preciseHits = Physics.RaycastAll(ray, range, interactMask, QueryTriggerInteraction.Ignore);
-        if (preciseHits != null && preciseHits.Length > 0)
+        int preciseHitCount = Physics.RaycastNonAlloc(ray, _preciseHitBuffer, range, interactMask, QueryTriggerInteraction.Ignore);
+        if (preciseHitCount > 0)
         {
             float closestPreciseDist = float.MaxValue;
             RaycastHit bestPreciseHit = default;
             bool foundPrecise = false;
 
-            for (int i = 0; i < preciseHits.Length; i++)
+            for (int i = 0; i < preciseHitCount; i++)
             {
-                RaycastHit phit = preciseHits[i];
+                RaycastHit phit = _preciseHitBuffer[i];
                 if (phit.collider != null && !IsIgnoredCarryHitCollider(phit.collider))
                 {
                     if (phit.distance < closestPreciseDist)
@@ -819,66 +886,50 @@ public class InteractionSystem : MonoBehaviour
 
         float sphereRadius = interactionRayRadius > 0.0001f ? interactionRayRadius * 5f : 0f; // 500% thicker cast
 
-        RaycastHit[] hits = sphereRadius > 0.0001f
-            ? Physics.SphereCastAll(ray, sphereRadius, range, interactMask, QueryTriggerInteraction.Ignore)
-            : Physics.RaycastAll(ray, range, interactMask, QueryTriggerInteraction.Ignore);
-        if (hits == null || hits.Length == 0)
+        int hitCount = sphereRadius > 0.0001f
+            ? Physics.SphereCastNonAlloc(ray, sphereRadius, _wideHitBuffer, range, interactMask, QueryTriggerInteraction.Ignore)
+            : Physics.RaycastNonAlloc(ray, _wideHitBuffer, range, interactMask, QueryTriggerInteraction.Ignore);
+        if (hitCount <= 0)
             return false;
 
-        // 1. Gather all valid hits (ignoring player or ignored carry colliders)
-        List<RaycastHit> validHits = new List<RaycastHit>();
-        for (int i = 0; i < hits.Length; i++)
+        // 1. Prioritize valid WorldObject hits by distance.
+        float closestWorldObjectDist = float.MaxValue;
+        RaycastHit closestWorldObjectHit = default;
+        bool foundWorldObject = false;
+        bool foundValidHit = false;
+        for (int i = 0; i < hitCount; i++)
         {
-            RaycastHit hit = hits[i];
+            RaycastHit hit = _wideHitBuffer[i];
             Collider c = hit.collider;
             if (c == null) continue;
             if (IsIgnoredCarryHitCollider(c)) continue;
-            validHits.Add(hit);
+
+            foundValidHit = true;
+            if (GetCachedWorldObject(c) != null && hit.distance < closestWorldObjectDist)
+            {
+                closestWorldObjectDist = hit.distance;
+                closestWorldObjectHit = hit;
+                foundWorldObject = true;
+            }
         }
 
-        if (validHits.Count == 0)
+        if (foundWorldObject)
+        {
+            bestHit = closestWorldObjectHit;
+            return true;
+        }
+
+        if (!foundValidHit)
             return false;
 
-        // 2. Separate into qualifying hits that possess a WorldObject component (directly or in parents)
-        List<RaycastHit> qualifyingHits = new List<RaycastHit>();
-        for (int i = 0; i < validHits.Count; i++)
-        {
-            RaycastHit hit = validHits[i];
-            if (hit.collider.GetComponentInParent<WorldObject>() != null)
-            {
-                qualifyingHits.Add(hit);
-            }
-        }
-
-        // 3. If multiple qualifying targets are hit, prioritize the one the raycast touches first (minimum distance)!
-        if (qualifyingHits.Count >= 1)
-        {
-            float minDistance = float.MaxValue;
-            RaycastHit closestHit = default;
-            bool found = false;
-            for (int i = 0; i < qualifyingHits.Count; i++)
-            {
-                RaycastHit hit = qualifyingHits[i];
-                if (hit.distance < minDistance)
-                {
-                    minDistance = hit.distance;
-                    closestHit = hit;
-                    found = true;
-                }
-            }
-            if (found)
-            {
-                bestHit = closestHit;
-                return true;
-            }
-        }
-
-        // 4. Otherwise (no qualifying WorldObjects hit), fallback to original scoring based on screen alignment
+        // 2. Otherwise fallback to original scoring based on screen alignment.
         float bestScore = float.PositiveInfinity;
-        for (int i = 0; i < validHits.Count; i++)
+        for (int i = 0; i < hitCount; i++)
         {
-            RaycastHit hit = validHits[i];
+            RaycastHit hit = _wideHitBuffer[i];
             Collider c = hit.collider;
+            if (c == null) continue;
+            if (IsIgnoredCarryHitCollider(c)) continue;
 
             // Unity SphereCast returns (0,0,0) and distance 0 if the sphere overlaps the collider at the start.
             Vector3 pointToEvaluate = hit.point;
@@ -975,59 +1026,20 @@ public class InteractionSystem : MonoBehaviour
             return;
         }
 
-        _lookedAt = hit.collider.GetComponentInParent<WorldObject>();
-        
-        // 🌟 新增：扫描当前注视的物体（或其父级）上是否挂有收纳盒组件
-        if (_lookedAt != null)
-            _lookedAtContainer = _lookedAt.GetComponent<PremodeledContainer>() ?? _lookedAt.GetComponentInParent<PremodeledContainer>();
-        else
-            _lookedAtContainer = null;
+        ResolveScanTargets(hit.collider);
 
-        // Scan for FuelTank component
-        if (hit.collider != null)
+        _lookedAt = _cachedScanWorldObject;
+        _lookedAtContainer = _cachedScanContainer;
+        _lookedAtFuelTank = _cachedScanColliderIsFuelTankPart ? _cachedScanFuelTank : null;
+
+        if (_lookedAtFuelTank != null)
         {
-            // First check if the hit collider or its parent/children has a FuelTank component
-            _lookedAtFuelTank = hit.collider.GetComponent<FuelTank>() ?? hit.collider.GetComponentInParent<FuelTank>() ?? hit.collider.transform.GetComponentInParent<FuelTank>();
-
-            if (_lookedAtFuelTank != null)
+            if (_lastLookedAtFuelTank != null && _lastLookedAtFuelTank != _lookedAtFuelTank)
             {
-                // Double check: ensure the collider is actually the fuel tank itself or a direct child of its hierarchy
-                // This prevents raycasts hitting the giant truck frame/mudguards (if they are separate objects) from accidentally showing the UI.
-                Transform t = hit.collider.transform;
-                bool isPartOfTank = (t == _lookedAtFuelTank.transform);
-                if (!isPartOfTank)
-                {
-                    // Check if it is a child of the FuelTank
-                    Transform parent = t.parent;
-                    while (parent != null)
-                    {
-                        if (parent == _lookedAtFuelTank.transform)
-                        {
-                            isPartOfTank = true;
-                            break;
-                        }
-                        parent = parent.parent;
-                    }
-                }
-
-                if (isPartOfTank)
-                {
-                    if (_lastLookedAtFuelTank != null && _lastLookedAtFuelTank != _lookedAtFuelTank)
-                    {
-                        _lastLookedAtFuelTank.ShowUI(false);
-                    }
-                    _lookedAtFuelTank.ShowUI(true);
-                    _lastLookedAtFuelTank = _lookedAtFuelTank;
-                }
-                else
-                {
-                    ClearLastFuelTankFocus();
-                }
+                _lastLookedAtFuelTank.ShowUI(false);
             }
-            else
-            {
-                ClearLastFuelTankFocus();
-            }
+            _lookedAtFuelTank.ShowUI(true);
+            _lastLookedAtFuelTank = _lookedAtFuelTank;
         }
         else
         {
@@ -1041,6 +1053,59 @@ public class InteractionSystem : MonoBehaviour
             _carryCandidateRb = null;
             _carryCandidateWo = null;
         }
+    }
+
+    private void ResolveScanTargets(Collider hitCollider)
+    {
+        if (hitCollider == _lastScanCollider)
+            return;
+
+        _lastScanCollider = hitCollider;
+        _cachedScanWorldObject = null;
+        _cachedScanContainer = null;
+        _cachedScanFuelTank = null;
+        _cachedScanColliderIsFuelTankPart = false;
+
+        if (hitCollider == null)
+            return;
+
+        _cachedScanWorldObject = GetCachedWorldObject(hitCollider);
+        if (_cachedScanWorldObject != null)
+            _cachedScanContainer = _cachedScanWorldObject.GetComponent<PremodeledContainer>() ?? _cachedScanWorldObject.GetComponentInParent<PremodeledContainer>();
+
+        _cachedScanFuelTank = hitCollider.GetComponent<FuelTank>() ?? hitCollider.GetComponentInParent<FuelTank>();
+        if (_cachedScanFuelTank == null)
+            return;
+
+        Transform tankTransform = _cachedScanFuelTank.transform;
+        Transform current = hitCollider.transform;
+        while (current != null)
+        {
+            if (current == tankTransform)
+            {
+                _cachedScanColliderIsFuelTankPart = true;
+                return;
+            }
+            current = current.parent;
+        }
+    }
+
+    private WorldObject GetCachedWorldObject(Collider hitCollider)
+    {
+        if (hitCollider == null)
+            return null;
+
+        if (_scanWorldObjectCache.TryGetValue(hitCollider, out WorldObject cachedWorldObject))
+            return cachedWorldObject;
+
+        if (_scanWorldObjectCache.Count >= ScanWorldObjectCacheLimit)
+        {
+            _scanWorldObjectCache.Clear();
+        }
+
+        cachedWorldObject = hitCollider.GetComponentInParent<WorldObject>();
+        _scanWorldObjectCache[hitCollider] = cachedWorldObject;
+        return cachedWorldObject;
     }
 
     private void ClearLastFuelTankFocus()
@@ -1224,7 +1289,7 @@ public class InteractionSystem : MonoBehaviour
         // 4. 左键松开执行放下或 Tab 放置
         if (Input.GetMouseButtonUp(0) && _carriedRb != null)
         {
-            if (_carriedWo != null && _carriedWo.GetComponent<Kelp>() != null)
+            if (_carriedKelp != null)
             {
                 PlantPot pot = GetLookedAtPot();
                 if (pot != null && pot.CanPlant())
@@ -1267,8 +1332,7 @@ public class InteractionSystem : MonoBehaviour
                 if (_carriedWo != null)
                 {
                     // ── 叶片燃料：通过组件类型精准识别 KelpLeaf，不依赖物体名称 ──────────
-                    KelpLeaf kelpLeaf = _carriedWo.GetComponent<KelpLeaf>();
-                    if (kelpLeaf != null)
+                    if (_carriedKelpLeaf != null)
                     {
                         // 每片叶片固定加注 5 单位燃料（5% of maxCapacity=100）
                         const float leafFuelValue = 5f;
@@ -1293,8 +1357,7 @@ public class InteractionSystem : MonoBehaviour
                     // ─────────────────────────────────────────────────────────────────────
 
                     // ── 燃料罐/瓶：通过组件类型精准识别 Fuel ─────────────────────────────────
-                    Fuel fuelItem = _carriedWo.GetComponent<Fuel>();
-                    if (fuelItem != null)
+                    if (_carriedFuel != null)
                     {
                         // 燃料罐固定加注 80 单位燃料（80% of maxCapacity=100）
                         const float fuelValue = 80f;
@@ -1404,18 +1467,17 @@ public class InteractionSystem : MonoBehaviour
             rayDir.Normalize();
             float castRadius = Mathf.Max(0.05f, _carriedRadius * 0.85f);
             float checkDistance = Mathf.Max(0.05f, carryMaxDistance);
-            RaycastHit[] hits = Physics.SphereCastAll(origin, castRadius, rayDir, checkDistance, interactMask, QueryTriggerInteraction.Ignore);
+            int hitCount = Physics.SphereCastNonAlloc(origin, castRadius, rayDir, _carryObstacleHitBuffer, checkDistance, interactMask, QueryTriggerInteraction.Ignore);
             float nearest = float.PositiveInfinity;
             Collider nearestCol = null;
-            RaycastHit nearestHit = default;
-            for (int i = 0; i < hits.Length; i++) {
-                Collider c = hits[i].collider;
+            for (int i = 0; i < hitCount; i++) {
+                RaycastHit hit = _carryObstacleHitBuffer[i];
+                Collider c = hit.collider;
                 if (c == null) continue;
                 if (IsIgnoredCarryHitCollider(c)) continue;
-                if (hits[i].distance < nearest) {
-                    nearest = hits[i].distance;
+                if (hit.distance < nearest) {
+                    nearest = hit.distance;
                     nearestCol = c;
-                    nearestHit = hits[i];
                 }
             }
             if (nearestCol != null) {
@@ -1453,15 +1515,16 @@ public class InteractionSystem : MonoBehaviour
         float checkDistance = maxDist;
         float castRadius = Mathf.Max(0.05f, _carriedRadius * 0.85f);
 
-        RaycastHit[] hits = Physics.SphereCastAll(origin, castRadius, rayDir, checkDistance, interactMask, QueryTriggerInteraction.Ignore);
+        int hitCount = Physics.SphereCastNonAlloc(origin, castRadius, rayDir, _carryObstacleHitBuffer, checkDistance, interactMask, QueryTriggerInteraction.Ignore);
         float nearest = float.PositiveInfinity;
-        for (int i = 0; i < hits.Length; i++)
+        for (int i = 0; i < hitCount; i++)
         {
-            Collider c = hits[i].collider;
+            RaycastHit hit = _carryObstacleHitBuffer[i];
+            Collider c = hit.collider;
             if (c == null) continue;
             if (IsIgnoredCarryHitCollider(c)) continue;
-            if (hits[i].distance < nearest)
-                nearest = hits[i].distance;
+            if (hit.distance < nearest)
+                nearest = hit.distance;
         }
 
         if (nearest == float.PositiveInfinity)
@@ -1518,20 +1581,38 @@ public class InteractionSystem : MonoBehaviour
 
     public WorldObject CarriedWorldObject => _carriedWo;
 
+    private void CacheCarriedComponents()
+    {
+        _carriedKelp = _carriedWo != null ? _carriedWo.GetComponent<Kelp>() : null;
+        _carriedKelpLeaf = _carriedWo != null ? _carriedWo.GetComponent<KelpLeaf>() : null;
+        _carriedFuel = _carriedWo != null ? _carriedWo.GetComponent<Fuel>() : null;
+        _carriedPlantPot = _carriedWo != null ? _carriedWo.GetComponent<PlantPot>() : null;
+    }
+
+    private void ClearCarriedComponentCache()
+    {
+        _carriedKelp = null;
+        _carriedKelpLeaf = null;
+        _carriedFuel = null;
+        _carriedPlantPot = null;
+    }
+
     public void ConsumeCarriedObjectSilently()
     {
         if (_carriedRb == null) return;
         RestoreCarryFriction();
         _carriedWo?.SetCarriedState(false);
         
-        PlayerController pc = GetComponent<PlayerController>();
-        if (pc != null) pc.SpeedMultiplier = 1f;
+        if (_playerController != null) _playerController.SpeedMultiplier = 1f;
 
         _carriedTransform = null;
         _carriedWo = null;
         _carriedRb = null;
+        ClearCarriedComponentCache();
         _carriedCols = null;
         _playerCols = null;
+        _carriedColliderSet.Clear();
+        _playerColliderSet.Clear();
         _carriedOriginalMaterials = null;
         _carryRayLocalDir = Vector3.forward;
         _carryRayDistance = 0f;
@@ -1594,6 +1675,7 @@ public class InteractionSystem : MonoBehaviour
         _carriedRb = rb;
         _carriedTransform = rb.transform;
         _carriedWo = wo;
+        CacheCarriedComponents();
 
         bool wasKinematic = _carriedRb.isKinematic;
         if (_carriedWo != null && _carriedWo.isPlacedAndAttached)
@@ -1615,6 +1697,8 @@ public class InteractionSystem : MonoBehaviour
 
         _playerCols = GetComponentsInChildren<Collider>();
         _carriedCols = rb.GetComponentsInChildren<Collider>();
+        RebuildPlayerColliderSet();
+        RebuildCarriedColliderSet();
         _carriedRadius = ComputeCarriedRadius();
         ApplyCarryNoFriction();
 
@@ -1684,9 +1768,8 @@ public class InteractionSystem : MonoBehaviour
         _carriedWo?.SetCarriedState(true);
         _carriedWo?.TriggerPickUp(gameObject);
 
-        PlayerController pc = GetComponent<PlayerController>();
-        if (pc != null && _carriedWo != null && _carriedWo.isHeavy)
-            pc.SpeedMultiplier = 0.4f;
+        if (_playerController != null && _carriedWo != null && _carriedWo.isHeavy)
+            _playerController.SpeedMultiplier = 0.4f;
     }
 
     void Drop()
@@ -1759,15 +1842,17 @@ public class InteractionSystem : MonoBehaviour
         _carriedWo?.SetCarriedState(false);
         _carriedWo?.TriggerDrop(gameObject);
 
-        PlayerController pc = GetComponent<PlayerController>();
-        if (pc != null) pc.SpeedMultiplier = 1f;
+        if (_playerController != null) _playerController.SpeedMultiplier = 1f;
 
         // 彻底清空手部引用缓存
         _carriedTransform = null;
         _carriedWo = null;
         _carriedRb = null;
+        ClearCarriedComponentCache();
         _carriedCols = null;
         _playerCols = null;
+        _carriedColliderSet.Clear();
+        _playerColliderSet.Clear();
         _carriedOriginalMaterials = null;
         _carryRayLocalDir = Vector3.forward;
         _carryRayDistance = 0f;
@@ -1787,7 +1872,7 @@ public class InteractionSystem : MonoBehaviour
                 if (enabled)
                 {
                     Kelp k = _carriedCols[i].GetComponentInParent<Kelp>();
-                    if (k != null && _carriedWo != null && _carriedWo.GetComponent<PlantPot>() != null)
+                    if (k != null && _carriedPlantPot != null)
                     {
                         continue;
                     }
@@ -1799,11 +1884,11 @@ public class InteractionSystem : MonoBehaviour
 
     Vector3 GetPlayerVelocity()
     {
-        if (_playerCol != null)
-            return _playerCol.GetComponent<Rigidbody>().velocity;
+        if (_playerRb != null)
+            return _playerRb.velocity;
 
-        Rigidbody rb = GetComponent<Rigidbody>();
-        return rb != null ? rb.velocity : Vector3.zero;
+        _playerRb = GetComponent<Rigidbody>();
+        return _playerRb != null ? _playerRb.velocity : Vector3.zero;
     }
 
     void UpdatePrompt()
@@ -1812,24 +1897,48 @@ public class InteractionSystem : MonoBehaviour
         bool showInteract = _lookedAt != null && _lookedAt.interactable;
         bool showCollect = _carriedWo != null && _carriedWo.collectable;
 
-        SetLabel(carryLabel, showCarry);
-        SetLabel(interactLabel, showInteract);
-        SetLabel(collectLabel, showCollect);
+        SetLabel(carryLabel, showCarry, ref _carryLabelActive);
+        SetLabel(interactLabel, showInteract, ref _interactLabelActive);
+        SetLabel(collectLabel, showCollect, ref _collectLabelActive);
     }
 
-    void SetLabel(TextMeshProUGUI label, bool active)
+    void SetLabel(TextMeshProUGUI label, bool active, ref bool cachedActive)
     {
-        if (label != null)
-            label.gameObject.SetActive(active);
+        if (label == null)
+        {
+            cachedActive = active;
+            return;
+        }
+
+        if (cachedActive == active && label.gameObject.activeSelf == active)
+            return;
+
+        label.gameObject.SetActive(active);
+        cachedActive = active;
+    }
+
+    void SetLabelText(TextMeshProUGUI label, string text, ref string cachedText)
+    {
+        if (label == null)
+        {
+            cachedText = text;
+            return;
+        }
+
+        if (cachedText == text && label.text == text)
+            return;
+
+        label.text = text;
+        cachedText = text;
     }
 
     public void ClearPrompts()
     {
-        SetLabel(carryLabel, false);
-        SetLabel(interactLabel, false);
-        SetLabel(collectLabel, false);
-        if (infoLabel != null) infoLabel.gameObject.SetActive(false);
-        if (carryDistanceLimitLabel != null) carryDistanceLimitLabel.gameObject.SetActive(false);
+        SetLabel(carryLabel, false, ref _carryLabelActive);
+        SetLabel(interactLabel, false, ref _interactLabelActive);
+        SetLabel(collectLabel, false, ref _collectLabelActive);
+        SetLabel(infoLabel, false, ref _infoLabelActive);
+        SetLabel(carryDistanceLimitLabel, false, ref _carryDistanceLimitLabelActive);
     }
 
     // 🌟 外界专属接口：支持车内或其它外部模块强行设置交互提示文字并显示/隐藏它！
@@ -1837,8 +1946,8 @@ public class InteractionSystem : MonoBehaviour
     {
         if (interactLabel != null)
         {
-            interactLabel.text = text;
-            interactLabel.gameObject.SetActive(active);
+            SetLabelText(interactLabel, text, ref _interactLabelText);
+            SetLabel(interactLabel, active, ref _interactLabelActive);
         }
     }
 
@@ -1873,8 +1982,8 @@ public class InteractionSystem : MonoBehaviour
         if (_hideInfoCo != null)
             StopCoroutine(_hideInfoCo);
 
-        infoLabel.text = message;
-        infoLabel.gameObject.SetActive(true);
+        SetLabelText(infoLabel, message, ref _infoLabelText);
+        SetLabel(infoLabel, true, ref _infoLabelActive);
         _hideInfoCo = StartCoroutine(HideInfoAfter(infoDisplayDuration));
     }
 
@@ -1886,24 +1995,22 @@ public class InteractionSystem : MonoBehaviour
         if (_hideCarryDistanceLimitCo != null)
             StopCoroutine(_hideCarryDistanceLimitCo);
 
-        carryDistanceLimitLabel.text = message;
-        carryDistanceLimitLabel.gameObject.SetActive(true);
+        SetLabelText(carryDistanceLimitLabel, message, ref _carryDistanceLimitLabelText);
+        SetLabel(carryDistanceLimitLabel, true, ref _carryDistanceLimitLabelActive);
         _hideCarryDistanceLimitCo = StartCoroutine(HideCarryDistanceLimitAfter(carryDistanceLimitDisplayDuration));
     }
 
     IEnumerator HideInfoAfter(float delay)
     {
         yield return new WaitForSeconds(delay);
-        if (infoLabel != null)
-            infoLabel.gameObject.SetActive(false);
+        SetLabel(infoLabel, false, ref _infoLabelActive);
         _hideInfoCo = null;
     }
 
     IEnumerator HideCarryDistanceLimitAfter(float delay)
     {
         yield return new WaitForSeconds(delay);
-        if (carryDistanceLimitLabel != null)
-            carryDistanceLimitLabel.gameObject.SetActive(false);
+        SetLabel(carryDistanceLimitLabel, false, ref _carryDistanceLimitLabelActive);
         _hideCarryDistanceLimitCo = null;
     }
 
@@ -2001,8 +2108,12 @@ public class InteractionSystem : MonoBehaviour
                 c.gameObject.layer = 2; // Ignore Raycast layer
             }
         }
+
+        CachePlacementGhostComponents();
+        _placementGhostActive = true;
+        _hasPlacementMaterialState = false;
         
-        _placementGhost.SetActive(false);
+        SetPlacementGhostActive(false);
     }
 
     void ExitPlacementMode()
@@ -2016,6 +2127,75 @@ public class InteractionSystem : MonoBehaviour
             if (Application.isPlaying) Destroy(_placementGhost);
             else UnityEngine.Object.DestroyImmediate(_placementGhost);
         }
+
+        _placementGhostColliders = null;
+        _placementGhostRenderers = null;
+        _placementGhostActive = false;
+        _hasPlacementMaterialState = false;
+    }
+
+    void CachePlacementGhostComponents()
+    {
+        if (_placementGhost == null)
+        {
+            _placementGhostColliders = null;
+            _placementGhostRenderers = null;
+            return;
+        }
+
+        _placementGhostColliders = _placementGhost.GetComponentsInChildren<Collider>();
+        _placementGhostRenderers = _placementGhost.GetComponentsInChildren<Renderer>();
+    }
+
+    void SetPlacementGhostActive(bool active)
+    {
+        if (_placementGhost == null)
+            return;
+
+        if (_placementGhostActive == active && _placementGhost.activeSelf == active)
+            return;
+
+        _placementGhost.SetActive(active);
+        _placementGhostActive = active;
+    }
+
+    bool TryGetPlacementGhostBounds(out Bounds bounds)
+    {
+        bounds = new Bounds(_placementGhost != null ? _placementGhost.transform.position : transform.position, Vector3.zero);
+        bool hasBounds = false;
+
+        if (_placementGhostRenderers == null || _placementGhostRenderers.Length == 0)
+            CachePlacementGhostComponents();
+
+        if (_placementGhostRenderers == null)
+            return false;
+
+        for (int i = 0; i < _placementGhostRenderers.Length; i++)
+        {
+            Renderer r = _placementGhostRenderers[i];
+            if (r == null)
+                continue;
+
+            if (hasBounds) bounds.Encapsulate(r.bounds);
+            else { bounds = r.bounds; hasBounds = true; }
+        }
+
+        return hasBounds;
+    }
+
+    void FillPlacementCornerBuffer(Bounds bounds)
+    {
+        Vector3 gc = bounds.center;
+        Vector3 ge = bounds.extents;
+
+        _placementCornerBuffer[0] = gc + new Vector3(-ge.x, -ge.y, -ge.z);
+        _placementCornerBuffer[1] = gc + new Vector3( ge.x, -ge.y, -ge.z);
+        _placementCornerBuffer[2] = gc + new Vector3(-ge.x,  ge.y, -ge.z);
+        _placementCornerBuffer[3] = gc + new Vector3( ge.x,  ge.y, -ge.z);
+        _placementCornerBuffer[4] = gc + new Vector3(-ge.x, -ge.y,  ge.z);
+        _placementCornerBuffer[5] = gc + new Vector3( ge.x, -ge.y,  ge.z);
+        _placementCornerBuffer[6] = gc + new Vector3(-ge.x,  ge.y,  ge.z);
+        _placementCornerBuffer[7] = gc + new Vector3( ge.x,  ge.y,  ge.z);
     }
     
     void UpdatePlacementGhost()
@@ -2026,19 +2206,20 @@ public class InteractionSystem : MonoBehaviour
         EnsurePlayerCollidersCached();
         
         float maxReach = placementRayRange; // Let the placement mode leverage the full configured ray range (10m) instead of capping at pickup range (3m)!
-        RaycastHit[] hits = Physics.RaycastAll(ray, placementRayRange, placementMask, QueryTriggerInteraction.Ignore);
+        int hitCount = Physics.RaycastNonAlloc(ray, _placementHitBuffer, placementRayRange, placementMask, QueryTriggerInteraction.Ignore);
         
         // Find the nearest valid hit (any surface)
         float nearest = float.PositiveInfinity;
         RaycastHit bestHit = default;
         
-        for (int i = 0; i < hits.Length; i++)
+        for (int i = 0; i < hitCount; i++)
         {
-            if (IsIgnoredCarryHitCollider(hits[i].collider)) continue;
-            if (hits[i].distance < nearest)
+            RaycastHit hit = _placementHitBuffer[i];
+            if (IsIgnoredCarryHitCollider(hit.collider)) continue;
+            if (hit.distance < nearest)
             {
-                nearest = hits[i].distance;
-                bestHit = hits[i];
+                nearest = hit.distance;
+                bestHit = hit;
             }
         }
         
@@ -2046,7 +2227,7 @@ public class InteractionSystem : MonoBehaviour
         {
             if (nearest > maxReach)
             {
-                _placementGhost.SetActive(false);
+                SetPlacementGhostActive(false);
                 _isPlacementValid = false;
                 return;
             }
@@ -2082,7 +2263,7 @@ public class InteractionSystem : MonoBehaviour
 
             if (canPlaceOnSurface)
             {
-                _placementGhost.SetActive(true);
+                SetPlacementGhostActive(true);
                 
                 // 1. Initial placement on the surface
                 _placementPosition = bestHit.point;
@@ -2107,34 +2288,44 @@ public class InteractionSystem : MonoBehaviour
                 bool foundCollider = false;
                 Plane plane = new Plane(bestHit.normal, bestHit.point);
 
-                foreach(Collider c in _placementGhost.GetComponentsInChildren<Collider>())
-                {
-                    MeshCollider mc = c as MeshCollider;
-                    if (mc != null && !mc.convex)
-                    {
-                        Vector3 center = c.bounds.center;
-                        Vector3 extents = c.bounds.extents;
-                        Vector3 lowestCorner = center;
-                        lowestCorner.x += bestHit.normal.x < 0 ? extents.x : -extents.x;
-                        lowestCorner.y += bestHit.normal.y < 0 ? extents.y : -extents.y;
-                        lowestCorner.z += bestHit.normal.z < 0 ? extents.z : -extents.z;
+                if (_placementGhostColliders == null || _placementGhostColliders.Length == 0)
+                    CachePlacementGhostComponents();
 
-                        float d = plane.GetDistanceToPoint(lowestCorner);
-                        if (d < 0 && -d > maxPenetration)
+                if (_placementGhostColliders != null)
+                {
+                    for (int i = 0; i < _placementGhostColliders.Length; i++)
+                    {
+                        Collider c = _placementGhostColliders[i];
+                        if (c == null)
+                            continue;
+
+                        MeshCollider mc = c as MeshCollider;
+                        if (mc != null && !mc.convex)
                         {
-                            maxPenetration = -d;
+                            Vector3 center = c.bounds.center;
+                            Vector3 extents = c.bounds.extents;
+                            Vector3 lowestCorner = center;
+                            lowestCorner.x += bestHit.normal.x < 0 ? extents.x : -extents.x;
+                            lowestCorner.y += bestHit.normal.y < 0 ? extents.y : -extents.y;
+                            lowestCorner.z += bestHit.normal.z < 0 ? extents.z : -extents.z;
+
+                            float d = plane.GetDistanceToPoint(lowestCorner);
+                            if (d < 0 && -d > maxPenetration)
+                            {
+                                maxPenetration = -d;
+                                foundCollider = true;
+                            }
+                            continue;
+                        }
+
+                        Vector3 farPoint = c.bounds.center - bestHit.normal * 1000f;
+                        Vector3 extremePoint = c.ClosestPoint(farPoint);
+                        float dist = plane.GetDistanceToPoint(extremePoint);
+                        if (dist < 0 && -dist > maxPenetration)
+                        {
+                            maxPenetration = -dist;
                             foundCollider = true;
                         }
-                        continue;
-                    }
-
-                    Vector3 farPoint = c.bounds.center - bestHit.normal * 1000f;
-                    Vector3 extremePoint = c.ClosestPoint(farPoint);
-                    float dist = plane.GetDistanceToPoint(extremePoint);
-                    if (dist < 0 && -dist > maxPenetration)
-                    {
-                        maxPenetration = -dist;
-                        foundCollider = true;
                     }
                 }
 
@@ -2145,14 +2336,7 @@ public class InteractionSystem : MonoBehaviour
                 }
                 else if (!foundCollider)
                 {
-                    Bounds bounds = new Bounds(_placementGhost.transform.position, Vector3.zero);
-                    bool hasRenderer = false;
-                    foreach(Renderer r in _placementGhost.GetComponentsInChildren<Renderer>())
-                    {
-                        if (hasRenderer) bounds.Encapsulate(r.bounds);
-                        else { bounds = r.bounds; hasRenderer = true; }
-                    }
-                    if (hasRenderer)
+                    if (TryGetPlacementGhostBounds(out Bounds bounds))
                     {
                         Vector3 center = bounds.center;
                         Vector3 extents = bounds.extents;
@@ -2176,20 +2360,22 @@ public class InteractionSystem : MonoBehaviour
                 float toGhostDist = toGhost.magnitude;
                 if (toGhostDist > 0.01f)
                 {
-                    RaycastHit[] occlusionHits = Physics.RaycastAll(ray.origin, toGhost / toGhostDist, toGhostDist, placementMask, QueryTriggerInteraction.Ignore);
+                    int occlusionCount = Physics.RaycastNonAlloc(ray.origin, toGhost / toGhostDist, _placementHitBuffer, toGhostDist, placementMask, QueryTriggerInteraction.Ignore);
                     RaycastHit occWallHit = default;
                     bool occluded = false;
-                    for (int i = 0; i < occlusionHits.Length; i++)
+                    float nearestOccluder = float.PositiveInfinity;
+                    for (int i = 0; i < occlusionCount; i++)
                     {
-                        if (IsIgnoredCarryHitCollider(occlusionHits[i].collider)) continue;
-                        if (occlusionHits[i].collider == bestHit.collider) continue;
-                        float occDot = Vector3.Dot(occlusionHits[i].normal, Vector3.up);
+                        RaycastHit occlusionHit = _placementHitBuffer[i];
+                        if (IsIgnoredCarryHitCollider(occlusionHit.collider)) continue;
+                        if (occlusionHit.collider == bestHit.collider) continue;
+                        float occDot = Vector3.Dot(occlusionHit.normal, Vector3.up);
                         bool occIsWall = Mathf.Abs(occDot) < 0.7f;
-                        if (occIsWall)
+                        if (occIsWall && occlusionHit.distance < nearestOccluder)
                         {
-                            occWallHit = occlusionHits[i];
+                            nearestOccluder = occlusionHit.distance;
+                            occWallHit = occlusionHit;
                             occluded = true;
-                            break;
                         }
                     }
                     if (occluded)
@@ -2216,12 +2402,22 @@ public class InteractionSystem : MonoBehaviour
                                 // Re-run primary anti-penetration for the new floor surface
                                 Plane floorPlane = new Plane(cornerFloor.normal, cornerFloor.point);
                                 float floorPen = 0f;
-                                foreach(Collider c in _placementGhost.GetComponentsInChildren<Collider>())
+                                if (_placementGhostColliders == null || _placementGhostColliders.Length == 0)
+                                    CachePlacementGhostComponents();
+
+                                if (_placementGhostColliders != null)
                                 {
-                                    Vector3 fp = c.bounds.center - cornerFloor.normal * 1000f;
-                                    Vector3 ep = c.ClosestPoint(fp);
-                                    float dd = floorPlane.GetDistanceToPoint(ep);
-                                    if (dd < 0 && -dd > floorPen) floorPen = -dd;
+                                    for (int i = 0; i < _placementGhostColliders.Length; i++)
+                                    {
+                                        Collider c = _placementGhostColliders[i];
+                                        if (c == null)
+                                            continue;
+
+                                        Vector3 fp = c.bounds.center - cornerFloor.normal * 1000f;
+                                        Vector3 ep = c.ClosestPoint(fp);
+                                        float dd = floorPlane.GetDistanceToPoint(ep);
+                                        if (dd < 0 && -dd > floorPen) floorPen = -dd;
+                                    }
                                 }
                                 if (floorPen > 0f)
                                 {
@@ -2231,14 +2427,14 @@ public class InteractionSystem : MonoBehaviour
                             }
                             else
                             {
-                                _placementGhost.SetActive(false);
+                                SetPlacementGhostActive(false);
                                 _isPlacementValid = false;
                                 return;
                             }
                         }
                         else
                         {
-                            _placementGhost.SetActive(false);
+                            SetPlacementGhostActive(false);
                             _isPlacementValid = false;
                             return;
                         }
@@ -2249,13 +2445,7 @@ public class InteractionSystem : MonoBehaviour
                 // If a ray from center to corner hits a non-placement surface,
                 // the corner extends past that surface. Push ghost out along hit normal.
                 // This handles walls at ANY angle, not just cardinal directions.
-                Bounds ghostBounds = new Bounds(_placementGhost.transform.position, Vector3.zero);
-                bool hasBounds = false;
-                foreach(Renderer r in _placementGhost.GetComponentsInChildren<Renderer>())
-                {
-                    if (hasBounds) ghostBounds.Encapsulate(r.bounds);
-                    else { ghostBounds = r.bounds; hasBounds = true; }
-                }
+                bool hasBounds = TryGetPlacementGhostBounds(out Bounds ghostBounds);
                 
                 if (hasBounds)
                 {
@@ -2263,25 +2453,14 @@ public class InteractionSystem : MonoBehaviour
                     for (int iteration = 0; iteration < 3; iteration++)
                     {
                         Vector3 gc = ghostBounds.center;
-                        Vector3 ge = ghostBounds.extents;
-                        
-                        Vector3[] corners = {
-                            gc + new Vector3(-ge.x, -ge.y, -ge.z),
-                            gc + new Vector3( ge.x, -ge.y, -ge.z),
-                            gc + new Vector3(-ge.x,  ge.y, -ge.z),
-                            gc + new Vector3( ge.x,  ge.y, -ge.z),
-                            gc + new Vector3(-ge.x, -ge.y,  ge.z),
-                            gc + new Vector3( ge.x, -ge.y,  ge.z),
-                            gc + new Vector3(-ge.x,  ge.y,  ge.z),
-                            gc + new Vector3( ge.x,  ge.y,  ge.z)
-                        };
+                        FillPlacementCornerBuffer(ghostBounds);
                         
                         float worstPen = 0f;
                         Vector3 worstNormal = Vector3.zero;
                         
-                        for (int ci = 0; ci < corners.Length; ci++)
+                        for (int ci = 0; ci < _placementCornerBuffer.Length; ci++)
                         {
-                            Vector3 dir = corners[ci] - gc;
+                            Vector3 dir = _placementCornerBuffer[ci] - gc;
                             float dist = dir.magnitude;
                             if (dist < 0.001f) continue;
                             dir /= dist;
@@ -2308,9 +2487,7 @@ public class InteractionSystem : MonoBehaviour
                         Physics.SyncTransforms();
                         
                         // Recompute bounds for next iteration
-                        ghostBounds = new Bounds(_placementGhost.transform.position, Vector3.zero);
-                        foreach(Renderer r in _placementGhost.GetComponentsInChildren<Renderer>())
-                            ghostBounds.Encapsulate(r.bounds);
+                        TryGetPlacementGhostBounds(out ghostBounds);
                     }
                 }
                 
@@ -2318,13 +2495,13 @@ public class InteractionSystem : MonoBehaviour
             }
             else
             {
-                _placementGhost.SetActive(false);
+                SetPlacementGhostActive(false);
                 _isPlacementValid = false;
             }
         }
         else
         {
-            _placementGhost.SetActive(false);
+            SetPlacementGhostActive(false);
             _isPlacementValid = false;
         }
     }
@@ -2333,15 +2510,7 @@ public class InteractionSystem : MonoBehaviour
     {
         _isPlacementValid = true;
 
-        Renderer[] ghostRenderers = _placementGhost.GetComponentsInChildren<Renderer>();
-        Bounds bounds = new Bounds(_placementGhost.transform.position, Vector3.zero);
-        bool hasBounds = false;
-        
-        foreach(Renderer r in ghostRenderers)
-        {
-            if (hasBounds) bounds.Encapsulate(r.bounds);
-            else { bounds = r.bounds; hasBounds = true; }
-        }
+        bool hasBounds = TryGetPlacementGhostBounds(out Bounds bounds);
         
         if (_isPlacementValid && hasBounds)
         {
@@ -2350,9 +2519,11 @@ public class InteractionSystem : MonoBehaviour
             extents.y = Mathf.Max(0.01f, extents.y);
             extents.z = Mathf.Max(0.01f, extents.z);
             
-            Collider[] hits = Physics.OverlapBox(bounds.center, extents, Quaternion.identity, interactMask, QueryTriggerInteraction.Ignore);
-            foreach(Collider c in hits)
+            int overlapCount = Physics.OverlapBoxNonAlloc(bounds.center, extents, _placementOverlapBuffer, Quaternion.identity, interactMask, QueryTriggerInteraction.Ignore);
+            for (int i = 0; i < overlapCount; i++)
             {
+                Collider c = _placementOverlapBuffer[i];
+                if (c == null) continue;
                 if (IsIgnoredCarryHitCollider(c)) continue;
                 if (c.transform.IsChildOf(_placementGhost.transform)) continue;
                 if (IsGroundCollider(c)) continue; // Crucial: Ignore sloped or uneven ground meshes to prevent red warning hologram!
@@ -2362,13 +2533,29 @@ public class InteractionSystem : MonoBehaviour
             }
         }
         
+        if (_hasPlacementMaterialState && _lastPlacementMaterialValid == _isPlacementValid)
+            return;
+
         Material targetMat = _isPlacementValid ? _placementValidMat : _placementInvalidMat;
-        foreach(Renderer r in ghostRenderers)
+        if (_placementGhostRenderers == null || _placementGhostRenderers.Length == 0)
+            CachePlacementGhostComponents();
+
+        if (_placementGhostRenderers == null)
+            return;
+
+        for (int i = 0; i < _placementGhostRenderers.Length; i++)
         {
+            Renderer r = _placementGhostRenderers[i];
+            if (r == null)
+                continue;
+
             Material[] mats = r.sharedMaterials;
-            for(int i=0; i<mats.Length; i++) mats[i] = targetMat;
+            for(int j=0; j<mats.Length; j++) mats[j] = targetMat;
             r.sharedMaterials = mats;
         }
+
+        _lastPlacementMaterialValid = _isPlacementValid;
+        _hasPlacementMaterialState = true;
     }
     
     void ExecutePlacement()

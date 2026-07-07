@@ -13,6 +13,8 @@ public class InventoryRaycastPlacer3D : MonoBehaviour
     private GameObject previewInstance;        // 当前生成的预览模型
     private Vector3Int currentHoverCell = new Vector3Int(-1, -1, -1);
     private bool isPreviewValid = false;
+    private Renderer[] _previewRenderers;
+    private Color _lastPreviewColor = new Color(-1f, -1f, -1f, -1f);
 
     // 隐形格子的辅助脚本
     public class CellTriggerInfo : MonoBehaviour
@@ -110,8 +112,10 @@ public class InventoryRaycastPlacer3D : MonoBehaviour
             if (invSystem.InsertItem(testingItem, currentHoverCell))
             {
                 // 简单实现：成功放下后，把当前的预览模型“钉死”在背包里作为固定实体
-                previewInstance = null; 
-                
+                previewInstance = null;
+                _previewRenderers = null;
+                _lastPreviewColor = new Color(-1f, -1f, -1f, -1f);
+
                 // 重新派发下一个测试物品（如果在真实游戏里，这里应该去获取手里的下一个东西）
                 if (testingItem != null) CreatePreview(testingItem);
             }
@@ -123,6 +127,8 @@ public class InventoryRaycastPlacer3D : MonoBehaviour
         if (item.previewPrefab != null)
         {
             previewInstance = Instantiate(item.previewPrefab);
+            _previewRenderers = previewInstance.GetComponentsInChildren<Renderer>();
+            _lastPreviewColor = new Color(-1f, -1f, -1f, -1f);
             // 确保预览物体的轴心在左下角，或者大小合适
         }
     }
@@ -130,10 +136,20 @@ public class InventoryRaycastPlacer3D : MonoBehaviour
     void SetPreviewColor(Color col)
     {
         if (previewInstance == null) return;
-        Renderer[] rends = previewInstance.GetComponentsInChildren<Renderer>();
-        foreach (var r in rends)
+
+        Color targetColor = new Color(col.r, col.g, col.b, 0.5f);
+        if (_lastPreviewColor == targetColor)
+            return;
+
+        if (_previewRenderers == null || _previewRenderers.Length == 0)
+            _previewRenderers = previewInstance.GetComponentsInChildren<Renderer>();
+
+        foreach (var r in _previewRenderers)
         {
-            r.material.color = new Color(col.r, col.g, col.b, 0.5f);
+            if (r != null)
+                r.material.color = targetColor;
         }
+
+        _lastPreviewColor = targetColor;
     }
 }

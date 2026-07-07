@@ -18,6 +18,30 @@ public class Hostile : MonoBehaviour
     private Dictionary<PlayerController, float> _nextDamageTimes = new Dictionary<PlayerController, float>();
     private HashSet<PlayerController> _ratioDamaged = new HashSet<PlayerController>();
     private Dictionary<PlayerController, int> _colliderCount = new Dictionary<PlayerController, int>();
+    private DamageMode _damageMode;
+    private DurationMode _durationMode;
+
+    private enum DamageMode
+    {
+        Ratio,
+        Interval
+    }
+
+    private enum DurationMode
+    {
+        Conserved,
+        Once
+    }
+
+    private void Awake()
+    {
+        RefreshModes();
+    }
+
+    private void OnValidate()
+    {
+        RefreshModes();
+    }
 
     private void OnTriggerEnter(Collider other)
     {
@@ -56,20 +80,19 @@ public class Hostile : MonoBehaviour
         PlayerController pc = other.GetComponentInParent<PlayerController>();
         if (pc == null) return;
 
-        if (!_colliderCount.ContainsKey(pc))
-            _colliderCount[pc] = 0;
-        
-        _colliderCount[pc]++;
+        _colliderCount.TryGetValue(pc, out int colliderCount);
+        colliderCount++;
+        _colliderCount[pc] = colliderCount;
 
-        if (_colliderCount[pc] == 1) // First collider of this player entered
+        if (colliderCount == 1) // First collider of this player entered
         {
-            if (damageType == "interval")
+            if (_damageMode == DamageMode.Interval)
             {
                 pc.TakeDamage(damage, transform.position);
                 _nextDamageTimes[pc] = Time.time + intervalTime;
                 CheckOnce();
             }
-            else if (damageType == "ratio")
+            else if (_damageMode == DamageMode.Ratio)
             {
                 if (!_ratioDamaged.Contains(pc))
                 {
@@ -88,7 +111,7 @@ public class Hostile : MonoBehaviour
         PlayerController pc = other.GetComponentInParent<PlayerController>();
         if (pc == null) return;
 
-        if (damageType == "interval")
+        if (_damageMode == DamageMode.Interval)
         {
             if (_nextDamageTimes.TryGetValue(pc, out float nextTime))
             {
@@ -109,24 +132,34 @@ public class Hostile : MonoBehaviour
         PlayerController pc = other.GetComponentInParent<PlayerController>();
         if (pc == null) return;
 
-        if (_colliderCount.ContainsKey(pc))
+        if (_colliderCount.TryGetValue(pc, out int colliderCount))
         {
-            _colliderCount[pc]--;
-            if (_colliderCount[pc] <= 0)
+            colliderCount--;
+            if (colliderCount <= 0)
             {
                 _colliderCount.Remove(pc);
                 _nextDamageTimes.Remove(pc);
                 _ratioDamaged.Remove(pc);
+            }
+            else
+            {
+                _colliderCount[pc] = colliderCount;
             }
         }
     }
 
     private void CheckOnce()
     {
-        if (durationType == "once")
+        if (_durationMode == DurationMode.Once)
         {
             if (Application.isPlaying) Destroy(gameObject);
             else UnityEngine.Object.DestroyImmediate(gameObject);
         }
+    }
+
+    private void RefreshModes()
+    {
+        _damageMode = damageType == "interval" ? DamageMode.Interval : DamageMode.Ratio;
+        _durationMode = durationType == "once" ? DurationMode.Once : DurationMode.Conserved;
     }
 }

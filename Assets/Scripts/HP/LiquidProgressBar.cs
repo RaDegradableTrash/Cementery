@@ -17,22 +17,53 @@ namespace HP
         public float waveSpeed = 1f;      // 液体波动速度
         public float waveHeight = 0.1f;    // 液体波动高度
         public float waveTime = 0f;       // 波浪的时间种子
+        [Min(0.02f)]
+        public float meshRefreshInterval = 0.033f;
 
         [Header("曲面细分")]
         public Vector2Int SubdivisionSurface = new Vector2Int(1, 1);
 
         public float waveOffset = 0f;    // 液体波动偏移量
         public Color color2;             // 中间/顶层液体颜色
+        private float _meshRefreshTimer;
+        private float _lastRenderedFillAmount = -1f;
 
         protected override void OnEnable()
         {
             base.OnEnable();
+            _meshRefreshTimer = 0f;
+            _lastRenderedFillAmount = -1f;
+            SetVerticesDirty();
         }
 
         private void Update()
         {
-            waveTime += Time.deltaTime * waveSpeed;
-            SetVerticesDirty(); // 每帧标记网格失效，触发重绘
+            if (canvasRenderer == null || canvasRenderer.GetAlpha() <= 0.001f)
+                return;
+
+            float clampedFill = Mathf.Clamp01(fillAmount);
+            bool fillChanged = Mathf.Abs(_lastRenderedFillAmount - clampedFill) > 0.001f;
+            bool waveCanAnimate = Mathf.Abs(waveSpeed) > 0.001f &&
+                Mathf.Abs(waveHeight) > 0.0001f &&
+                clampedFill > 0.01f &&
+                clampedFill < 0.99f;
+
+            if (!fillChanged && !waveCanAnimate)
+                return;
+
+            _meshRefreshTimer += Time.deltaTime;
+            float interval = Mathf.Max(0.02f, meshRefreshInterval);
+            if (!fillChanged && _meshRefreshTimer < interval)
+                return;
+
+            float elapsed = _meshRefreshTimer;
+            _meshRefreshTimer = 0f;
+            if (waveCanAnimate)
+            {
+                waveTime += elapsed * waveSpeed;
+            }
+            _lastRenderedFillAmount = clampedFill;
+            SetVerticesDirty();
         }
 
         // 核心：动态网格重建

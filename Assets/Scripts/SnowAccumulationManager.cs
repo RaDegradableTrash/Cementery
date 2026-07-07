@@ -5,13 +5,18 @@ public class SnowAccumulationManager : MonoBehaviour
     public static SnowAccumulationManager Instance { get; private set; }
 
     [Header("Snow Map Settings")]
-    public int mapResolution = 1024;
+    public int mapResolution = 512;
+    public int occlusionMapResolution = 256;
     [Tooltip("World-space diameter of the snow coverage area. This follows the player so snow is always global.")]
     public float mapWorldSize = 512f;
     [Tooltip("Auto-updated at runtime to follow the player. Do not set manually.")]
     public Vector3 mapCenter = Vector3.zero;
     [Tooltip("How many world-units the player must move before the snow map re-centers. Prevents constant flickering.")]
     public float trackingSnapInterval = 64f;
+    [Min(0.02f)] public float occlusionUpdateInterval = 0.12f;
+    [Min(0.02f)] public float globalSnowUpdateInterval = 0.25f;
+    [Min(0.05f)] public float shaderParamRefreshInterval = 0.5f;
+    [Min(0.05f)] public float trackingUpdateInterval = 0.2f;
 
     [Header("Resources")]
     public Shader modificationShader;
@@ -24,7 +29,33 @@ public class SnowAccumulationManager : MonoBehaviour
     [Header("Runtime Debug (Do not set)")]
     public Material modificationMaterial;
     private RenderTexture snowHeightMap;
+    private RenderTexture snowScratchMap;
     private RenderTexture occlusionMap;
+    private float _occlusionTimer;
+    private float _globalSnowTimer;
+    private float _shaderParamTimer;
+    private float _trackingTimer;
+    private float _nextTrackingTargetSearchTime;
+    private Vector4 _cachedSnowParams;
+    private float _cachedSnowMapWorldSize = -1f;
+    private bool _snowParamsDirty = true;
+    private bool _snowDebugGreenEnabled;
+    private float _cachedTrackingUpdateIntervalSource = -1f;
+    private float _cachedTrackingUpdateInterval = 0.05f;
+    private float _cachedTrackingSnapIntervalSource = -1f;
+    private float _cachedTrackingSnapInterval = 1f;
+    private float _cachedOcclusionUpdateIntervalSource = -1f;
+    private float _cachedOcclusionUpdateInterval = 0.02f;
+    private float _cachedGlobalSnowUpdateIntervalSource = -1f;
+    private float _cachedGlobalSnowUpdateInterval = 0.02f;
+    private float _cachedShaderParamRefreshIntervalSource = -1f;
+    private float _cachedShaderParamRefreshInterval = 0.05f;
+    private bool _hasOcclusionSample;
+    private bool _occlusionClearedWithoutTarget;
+    private Vector3 _lastOcclusionPosition;
+    private Vector3 _lastOcclusionForward;
+    private Vector4 _lastOcclusionSnowParams;
+    private float _lastOcclusionRadius = -1f;
 
     private void Awake()
     {
@@ -52,11 +83,19 @@ public class SnowAccumulationManager : MonoBehaviour
 
     private void InitializeMap()
     {
-        // 1. Create a 1024x1024 RenderTexture for high precision (10cm per pixel for 100x100m)
-        snowHeightMap = new RenderTexture(1024, 1024, 0, RenderTextureFormat.RHalf);
+        int snowResolution = Mathf.Clamp(mapResolution, 256, 1024);
+        int occlusionResolution = Mathf.Clamp(occlusionMapResolution, 128, 512);
+
+        snowHeightMap = new RenderTexture(snowResolution, snowResolution, 0, RenderTextureFormat.RHalf);
         snowHeightMap.name = "SnowHeightMap";
         snowHeightMap.filterMode = FilterMode.Bilinear;
         snowHeightMap.wrapMode = TextureWrapMode.Clamp;
+
+        snowScratchMap = new RenderTexture(snowResolution, snowResolution, 0, RenderTextureFormat.RHalf);
+        snowScratchMap.name = "SnowScratchMap";
+        snowScratchMap.filterMode = FilterMode.Bilinear;
+        snowScratchMap.wrapMode = TextureWrapMode.Clamp;
+        snowScratchMap.Create();
         
         // CLEAR garbage data from RenderTexture initialization!
         snowHeightMap.DiscardContents();
@@ -64,8 +103,7 @@ public class SnowAccumulationManager : MonoBehaviour
         GL.Clear(true, true, Color.black);
         RenderTexture.active = null;
 
-        // 2. Create the occlusion map
-        occlusionMap = new RenderTexture(512, 512, 0, RenderTextureFormat.RHalf);
+        occlusionMap = new RenderTexture(occlusionResolution, occlusionResolution, 0, RenderTextureFormat.RHalf);
         occlusionMap.name = "OcclusionMap";
         occlusionMap.filterMode = FilterMode.Bilinear;
         occlusionMap.wrapMode = TextureWrapMode.Clamp;
@@ -106,7 +144,7 @@ public class SnowAccumulationManager : MonoBehaviour
         {
             modificationMaterial.SetTexture("_OcclusionMap", occlusionMap);
         }
-        Vector4 snowParams = new Vector4(mapCenter.x, mapCenter.z, mapWorldSize, 1f / mapWorldSize);
+        Vector4 snowParams = GetSnowParams();
         Shader.SetGlobalVector("_GlobalSnowMapParams", snowParams);
     }
 
@@ -116,20 +154,43 @@ public class SnowAccumulationManager : MonoBehaviour
 
         if (playerCar != null)
         {
-            modificationMaterial.SetVector("_CarParams", new Vector4(playerCar.position.x, playerCar.position.y, playerCar.position.z, carOcclusionRadius));
-            modificationMaterial.SetVector("_CarParamsForward", new Vector4(playerCar.forward.x, playerCar.forward.y, playerCar.forward.z, 4.5f));
-            Vector4 snowParams = new Vector4(mapCenter.x, mapCenter.z, mapWorldSize, 1f / mapWorldSize);
+            Vector3 carPosition = playerCar.position;
+            Vector3 carForward = playerCar.forward;
+            Vector4 snowParams = GetSnowParams();
+            if (_hasOcclusionSample &&
+                !_occlusionClearedWithoutTarget &&
+                (carPosition - _lastOcclusionPosition).sqrMagnitude < 0.0001f &&
+                (carForward - _lastOcclusionForward).sqrMagnitude < 0.0001f &&
+                Mathf.Approximately(_lastOcclusionRadius, carOcclusionRadius) &&
+                (_lastOcclusionSnowParams - snowParams).sqrMagnitude < 0.000001f)
+            {
+                return;
+            }
+
+            modificationMaterial.SetVector("_CarParams", new Vector4(carPosition.x, carPosition.y, carPosition.z, carOcclusionRadius));
+            modificationMaterial.SetVector("_CarParamsForward", new Vector4(carForward.x, carForward.y, carForward.z, 4.5f));
             modificationMaterial.SetVector("_SnowMapParams", snowParams);
             
             // Pass 2: Draw Occlusion mask
             Graphics.Blit(null, occlusionMap, modificationMaterial, 2);
+            _hasOcclusionSample = true;
+            _occlusionClearedWithoutTarget = false;
+            _lastOcclusionPosition = carPosition;
+            _lastOcclusionForward = carForward;
+            _lastOcclusionSnowParams = snowParams;
+            _lastOcclusionRadius = carOcclusionRadius;
         }
         else
         {
+            if (_occlusionClearedWithoutTarget)
+                return;
+
             // If no car, clear to white (no occlusion)
             RenderTexture.active = occlusionMap;
             GL.Clear(false, true, Color.white);
             RenderTexture.active = null;
+            _hasOcclusionSample = false;
+            _occlusionClearedWithoutTarget = true;
         }
     }
 
@@ -151,16 +212,14 @@ public class SnowAccumulationManager : MonoBehaviour
         modificationMaterial.SetVector("_BrushParams", new Vector4(pos.x, pos.y, pos.z, radius));
         modificationMaterial.SetVector("_BrushStrength", new Vector4(amount, 0, 0, 0));
         
-        Vector4 snowParams = new Vector4(mapCenter.x, mapCenter.z, mapWorldSize, 1f / mapWorldSize);
-        modificationMaterial.SetVector("_SnowMapParams", snowParams);
+        modificationMaterial.SetVector("_SnowMapParams", GetSnowParams());
 
-        RenderTexture tempRT = RenderTexture.GetTemporary(snowHeightMap.descriptor);
+        if (!EnsureSnowScratchMap())
+            return;
         
         // Pass 0: Add Snow
-        Graphics.Blit(snowHeightMap, tempRT, modificationMaterial, 0);
-        Graphics.Blit(tempRT, snowHeightMap);
-
-        RenderTexture.ReleaseTemporary(tempRT);
+        Graphics.Blit(snowHeightMap, snowScratchMap, modificationMaterial, 0);
+        Graphics.Blit(snowScratchMap, snowHeightMap);
     }
 
     private void OnDestroy()
@@ -169,6 +228,11 @@ public class SnowAccumulationManager : MonoBehaviour
         {
             snowHeightMap.Release();
             Destroy(snowHeightMap);
+        }
+        if (snowScratchMap != null)
+        {
+            snowScratchMap.Release();
+            Destroy(snowScratchMap);
         }
         if (occlusionMap != null)
         {
@@ -181,62 +245,178 @@ public class SnowAccumulationManager : MonoBehaviour
         }
     }
 
-    private void AccumulateGlobalSnow()
+    private void AccumulateGlobalSnow(float deltaSeconds)
     {
         if (modificationMaterial == null || snowHeightMap == null || globalSnowRate <= 0f) return;
 
-        modificationMaterial.SetVector("_BrushStrength", new Vector4(globalSnowRate * Time.deltaTime, 0, 0, 0));
+        modificationMaterial.SetVector("_BrushStrength", new Vector4(globalSnowRate * deltaSeconds, 0, 0, 0));
         
-        Vector4 snowParams = new Vector4(mapCenter.x, mapCenter.z, mapWorldSize, 1f / mapWorldSize);
-        modificationMaterial.SetVector("_SnowMapParams", snowParams);
+        modificationMaterial.SetVector("_SnowMapParams", GetSnowParams());
 
-        RenderTexture tempRT = RenderTexture.GetTemporary(snowHeightMap.descriptor);
+        if (!EnsureSnowScratchMap())
+            return;
         
         // Pass 3: Global Accumulation
-        Graphics.Blit(snowHeightMap, tempRT, modificationMaterial, 3);
-        Graphics.Blit(tempRT, snowHeightMap);
+        Graphics.Blit(snowHeightMap, snowScratchMap, modificationMaterial, 3);
+        Graphics.Blit(snowScratchMap, snowHeightMap);
+    }
 
-        RenderTexture.ReleaseTemporary(tempRT);
+    private bool EnsureSnowScratchMap()
+    {
+        if (snowHeightMap == null)
+            return false;
+
+        if (snowScratchMap != null &&
+            snowScratchMap.width == snowHeightMap.width &&
+            snowScratchMap.height == snowHeightMap.height &&
+            snowScratchMap.format == snowHeightMap.format)
+        {
+            return true;
+        }
+
+        if (snowScratchMap != null)
+        {
+            snowScratchMap.Release();
+            Destroy(snowScratchMap);
+        }
+
+        snowScratchMap = new RenderTexture(snowHeightMap.descriptor);
+        snowScratchMap.name = "SnowScratchMap";
+        snowScratchMap.filterMode = snowHeightMap.filterMode;
+        snowScratchMap.wrapMode = snowHeightMap.wrapMode;
+        snowScratchMap.Create();
+        return true;
     }
 
     private void Update()
     {
-        // ── Track player so snow coverage is always global ──────────────────
-        Transform tracker = ResolveTrackingTarget();
-        if (tracker != null)
-        {
-            // Snap to a grid to avoid the snow map sliding pixel-by-pixel every frame
-            float snap = trackingSnapInterval;
-            float snappedX = Mathf.Round(tracker.position.x / snap) * snap;
-            float snappedZ = Mathf.Round(tracker.position.z / snap) * snap;
-            Vector3 newCenter = new Vector3(snappedX, 0f, snappedZ);
+        bool shaderParamsDirty = false;
 
-            if (newCenter != mapCenter)
+        _trackingTimer += Time.deltaTime;
+        if (_trackingTimer >= GetTrackingUpdateInterval())
+        {
+            _trackingTimer = 0f;
+
+            // ── Track player so snow coverage is always global ──────────────────
+            Transform tracker = ResolveTrackingTarget();
+            if (tracker != null)
             {
-                mapCenter = newCenter;
-                // Re-push shader params immediately after center shift
-                UpdateGlobalShaderParams();
+                // Snap to a grid to avoid the snow map sliding pixel-by-pixel every frame
+                float snap = GetTrackingSnapInterval();
+                float snappedX = Mathf.Round(tracker.position.x / snap) * snap;
+                float snappedZ = Mathf.Round(tracker.position.z / snap) * snap;
+                Vector3 newCenter = new Vector3(snappedX, 0f, snappedZ);
+
+                if (newCenter != mapCenter)
+                {
+                    mapCenter = newCenter;
+                    _snowParamsDirty = true;
+                    shaderParamsDirty = true;
+                }
             }
         }
 
-        UpdateOcclusionMap();
-        AccumulateGlobalSnow();
-        UpdateGlobalShaderParams();
+        _occlusionTimer += Time.deltaTime;
+        if (_occlusionTimer >= GetOcclusionUpdateInterval())
+        {
+            _occlusionTimer = 0f;
+            UpdateOcclusionMap();
+        }
+
+        _globalSnowTimer += Time.deltaTime;
+        if (_globalSnowTimer >= GetGlobalSnowUpdateInterval())
+        {
+            float elapsed = _globalSnowTimer;
+            _globalSnowTimer = 0f;
+            AccumulateGlobalSnow(elapsed);
+        }
+
+        _shaderParamTimer += Time.deltaTime;
+        if (shaderParamsDirty || _shaderParamTimer >= GetShaderParamRefreshInterval())
+        {
+            _shaderParamTimer = 0f;
+            UpdateGlobalShaderParams();
+        }
 
         if (Input.GetKeyDown(KeyCode.P))
         {
             DebugSnowHeight();
         }
 
-        // 调试按键：按住 ] 键将雪变为绿色
-        if (Input.GetKey(KeyCode.RightBracket))
+        bool debugGreen = Input.GetKey(KeyCode.RightBracket);
+        if (debugGreen != _snowDebugGreenEnabled)
         {
-            Shader.SetGlobalFloat("_SnowDebugGreen", 1f);
+            _snowDebugGreenEnabled = debugGreen;
+            Shader.SetGlobalFloat("_SnowDebugGreen", debugGreen ? 1f : 0f);
         }
-        else
+    }
+
+    private Vector4 GetSnowParams()
+    {
+        if (_snowParamsDirty || !Mathf.Approximately(_cachedSnowMapWorldSize, mapWorldSize))
         {
-            Shader.SetGlobalFloat("_SnowDebugGreen", 0f);
+            float worldSize = Mathf.Max(0.001f, mapWorldSize);
+            _cachedSnowParams = new Vector4(mapCenter.x, mapCenter.z, worldSize, 1f / worldSize);
+            _cachedSnowMapWorldSize = mapWorldSize;
+            _snowParamsDirty = false;
         }
+
+        return _cachedSnowParams;
+    }
+
+    private float GetTrackingUpdateInterval()
+    {
+        if (!Mathf.Approximately(_cachedTrackingUpdateIntervalSource, trackingUpdateInterval))
+        {
+            _cachedTrackingUpdateIntervalSource = trackingUpdateInterval;
+            _cachedTrackingUpdateInterval = Mathf.Max(0.05f, trackingUpdateInterval);
+        }
+
+        return _cachedTrackingUpdateInterval;
+    }
+
+    private float GetTrackingSnapInterval()
+    {
+        if (!Mathf.Approximately(_cachedTrackingSnapIntervalSource, trackingSnapInterval))
+        {
+            _cachedTrackingSnapIntervalSource = trackingSnapInterval;
+            _cachedTrackingSnapInterval = Mathf.Max(1f, trackingSnapInterval);
+        }
+
+        return _cachedTrackingSnapInterval;
+    }
+
+    private float GetOcclusionUpdateInterval()
+    {
+        if (!Mathf.Approximately(_cachedOcclusionUpdateIntervalSource, occlusionUpdateInterval))
+        {
+            _cachedOcclusionUpdateIntervalSource = occlusionUpdateInterval;
+            _cachedOcclusionUpdateInterval = Mathf.Max(0.02f, occlusionUpdateInterval);
+        }
+
+        return _cachedOcclusionUpdateInterval;
+    }
+
+    private float GetGlobalSnowUpdateInterval()
+    {
+        if (!Mathf.Approximately(_cachedGlobalSnowUpdateIntervalSource, globalSnowUpdateInterval))
+        {
+            _cachedGlobalSnowUpdateIntervalSource = globalSnowUpdateInterval;
+            _cachedGlobalSnowUpdateInterval = Mathf.Max(0.02f, globalSnowUpdateInterval);
+        }
+
+        return _cachedGlobalSnowUpdateInterval;
+    }
+
+    private float GetShaderParamRefreshInterval()
+    {
+        if (!Mathf.Approximately(_cachedShaderParamRefreshIntervalSource, shaderParamRefreshInterval))
+        {
+            _cachedShaderParamRefreshIntervalSource = shaderParamRefreshInterval;
+            _cachedShaderParamRefreshInterval = Mathf.Max(0.05f, shaderParamRefreshInterval);
+        }
+
+        return _cachedShaderParamRefreshInterval;
     }
 
     private Transform ResolveTrackingTarget()
@@ -244,6 +424,11 @@ public class SnowAccumulationManager : MonoBehaviour
         // Re-use the already-assigned playerCar reference if it is still valid
         if (playerCar != null && playerCar.gameObject.activeInHierarchy)
             return playerCar;
+
+        if (Time.time < _nextTrackingTargetSearchTime)
+            return null;
+
+        _nextTrackingTargetSearchTime = Time.time + 0.75f;
 
         // Otherwise search in the same priority order as WorldStreamer
         GameObject player = GameObject.FindGameObjectWithTag("Player");

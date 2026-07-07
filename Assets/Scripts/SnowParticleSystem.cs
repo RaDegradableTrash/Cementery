@@ -6,11 +6,37 @@ using EnvironmentSystem;
 public class SnowParticleSystem : MonoBehaviour
 {
     [Header("Snow Settings")]
-    public float particleSnowRadius = 1.5f; 
+    public float particleSnowRadius = 1.5f;
     public float particleSnowAmount = 0.2f; // Increase accumulation rate so it passes the Cutoff!
+    [Header("Performance")]
+    public int maxCollisionEventsPerFrame = 24;
+    public int maxSnowMapWritesPerFrame = 6;
+    public int skyVisibilityCheckStride = 4;
+    public bool enableDynamicObjectSnow = false;
+    [Min(0.1f)] public float followRepositionDistance = 1.5f;
 
     private ParticleSystem partSystem;
     private List<ParticleCollisionEvent> collisionEvents;
+    private int _collisionFrame = -1;
+    private int _processedCollisionEventsThisFrame;
+    private int _processedSnowMapWritesThisFrame;
+    private int _skyCheckCounter;
+    private float _nextTargetSearchTime;
+    private RVSystem.RVController _cachedRv;
+    private Camera _cachedCamera;
+    private Vector3 _lastEmitterPosition;
+    private bool _hasEmitterPosition;
+    private float _cachedFollowRepositionDistance = -1f;
+    private float _cachedFollowRepositionDistanceSqr = 0.01f;
+    private float _nextPlayStateCheckTime;
+    private readonly Dictionary<int, CollisionTargetInfo> _collisionTargetCache = new Dictionary<int, CollisionTargetInfo>(64);
+    private const int MaxCollisionTargetCacheSize = 256;
+
+    private struct CollisionTargetInfo
+    {
+        public bool isTerrain;
+        public DynamicSnowObject dynamicSnowObject;
+    }
 
     private void Awake()
     {
@@ -19,7 +45,7 @@ public class SnowParticleSystem : MonoBehaviour
         particleSnowAmount = 0.05f;
 
         partSystem = GetComponent<ParticleSystem>();
-        collisionEvents = new List<ParticleCollisionEvent>();
+        collisionEvents = new List<ParticleCollisionEvent>(64);
     }
 
     private Transform _playerTransform;
@@ -43,26 +69,58 @@ public class SnowParticleSystem : MonoBehaviour
         if (_playerTransform != null)
         {
             // Position the particle system above the player so that it always falls around the player
-            transform.position = new Vector3(_playerTransform.position.x, _playerTransform.position.y + 40f, _playerTransform.position.z);
+            Vector3 emitterPosition = new Vector3(_playerTransform.position.x, _playerTransform.position.y + 40f, _playerTransform.position.z);
+            if (!_hasEmitterPosition || (emitterPosition - _lastEmitterPosition).sqrMagnitude >= GetFollowRepositionDistanceSqr())
+            {
+                transform.position = emitterPosition;
+                _lastEmitterPosition = emitterPosition;
+                _hasEmitterPosition = true;
+            }
         }
 
-        if (partSystem != null && !partSystem.isPlaying)
+        if (partSystem != null && Time.time >= _nextPlayStateCheckTime)
         {
-            partSystem.Play();
+            _nextPlayStateCheckTime = Time.time + 1f;
+            if (!partSystem.isPlaying)
+            {
+                partSystem.Play();
+            }
         }
     }
 
     private Transform FindPlayer()
     {
+        if (Time.time < _nextTargetSearchTime)
+            return null;
+
+        _nextTargetSearchTime = Time.time + 0.75f;
+
         GameObject player = GameObject.FindGameObjectWithTag("Player");
         if (player != null && player.activeInHierarchy)
             return player.transform;
 
-        var rv = FindObjectOfType<RVSystem.RVController>();
-        if (rv != null && rv.gameObject.activeInHierarchy)
-            return rv.transform;
+        if (_cachedRv == null || !_cachedRv.gameObject.activeInHierarchy)
+            _cachedRv = FindObjectOfType<RVSystem.RVController>();
 
-        return Camera.main != null ? Camera.main.transform : null;
+        if (_cachedRv != null && _cachedRv.gameObject.activeInHierarchy)
+            return _cachedRv.transform;
+
+        if (_cachedCamera == null || !_cachedCamera.gameObject.activeInHierarchy)
+            _cachedCamera = Camera.main;
+
+        return _cachedCamera != null ? _cachedCamera.transform : null;
+    }
+
+    private float GetFollowRepositionDistanceSqr()
+    {
+        if (!Mathf.Approximately(_cachedFollowRepositionDistance, followRepositionDistance))
+        {
+            _cachedFollowRepositionDistance = followRepositionDistance;
+            float minMoveDistance = Mathf.Max(0.1f, followRepositionDistance);
+            _cachedFollowRepositionDistanceSqr = minMoveDistance * minMoveDistance;
+        }
+
+        return _cachedFollowRepositionDistanceSqr;
     }
 
     private void ConfigureParticleSystemProgrammatically()
@@ -77,25 +135,27 @@ public class SnowParticleSystem : MonoBehaviour
         }
         
         transform.position = new Vector3(mapCenter.x, 50f, mapCenter.z); // Cloud height
+        _lastEmitterPosition = transform.position;
+        _hasEmitterPosition = true;
         transform.rotation = Quaternion.Euler(90f, 0f, 0f); // Pointing straight down (Z down)
 
         // 2. Main Module setup
         var main = partSystem.main;
         main.loop = true;
         main.startLifetime = 150f; // Longer lifetime since it falls slower
-        main.startSpeed = 0f; 
+        main.startSpeed = 0f;
         // 粒子保持2d，略微带点冰晶蓝
         main.startSize = new ParticleSystem.MinMaxCurve(0.04f, 0.16f);
-        main.startColor = new Color(0.9f, 0.95f, 1.0f, 0.8f); 
+        main.startColor = new Color(0.9f, 0.95f, 1.0f, 0.8f);
         // 下落速度降至当前的 30% (之前是0.5)
-        main.gravityModifier = 0.15f; 
+        main.gravityModifier = 0.15f;
         main.simulationSpace = ParticleSystemSimulationSpace.World;
-        main.maxParticles = Application.platform == RuntimePlatform.WebGLPlayer ? 2000 : 5000; 
+        main.maxParticles = Application.platform == RuntimePlatform.WebGLPlayer ? 1000 : 2500;
 
         // 3. Emission Module setup
         var emission = partSystem.emission;
         emission.enabled = true;
-        emission.rateOverTime = Application.platform == RuntimePlatform.WebGLPlayer ? 150f : 500f;  
+        emission.rateOverTime = Application.platform == RuntimePlatform.WebGLPlayer ? 80f : 220f;
 
         // 4. Shape Module setup: 圆形范围 (Circle)
         var shape = partSystem.shape;
@@ -112,8 +172,8 @@ public class SnowParticleSystem : MonoBehaviour
         collision.dampen = 1f; 
         collision.lifetimeLoss = 1f; 
         collision.collidesWith = ~0; 
-        collision.quality = ParticleSystemCollisionQuality.Medium; // High drops collisions on 130k poly terrains!
-        collision.voxelSize = 0.2f; // Increase voxel resolution to 20cm to eliminate grid-snapping lines!
+        collision.quality = ParticleSystemCollisionQuality.Low;
+        collision.voxelSize = 0.4f;
 
         // 6. 生成并应用柔和的雪花材质
         var renderer = GetComponent<ParticleSystemRenderer>();
@@ -149,26 +209,7 @@ public class SnowParticleSystem : MonoBehaviour
                 mat.SetColor("_BaseColor", new Color(2.0f, 2.0f, 2.0f, 0.8f)); // HDR bright white
                 mat.SetColor("_Color", new Color(2.0f, 2.0f, 2.0f, 0.8f));
                 
-                // 程序化生成柔和的圆形贴图
-                Texture2D circleTex = new Texture2D(32, 32, TextureFormat.RGBA32, false);
-                circleTex.name = "SoftSnowflakeTex";
-                Color[] pixels = new Color[32 * 32];
-                Vector2 center = new Vector2(16, 16);
-                for (int y = 0; y < 32; y++)
-                {
-                    for (int x = 0; x < 32; x++)
-                    {
-                        float dist = Vector2.Distance(new Vector2(x, y), center) / 16f;
-                        float alpha = Mathf.Clamp01(1f - dist);
-                        // 柔和边缘
-                        alpha = alpha * alpha * (3f - 2f * alpha);
-                        pixels[y * 32 + x] = new Color(1f, 1f, 1f, alpha);
-                    }
-                }
-                circleTex.SetPixels(pixels);
-                circleTex.Apply();
-                
-                mat.mainTexture = circleTex;
+                mat.mainTexture = GetSoftSnowflakeTexture();
                 renderer.sharedMaterial = mat;
             }
         }
@@ -176,18 +217,66 @@ public class SnowParticleSystem : MonoBehaviour
 
     private static GameObject snowBlobPrefab;
     private static Queue<GameObject> activeBlobs = new Queue<GameObject>();
+    private static Texture2D s_softSnowflakeTexture;
+
+    private static Texture2D GetSoftSnowflakeTexture()
+    {
+        if (s_softSnowflakeTexture != null)
+            return s_softSnowflakeTexture;
+
+        Texture2D circleTex = new Texture2D(32, 32, TextureFormat.RGBA32, false);
+        circleTex.name = "SoftSnowflakeTex";
+        Color[] pixels = new Color[32 * 32];
+        const float center = 16f;
+        const float invRadiusSq = 1f / (16f * 16f);
+        for (int y = 0; y < 32; y++)
+        {
+            float dy = y - center;
+            for (int x = 0; x < 32; x++)
+            {
+                float dx = x - center;
+                float distSq = (dx * dx + dy * dy) * invRadiusSq;
+                float alpha = Mathf.Clamp01(1f - Mathf.Sqrt(distSq));
+                alpha = alpha * alpha * (3f - 2f * alpha);
+                pixels[y * 32 + x] = new Color(1f, 1f, 1f, alpha);
+            }
+        }
+        circleTex.SetPixels(pixels);
+        circleTex.Apply();
+
+        s_softSnowflakeTexture = circleTex;
+        return s_softSnowflakeTexture;
+    }
 
     private void OnParticleCollision(GameObject other)
     {
-        int numCollisionEvents = partSystem.GetCollisionEvents(other, collisionEvents);
+        if (partSystem == null || other == null)
+            return;
+
+        if (_collisionFrame != Time.frameCount)
+        {
+            _collisionFrame = Time.frameCount;
+            _processedCollisionEventsThisFrame = 0;
+            _processedSnowMapWritesThisFrame = 0;
+        }
+
+        int remainingBudget = Mathf.Max(0, maxCollisionEventsPerFrame - _processedCollisionEventsThisFrame);
+        if (remainingBudget <= 0)
+            return;
+
+        int numCollisionEvents = Mathf.Min(partSystem.GetCollisionEvents(other, collisionEvents), remainingBudget);
+        _processedCollisionEventsThisFrame += numCollisionEvents;
+        int targetCacheKey = other.GetInstanceID();
+        CollisionTargetInfo targetInfo = GetCollisionTargetInfo(other, targetCacheKey);
+        bool isTerrain = targetInfo.isTerrain;
+        int visibilityStride = Mathf.Max(1, skyVisibilityCheckStride);
+        int snowWriteBudget = Mathf.Max(1, maxSnowMapWritesPerFrame);
+        SnowAccumulationManager snowManager = SnowAccumulationManager.Instance;
 
         for (int i = 0; i < numCollisionEvents; i++)
         {
             Vector3 pos = collisionEvents[i].intersection;
             Vector3 normal = collisionEvents[i].normal;
-
-            // 判定是否碰到了地形
-            bool isTerrain = (other.GetComponentInParent<DesertTerrainChunk>() != null || other.name.Contains("Terrain"));
 
             // 1. 坡度合法性检验 (Slope Check)：
             // 【极其重要】：Medium 质量的碰撞使用了体素网格（Voxel Grid）。
@@ -204,7 +293,9 @@ public class SnowParticleSystem : MonoBehaviour
             // 因此，如果是地形，我们将起点抬高至上方 0.5 米发射射线，过滤自遮挡干扰！
             float raycastOffset = isTerrain ? 0.5f : 0.02f;
             RaycastHit hit;
-            if (Physics.Raycast(pos + Vector3.up * raycastOffset, Vector3.up, out hit, 30f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+            bool runSkyVisibilityCheck = visibilityStride <= 1 || (_skyCheckCounter++ % visibilityStride) == 0;
+            if (runSkyVisibilityCheck &&
+                Physics.Raycast(pos + Vector3.up * raycastOffset, Vector3.up, out hit, 30f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
             {
                 // 如果是地形，且上方遮挡点非常近（可能射中了极陡峭的山崖上部），我们也忽略此遮挡
                 if (isTerrain && hit.distance < 1.0f)
@@ -213,41 +304,76 @@ public class SnowParticleSystem : MonoBehaviour
                 }
                 else
                 {
-                    continue; 
+                    continue;
                 }
             }
 
             // 如果撞到的不是地形，就意味着撞到了车子、石头等动态或静态物体
-            if (other.GetComponentInParent<DesertTerrainChunk>() == null && !other.name.Contains("Terrain"))
+            if (!isTerrain)
             {
-                var dynamicObj = other.GetComponentInParent<DynamicSnowObject>();
+                if (!enableDynamicObjectSnow)
+                    continue;
+
+                DynamicSnowObject dynamicObj = targetInfo.dynamicSnowObject;
                 if (dynamicObj == null && other.transform.root != null)
                 {
                     dynamicObj = other.transform.root.gameObject.AddComponent<DynamicSnowObject>();
+                    targetInfo.dynamicSnowObject = dynamicObj;
+                    _collisionTargetCache[targetCacheKey] = targetInfo;
                 }
                 
                 if (dynamicObj != null)
                 {
+                    if (_processedSnowMapWritesThisFrame >= snowWriteBudget)
+                        continue;
+
                     // 局部物体（车身等）保持精细的小半径，防止一颗雪把全车刷白
                     dynamicObj.AddSnowLocal(pos, 0.4f, particleSnowAmount * 1.5f);
+                    _processedSnowMapWritesThisFrame++;
                 }
                 continue; // 撞到物体的雪花不会再穿透到地上！
             }
 
             // 2D Base Layer Support (对于地形)
-            if (SnowAccumulationManager.Instance == null)
+            if (snowManager == null)
             {
                 GameObject managerGO = new GameObject("[SYSTEM] SnowAccumulationManager");
-                var manager = managerGO.AddComponent<SnowAccumulationManager>();
-                manager.mapCenter = pos; 
+                snowManager = managerGO.AddComponent<SnowAccumulationManager>();
+                snowManager.mapCenter = pos;
             }
             
-            if (SnowAccumulationManager.Instance != null)
+            if (snowManager != null)
             {
+                if (_processedSnowMapWritesThisFrame >= snowWriteBudget)
+                    continue;
+
                 // 【核心修复】：为地形使用超大的柔和笔刷半径（3.5米）！
                 // 这能保证落下的雪花能迅速且均匀地在地面晕染开来并连成一大片，彻底消灭“一块一块的斑秃”感！
-                SnowAccumulationManager.Instance.AddSnowAtPoint(pos, 3.5f, particleSnowAmount * 0.6f);
+                snowManager.AddSnowAtPoint(pos, 3.5f, particleSnowAmount * 0.6f);
+                _processedSnowMapWritesThisFrame++;
             }
         }
+    }
+
+    private CollisionTargetInfo GetCollisionTargetInfo(GameObject other, int key)
+    {
+        if (_collisionTargetCache.TryGetValue(key, out CollisionTargetInfo info))
+        {
+            return info;
+        }
+
+        if (_collisionTargetCache.Count >= MaxCollisionTargetCacheSize)
+        {
+            _collisionTargetCache.Clear();
+        }
+
+        info = new CollisionTargetInfo
+        {
+            isTerrain = other.GetComponentInParent<DesertTerrainChunk>() != null || other.name.Contains("Terrain"),
+            dynamicSnowObject = enableDynamicObjectSnow ? other.GetComponentInParent<DynamicSnowObject>() : null
+        };
+
+        _collisionTargetCache[key] = info;
+        return info;
     }
 }

@@ -16,6 +16,7 @@ public class PlayerController : NetworkBehaviour
     [Header("Health")]
     public int hp = 10;
     public int maxHp = 10;
+    [SerializeField] private bool logDamageEvents = false;
 
     [Header("Input")]
     [Tooltip("Use raw axis values for immediate response (recommended for low input latency).")]
@@ -101,8 +102,18 @@ public class PlayerController : NetworkBehaviour
     public LayerMask groundMask = ~0;
     public int groundCheckInterval = 2;
     private int _groundCheckFrameCounter;
+    [SerializeField] private bool logJumpPeak = false;
+    private const int GroundHitBufferSize = 16;
+    private readonly RaycastHit[] _groundHitBuffer = new RaycastHit[GroundHitBufferSize];
+    private readonly RaycastHit[] _groundFallbackHitBuffer = new RaycastHit[GroundHitBufferSize];
+    private const int ClimbHitBufferSize = 16;
+    private readonly RaycastHit[] _climbHitBuffer = new RaycastHit[ClimbHitBufferSize];
+    private const int CollisionContactBufferSize = 32;
+    private readonly ContactPoint[] _collisionContactBuffer = new ContactPoint[CollisionContactBufferSize];
     private bool _hasSetupKinematic = false;
     private float _startupTime;
+    private int _inventoryModeCacheFrame = -1;
+    private bool _cachedInventoryModeActive;
 
     // 🌟 核心新增：控制玩家当前是否因使用家具（躺下/坐下）而全面冻结控制器逻辑
     public bool IsUsingFurniture { get; set; } = false;
@@ -163,7 +174,7 @@ public class PlayerController : NetworkBehaviour
         if (inventoryCameraController == null)
             inventoryCameraController = InventoryCameraController.GetPrimaryController();
 
-        Camera[] allCameras = FindObjectsOfType<Camera>(true);
+        Camera[] allCameras = FindObjectsByType<Camera>(FindObjectsInactive.Include, FindObjectsSortMode.None);
         Camera playerCamera = GetComponentInChildren<Camera>(true);
         foreach (Camera cam in allCameras)
         {
@@ -181,8 +192,8 @@ public class PlayerController : NetworkBehaviour
             }
         }
 
-        if (mouseLook == null && Camera.main != null)
-            mouseLook = Camera.main.GetComponent<MouseLook>();
+        if (mouseLook == null && playerCamera != null)
+            mouseLook = playerCamera.GetComponent<MouseLook>();
 
         // 补充初始化 UI
         if (SimpleCircleBar.Instance != null)
@@ -315,7 +326,10 @@ public class PlayerController : NetworkBehaviour
         }
         else if (_currentJumpPeakY > -Mathf.Infinity)
         {
-            Debug.Log($"[Jump Peak] Maximum Height Reached: {_currentJumpPeakY:F2}m (Delta: {(_currentJumpPeakY - transform.position.y):F2}m)");
+            if (logJumpPeak)
+            {
+                Debug.Log($"[Jump Peak] Maximum Height Reached: {_currentJumpPeakY:F2}m (Delta: {(_currentJumpPeakY - transform.position.y):F2}m)");
+            }
             _currentJumpPeakY = -Mathf.Infinity;
         }
     }
@@ -354,10 +368,16 @@ public class PlayerController : NetworkBehaviour
 
     bool IsInventoryModeActive()
     {
+        int frame = Time.frameCount;
+        if (_inventoryModeCacheFrame == frame)
+            return _cachedInventoryModeActive;
+
         if (inventoryCameraController == null)
             inventoryCameraController = InventoryCameraController.GetPrimaryController();
 
-        return inventoryCameraController != null && inventoryCameraController.IsInventoryActive;
+        _cachedInventoryModeActive = inventoryCameraController != null && inventoryCameraController.IsInventoryActive;
+        _inventoryModeCacheFrame = frame;
+        return _cachedInventoryModeActive;
     }
 
     // Movements
@@ -392,8 +412,11 @@ public class PlayerController : NetworkBehaviour
         }
 
         // 每次 hp 发生改变，就通知 UI 刷新
-SimpleCircleBar.Instance.UpdateHealthBar(hp, maxHp);
-        Debug.Log($"[PlayerController] Took {amount} damage. Current HP: {hp}");
+        SimpleCircleBar.Instance.UpdateHealthBar(hp, maxHp);
+        if (logDamageEvents)
+        {
+            Debug.Log($"[PlayerController] Took {amount} damage. Current HP: {hp}");
+        }
     }
 
     private void Die(Vector3 sourcePos)
@@ -612,13 +635,13 @@ SimpleCircleBar.Instance.UpdateHealthBar(hp, maxHp);
         
         _isGrounded = false;
         
-        RaycastHit[] hits = Physics.SphereCastAll(origin, radius, Vector3.down, castDist, groundMask, QueryTriggerInteraction.Ignore);
+        int hitCount = Physics.SphereCastNonAlloc(origin, radius, Vector3.down, _groundHitBuffer, castDist, groundMask, QueryTriggerInteraction.Ignore);
         RaycastHit bestHit = default;
         bool foundValidGround = false;
         
-        for (int i = 0; i < hits.Length; i++)
+        for (int i = 0; i < hitCount; i++)
         {
-            RaycastHit hit = hits[i];
+            RaycastHit hit = _groundHitBuffer[i];
             if (hit.transform != null && hit.transform.root != transform.root)
             {
                 bestHit = hit;
@@ -629,10 +652,10 @@ SimpleCircleBar.Instance.UpdateHealthBar(hp, maxHp);
         
         if (!foundValidGround)
         {
-            RaycastHit[] fallbackHits = Physics.SphereCastAll(origin, radius, Vector3.down, castDist, ~0, QueryTriggerInteraction.Ignore);
-            for (int i = 0; i < fallbackHits.Length; i++)
+            int fallbackHitCount = Physics.SphereCastNonAlloc(origin, radius, Vector3.down, _groundFallbackHitBuffer, castDist, ~0, QueryTriggerInteraction.Ignore);
+            for (int i = 0; i < fallbackHitCount; i++)
             {
-                RaycastHit hit = fallbackHits[i];
+                RaycastHit hit = _groundFallbackHitBuffer[i];
                 if (hit.transform != null && hit.transform.root != transform.root)
                 {
                     bestHit = hit;
@@ -717,11 +740,12 @@ SimpleCircleBar.Instance.UpdateHealthBar(hp, maxHp);
             Vector3 rayOrigin = new Vector3(scanPos.x, scanLimitY, scanPos.z);
             
             float targetHeightY = transform.position.y;
-            RaycastHit[] hits = Physics.RaycastAll(rayOrigin, Vector3.down, climbMaxHeight + 2.0f, climbObstacleMask);
+            int hitCount = Physics.RaycastNonAlloc(rayOrigin, Vector3.down, _climbHitBuffer, climbMaxHeight + 2.0f, climbObstacleMask, QueryTriggerInteraction.UseGlobal);
             
             bool foundLedge = false;
-            foreach (var hit in hits)
+            for (int i = 0; i < hitCount; i++)
             {
+                RaycastHit hit = _climbHitBuffer[i];
                 if (hit.transform.root == transform.root) continue;
 
                 if (hit.point.y > targetHeightY)
@@ -780,8 +804,10 @@ SimpleCircleBar.Instance.UpdateHealthBar(hp, maxHp);
         // 🌟 强力拦截 3：如果正在使用家具，绝不处理任何外部碰撞逻辑，避免被家具碰撞体误判为墙壁
         if (IsUsingFurniture) return;
 
-        foreach (ContactPoint cp in collision.contacts)
+        int contactCount = collision.GetContacts(_collisionContactBuffer);
+        for (int i = 0; i < contactCount; i++)
         {
+            ContactPoint cp = _collisionContactBuffer[i];
             float relativeY = cp.point.y - transform.position.y;
             
             if (Mathf.Abs(cp.normal.y) < 0.5f)
@@ -809,8 +835,9 @@ SimpleCircleBar.Instance.UpdateHealthBar(hp, maxHp);
             if (wo != null && wo.canBePushed)
             {
                 Vector3 pushDir = Vector3.zero;
-                foreach (ContactPoint contact in collision.contacts)
+                for (int i = 0; i < contactCount; i++)
                 {
+                    ContactPoint contact = _collisionContactBuffer[i];
                     pushDir -= contact.normal;
                 }
                 pushDir.y = 0f;

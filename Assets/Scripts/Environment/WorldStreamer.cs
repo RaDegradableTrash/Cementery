@@ -13,8 +13,10 @@ namespace EnvironmentSystem
         [Header("General Settings")]
         [Tooltip("Delay in seconds before unloading a chunk to prevent thrashing at boundaries.")]
         public float unloadDelay = 5f;
-        [Tooltip("Set to true to use automatic 7x7 grid coordinate-based loading (Option B). Set to false to use legacy ChunkTriggers.")]
+        [Tooltip("Set to true to use automatic grid coordinate-based loading. Set to false to use legacy ChunkTriggers.")]
         public bool useGridStreaming = true;
+        [Tooltip("Enable detailed chunk load/unload logs. Keep off during normal gameplay to avoid console overhead.")]
+        public bool verboseLogging = false;
 
         [Header("Grid Auto Streamer (Option B)")]
         [Tooltip("The Transform to track. If left empty, it will automatically search for the Player, the RV, or the Main Camera.")]
@@ -28,24 +30,50 @@ namespace EnvironmentSystem
         [Tooltip("The prefix of the baked chunk scenes, e.g. Desert_Chunk_X_Z")]
         public string sceneNamePrefix = "Desert_Chunk";
 
-        [Tooltip("The grid range of chunks to load around the player (e.g. 2 is a 5x5 grid, 3 is a 7x7 grid).")]
-        public int loadingRange = 3;
+        [Tooltip("The grid range of chunks to load around the player (2 is a 5x5 grid, 3 is a 7x7 grid).")]
+        public int loadingRange = 2;
+        [Tooltip("Maximum additive chunk scene loads running at once. Lower values reduce frame spikes.")]
+        [Min(1)] public int maxConcurrentLoads = 1;
+        [Tooltip("Minimum time between starting additive chunk scene loads. Small spacing smooths activation spikes while moving fast.")]
+        [Min(0f)] public float loadStartInterval = 0.1f;
+        [Tooltip("Minimum time between allowing loaded chunk scenes to activate. This smooths the heavier activation frame.")]
+        [Min(0f)] public float loadActivationInterval = 0.12f;
 
         private HashSet<string> _requestedChunks = new HashSet<string>();
         private HashSet<string> _loadedChunks = new HashSet<string>();
         private Dictionary<string, Coroutine> _unloadRoutines = new Dictionary<string, Coroutine>();
-        // Pending scene load queue for throttling: max 2 concurrent loads to avoid stutter
+        // Pending scene load queue for throttling.
         private Queue<string> _loadQueue = new Queue<string>();
+        private HashSet<string> _queuedChunks = new HashSet<string>();
+        private readonly List<string> _requiredChunks = new List<string>(49);
+        private readonly List<string> _chunksToUnload = new List<string>(49);
+        private readonly List<string> _queuedChunkBuffer = new List<string>(49);
+        private readonly HashSet<string> _queuedChunkBufferSet = new HashSet<string>();
+        private readonly List<Vector2Int> _streamingOffsets = new List<Vector2Int>(49);
         private int _activeLoads = 0;
-        private const int MaxConcurrentLoads = 2;
+        private int _cachedOffsetRange = int.MinValue;
+        private Coroutine _drainLoadQueueRoutine;
+        private float _nextLoadStartTime;
+        private float _nextLoadActivationTime;
+        private float _cachedLoadStartWaitInterval = -1f;
+        private WaitForSeconds _cachedLoadStartWait;
+        private float _cachedUnloadWaitDelay = -1f;
+        private WaitForSeconds _cachedUnloadWait;
 
-        // Cache DesertTerrainChunk size so FindObjectOfType is not called every 0.5 s
+        // Cache DesertTerrainChunk size so it is not recalculated every streaming check.
         private float _chunkSizeCacheTime = -99f;
         private const float ChunkSizeCacheInterval = 5f;
 
         private float _nextCheckTime;
         private int _lastGridX = int.MinValue;
         private int _lastGridZ = int.MinValue;
+        private float _nextTargetRefreshTime = -1f;
+        private const float TargetRefreshInterval = 0.75f;
+        private GameObject _cachedPlayer;
+        private Renderer _cachedPlayerRenderer;
+        private RVSystem.RVController _cachedRv;
+        private RVSystem.RVStateMachine _cachedRvStateMachine;
+        private Camera _cachedCamera;
 
         private void Awake()
         {
@@ -65,66 +93,28 @@ namespace EnvironmentSystem
 
         private void Update()
         {
-            if (Time.time < _nextCheckTime) return;
-            _nextCheckTime = Time.time + checkInterval;
+            if (!useGridStreaming) return;
 
-            // 1. Auto-detect target dynamically to support switching between Player and RV
-            trackingTarget = null;
-            GameObject player = GameObject.FindGameObjectWithTag("Player");
-            if (player != null && player.activeInHierarchy)
+            float now = Time.time;
+            bool shouldRunScheduledCheck = now >= _nextCheckTime;
+            if (shouldRunScheduledCheck)
             {
-                var rv = FindObjectOfType<RVSystem.RVController>();
-                var rvStateMachine = FindObjectOfType<RVSystem.RVStateMachine>();
-                
-                if (rvStateMachine != null && rvStateMachine.currentState == RVSystem.RVState.Active)
-                {
-                    trackingTarget = rvStateMachine.transform;
-                }
-                else if (rv != null && rv.gameObject.activeInHierarchy)
-                {
-                    // If player is hidden (renderers disabled, meaning driving), track the RV
-                    var r = player.GetComponentInChildren<Renderer>();
-                    if (r != null && !r.enabled)
-                    {
-                        trackingTarget = rv.transform;
-                    }
-                    else
-                    {
-                        trackingTarget = player.transform;
-                    }
-                }
-                else
-                {
-                    trackingTarget = player.transform;
-                }
+                _nextCheckTime = now + checkInterval;
+                RefreshTrackingTarget();
             }
-            
-            if (trackingTarget == null)
+            else if (trackingTarget == null)
             {
-                var rv = FindObjectOfType<RVSystem.RVController>();
-                if (rv != null && rv.gameObject.activeInHierarchy)
-                {
-                    trackingTarget = rv.transform;
-                }
-                else if (Camera.main != null)
-                {
-                    trackingTarget = Camera.main.transform;
-                }
+                return;
             }
 
             // 2. Perform grid projection and load surrounding chunks based on loadingRange
             if (trackingTarget != null)
             {
-                // Refresh chunk size from active chunk every ChunkSizeCacheInterval (not every frame!)
-                if (Time.time - _chunkSizeCacheTime > ChunkSizeCacheInterval)
+                // Refresh chunk size from the active chunk registry without a scene-wide search.
+                if (shouldRunScheduledCheck && now - _chunkSizeCacheTime > ChunkSizeCacheInterval)
                 {
-                    _chunkSizeCacheTime = Time.time;
-                    var activeChunk = FindObjectOfType<DesertTerrainChunk>();
-                    if (activeChunk != null)
-                    {
-                        chunkSizeX = activeChunk.width * activeChunk.cellSize;
-                        chunkSizeZ = activeChunk.depth * activeChunk.cellSize;
-                    }
+                    _chunkSizeCacheTime = now;
+                    TryRefreshChunkSizeFromLoadedChunk();
                 }
 
                 if (chunkSizeX <= 0.1f) chunkSizeX = 256f;
@@ -144,40 +134,128 @@ namespace EnvironmentSystem
 
         }
 
+        private void RefreshTrackingTarget()
+        {
+            if (Time.time >= _nextTargetRefreshTime)
+            {
+                _nextTargetRefreshTime = Time.time + TargetRefreshInterval;
+
+                if (_cachedPlayer == null || !_cachedPlayer.activeInHierarchy)
+                {
+                    _cachedPlayer = GameObject.FindGameObjectWithTag("Player");
+                    _cachedPlayerRenderer = _cachedPlayer != null
+                        ? _cachedPlayer.GetComponentInChildren<Renderer>()
+                        : null;
+                }
+
+                if (_cachedRv == null || !_cachedRv.gameObject.activeInHierarchy)
+                {
+                    _cachedRv = FindObjectOfType<RVSystem.RVController>();
+                }
+
+                if (_cachedRvStateMachine == null || !_cachedRvStateMachine.gameObject.activeInHierarchy)
+                {
+                    _cachedRvStateMachine = FindObjectOfType<RVSystem.RVStateMachine>();
+                }
+
+                if (_cachedCamera == null || !_cachedCamera.gameObject.activeInHierarchy)
+                {
+                    _cachedCamera = Camera.main;
+                }
+            }
+
+            trackingTarget = ResolveTrackingTarget();
+        }
+
+        private Transform ResolveTrackingTarget()
+        {
+            if (_cachedRvStateMachine != null &&
+                _cachedRvStateMachine.gameObject.activeInHierarchy &&
+                _cachedRvStateMachine.currentState == RVSystem.RVState.Active)
+            {
+                return _cachedRvStateMachine.transform;
+            }
+
+            if (_cachedPlayer != null && _cachedPlayer.activeInHierarchy)
+            {
+                if (_cachedRv != null &&
+                    _cachedRv.gameObject.activeInHierarchy &&
+                    _cachedPlayerRenderer != null &&
+                    !_cachedPlayerRenderer.enabled)
+                {
+                    return _cachedRv.transform;
+                }
+
+                return _cachedPlayer.transform;
+            }
+
+            if (_cachedRv != null && _cachedRv.gameObject.activeInHierarchy)
+            {
+                return _cachedRv.transform;
+            }
+
+            return _cachedCamera != null ? _cachedCamera.transform : null;
+        }
+
+        private void TryRefreshChunkSizeFromLoadedChunk()
+        {
+            foreach (var kv in ChunkRegistry.All)
+            {
+                DesertTerrainChunk activeChunk = kv.Value;
+                if (activeChunk == null || !activeChunk.gameObject.activeInHierarchy) continue;
+
+                chunkSizeX = activeChunk.width * activeChunk.cellSize;
+                chunkSizeZ = activeChunk.depth * activeChunk.cellSize;
+                return;
+            }
+        }
+
         private void UpdateGridChunks(int centerGridX, int centerGridZ)
         {
-            List<string> requiredList = new List<string>();
-
             int range = loadingRange;
             if (Application.platform == RuntimePlatform.WebGLPlayer)
             {
                 range = Mathf.Max(1, loadingRange - 1);
             }
 
-            // Create a list of offsets and sort by distance to center to load center first
-            List<Vector2Int> offsets = new List<Vector2Int>();
+            EnsureStreamingOffsets(range);
+
+            _requiredChunks.Clear();
+            for (int i = 0; i < _streamingOffsets.Count; i++)
+            {
+                Vector2Int offset = _streamingOffsets[i];
+                int gx = centerGridX + offset.x;
+                int gz = centerGridZ + offset.y;
+                string sceneName = $"{sceneNamePrefix}_{gx}_{gz}";
+                _requiredChunks.Add(sceneName);
+            }
+
+            int gridSizeDim = range * 2 + 1;
+            if (verboseLogging)
+            {
+                Debug.Log($"<color=#38bdf8><b>[WorldStreamer]</b></color> Grid updated. Center ({centerGridX}, {centerGridZ}). Loading {gridSizeDim}x{gridSizeDim} grid.");
+            }
+            RequestChunks(_requiredChunks);
+        }
+
+        private void EnsureStreamingOffsets(int range)
+        {
+            if (_cachedOffsetRange == range)
+                return;
+
+            _cachedOffsetRange = range;
+            _streamingOffsets.Clear();
+
             for (int dx = -range; dx <= range; dx++)
             {
                 for (int dz = -range; dz <= range; dz++)
                 {
-                    offsets.Add(new Vector2Int(dx, dz));
+                    _streamingOffsets.Add(new Vector2Int(dx, dz));
                 }
             }
 
-            // Sort by Euclidean distance squared (closest to center first)
-            offsets.Sort((a, b) => (a.x * a.x + a.y * a.y).CompareTo(b.x * b.x + b.y * b.y));
-
-            foreach (var offset in offsets)
-            {
-                int gx = centerGridX + offset.x;
-                int gz = centerGridZ + offset.y;
-                string sceneName = $"{sceneNamePrefix}_{gx}_{gz}";
-                requiredList.Add(sceneName);
-            }
-
-            int gridSizeDim = range * 2 + 1;
-            Debug.Log($"<color=#38bdf8><b>[WorldStreamer]</b></color> Grid updated! Center ({centerGridX}, {centerGridZ}). Loading {gridSizeDim}x{gridSizeDim} grid.");
-            RequestChunks(requiredList);
+            // Closest chunks are queued first so the playable area fills in before far edges.
+            _streamingOffsets.Sort((a, b) => (a.x * a.x + a.y * a.y).CompareTo(b.x * b.x + b.y * b.y));
         }
 
         public void RequestChunks(List<string> chunkSceneNames)
@@ -189,19 +267,70 @@ namespace EnvironmentSystem
                 LoadChunk(chunk);
             }
 
-            // Unload chunks that are no longer requested
-            List<string> chunksToUnload = new List<string>();
+            ReprioritizeLoadQueue(chunkSceneNames);
+
+            // Unload chunks that are no longer requested.
+            _chunksToUnload.Clear();
             foreach (var loaded in _loadedChunks)
             {
                 if (!_requestedChunks.Contains(loaded))
                 {
-                    chunksToUnload.Add(loaded);
+                    _chunksToUnload.Add(loaded);
                 }
             }
 
-            foreach (var chunk in chunksToUnload)
+            for (int i = 0; i < _chunksToUnload.Count; i++)
             {
-                UnloadChunk(chunk);
+                UnloadChunk(_chunksToUnload[i]);
+            }
+        }
+
+        private void ReprioritizeLoadQueue(List<string> priorityOrder)
+        {
+            if (_loadQueue.Count <= 1)
+            {
+                return;
+            }
+
+            _queuedChunkBuffer.Clear();
+            _queuedChunkBufferSet.Clear();
+            while (_loadQueue.Count > 0)
+            {
+                string chunkName = _loadQueue.Dequeue();
+                _queuedChunkBuffer.Add(chunkName);
+                _queuedChunkBufferSet.Add(chunkName);
+            }
+
+            _queuedChunks.Clear();
+            for (int i = 0; i < priorityOrder.Count; i++)
+            {
+                string chunkName = priorityOrder[i];
+                if (!_queuedChunkBufferSet.Contains(chunkName))
+                {
+                    continue;
+                }
+
+                _loadQueue.Enqueue(chunkName);
+                _queuedChunks.Add(chunkName);
+            }
+
+            for (int i = 0; i < _queuedChunkBuffer.Count; i++)
+            {
+                string chunkName = _queuedChunkBuffer[i];
+                if (_queuedChunks.Contains(chunkName))
+                {
+                    continue;
+                }
+
+                if (_requestedChunks.Contains(chunkName))
+                {
+                    _loadQueue.Enqueue(chunkName);
+                    _queuedChunks.Add(chunkName);
+                }
+                else
+                {
+                    _loadedChunks.Remove(chunkName);
+                }
             }
         }
 
@@ -216,23 +345,60 @@ namespace EnvironmentSystem
                 _unloadRoutines.Remove(chunkName);
             }
 
-            if (!_loadedChunks.Contains(chunkName) && !_loadQueue.Contains(chunkName))
+            if (!_loadedChunks.Contains(chunkName) && !_queuedChunks.Contains(chunkName))
             {
                 _loadedChunks.Add(chunkName);
                 // Throttle: enqueue, then drain up to MaxConcurrentLoads
                 _loadQueue.Enqueue(chunkName);
+                _queuedChunks.Add(chunkName);
                 DrainLoadQueue();
             }
         }
 
         private void DrainLoadQueue()
         {
-            while (_activeLoads < MaxConcurrentLoads && _loadQueue.Count > 0)
+            if (_drainLoadQueueRoutine != null)
+                return;
+
+            _drainLoadQueueRoutine = StartCoroutine(DrainLoadQueueAsync());
+        }
+
+        private IEnumerator DrainLoadQueueAsync()
+        {
+            while (_loadQueue.Count > 0)
             {
+                int loadLimit = Mathf.Max(1, maxConcurrentLoads);
+                if (_activeLoads >= loadLimit)
+                    break;
+
+                if (Time.time < _nextLoadStartTime)
+                {
+                    while (Time.time < _nextLoadStartTime)
+                    {
+                        yield return null;
+                    }
+                    continue;
+                }
+
                 string next = _loadQueue.Dequeue();
+                _queuedChunks.Remove(next);
+                if (!_requestedChunks.Contains(next))
+                {
+                    _loadedChunks.Remove(next);
+                    continue;
+                }
+
                 _activeLoads++;
+                _nextLoadStartTime = Time.time + loadStartInterval;
                 StartCoroutine(LoadSceneAsync(next));
+
+                if (loadStartInterval > 0f)
+                    yield return GetLoadStartWait();
+                else
+                    yield return null;
             }
+
+            _drainLoadQueueRoutine = null;
         }
 
         private void UnloadChunk(string chunkName)
@@ -245,6 +411,14 @@ namespace EnvironmentSystem
 
         private IEnumerator LoadSceneAsync(string sceneName)
         {
+            if (!_requestedChunks.Contains(sceneName))
+            {
+                _loadedChunks.Remove(sceneName);
+                _activeLoads = Mathf.Max(0, _activeLoads - 1);
+                DrainLoadQueue();
+                yield break;
+            }
+
             AsyncOperation asyncLoad = SceneManager.LoadSceneAsync(sceneName, LoadSceneMode.Additive);
             if (asyncLoad == null)
             {
@@ -255,12 +429,37 @@ namespace EnvironmentSystem
                 yield break;
             }
 
+            asyncLoad.allowSceneActivation = false;
+            while (asyncLoad.progress < 0.9f)
+            {
+                yield return null;
+            }
+
+            if (loadActivationInterval > 0f && Time.time < _nextLoadActivationTime)
+            {
+                while (Time.time < _nextLoadActivationTime)
+                {
+                    yield return null;
+                }
+            }
+
+            _nextLoadActivationTime = Time.time + loadActivationInterval;
             asyncLoad.allowSceneActivation = true;
             while (!asyncLoad.isDone)
             {
                 yield return null;
             }
-            Debug.Log($"[WorldStreamer] Loaded chunk: {sceneName}");
+
+            if (verboseLogging)
+            {
+                Debug.Log($"[WorldStreamer] Loaded chunk: {sceneName}");
+            }
+
+            if (!_requestedChunks.Contains(sceneName))
+            {
+                UnloadChunk(sceneName);
+            }
+
             _activeLoads = Mathf.Max(0, _activeLoads - 1);
             DrainLoadQueue();
         }
@@ -268,7 +467,7 @@ namespace EnvironmentSystem
         private IEnumerator UnloadSceneAsync(string sceneName)
         {
             // Wait a few seconds before actual unload to avoid thrashing
-            yield return new WaitForSeconds(unloadDelay);
+            yield return GetUnloadWait();
 
             // Double check if it got re-requested during the delay
             if (_requestedChunks.Contains(sceneName))
@@ -278,7 +477,13 @@ namespace EnvironmentSystem
             }
 
             AsyncOperation asyncUnload = SceneManager.UnloadSceneAsync(sceneName);
-            if (asyncUnload == null) yield break;
+            if (asyncUnload == null)
+            {
+                _loadedChunks.Remove(sceneName);
+                _unloadRoutines.Remove(sceneName);
+                DrainLoadQueue();
+                yield break;
+            }
 
             while (!asyncUnload.isDone)
             {
@@ -287,7 +492,34 @@ namespace EnvironmentSystem
 
             _loadedChunks.Remove(sceneName);
             _unloadRoutines.Remove(sceneName);
-            Debug.Log($"[WorldStreamer] Unloaded chunk: {sceneName}");
+            if (verboseLogging)
+            {
+                Debug.Log($"[WorldStreamer] Unloaded chunk: {sceneName}");
+            }
+        }
+
+        private WaitForSeconds GetLoadStartWait()
+        {
+            float interval = Mathf.Max(0f, loadStartInterval);
+            if (_cachedLoadStartWait == null || !Mathf.Approximately(_cachedLoadStartWaitInterval, interval))
+            {
+                _cachedLoadStartWaitInterval = interval;
+                _cachedLoadStartWait = new WaitForSeconds(interval);
+            }
+
+            return _cachedLoadStartWait;
+        }
+
+        private WaitForSeconds GetUnloadWait()
+        {
+            float delay = Mathf.Max(0f, unloadDelay);
+            if (_cachedUnloadWait == null || !Mathf.Approximately(_cachedUnloadWaitDelay, delay))
+            {
+                _cachedUnloadWaitDelay = delay;
+                _cachedUnloadWait = new WaitForSeconds(delay);
+            }
+
+            return _cachedUnloadWait;
         }
     }
 }

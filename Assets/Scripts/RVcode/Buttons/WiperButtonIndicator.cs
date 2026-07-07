@@ -8,13 +8,18 @@ public class WiperButtonIndicator : MonoBehaviour
 
     private Color inactiveEmissionColor = Color.black;
     private bool hasEmission;
+    private bool lastIsActive;
+    private bool hasAppliedVisual;
     private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
+    private static WiperControl[] s_cachedWiperControls;
+    private static float s_nextWiperControlCacheRefreshTime;
+    private const float WiperControlCacheRefreshInterval = 1f;
 
     private void Awake()
     {
         if (wiperControls == null || wiperControls.Length == 0)
         {
-            wiperControls = FindObjectsOfType<WiperControl>();
+            wiperControls = GetCachedWiperControls();
         }
 
         if (targetRenderer == null)
@@ -26,9 +31,62 @@ public class WiperButtonIndicator : MonoBehaviour
         UpdateVisual();
     }
 
-    private void Update()
+    private static WiperControl[] GetCachedWiperControls()
     {
+        if (s_cachedWiperControls != null && Time.time < s_nextWiperControlCacheRefreshTime)
+        {
+            return s_cachedWiperControls;
+        }
+
+        s_nextWiperControlCacheRefreshTime = Time.time + WiperControlCacheRefreshInterval;
+        s_cachedWiperControls = FindObjectsOfType<WiperControl>();
+        return s_cachedWiperControls;
+    }
+
+    private void OnEnable()
+    {
+        SubscribeToWipers();
         UpdateVisual();
+    }
+
+    private void OnDisable()
+    {
+        UnsubscribeFromWipers();
+    }
+
+    private void SubscribeToWipers()
+    {
+        if (wiperControls == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < wiperControls.Length; i++)
+        {
+            WiperControl control = wiperControls[i];
+            if (control != null)
+            {
+                control.OnModeChanged -= UpdateVisual;
+                control.OnModeChanged += UpdateVisual;
+            }
+        }
+    }
+
+    private void UnsubscribeFromWipers()
+    {
+        if (wiperControls == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < wiperControls.Length; i++)
+        {
+            WiperControl control = wiperControls[i];
+            if (control != null)
+            {
+                control.OnModeChanged -= UpdateVisual;
+            }
+        }
     }
 
     private void CacheEmissionColor()
@@ -63,6 +121,15 @@ public class WiperButtonIndicator : MonoBehaviour
                 break;
             }
         }
+
+        if (hasAppliedVisual && isActive == lastIsActive)
+        {
+            return;
+        }
+
+        hasAppliedVisual = true;
+        lastIsActive = isActive;
+
         Material mat = targetRenderer.material;
         if (isActive)
         {

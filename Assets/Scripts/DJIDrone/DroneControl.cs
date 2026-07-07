@@ -91,6 +91,8 @@ public class DroneControl : MonoBehaviour
     private float _holdTimer = 0f;
     private bool _hasSoul = false;
     private UnityEngine.UI.Slider _cachedSlider;
+    private bool _lastSliderActive;
+    private float _lastSliderProgress = -1f;
 
     private float _targetPropellerRotationSpeed = 0f;  // ────────────────────────────────────────────────────────────────────────
 
@@ -118,6 +120,8 @@ public class DroneControl : MonoBehaviour
     private float _noiseTimerZ;
 
     private readonly RaycastHit[] _altitudeHits = new RaycastHit[16];
+    private float _lastAppliedAudioVolume = -1f;
+    private float _lastAppliedAudioPitch = -1f;
 
     private bool _isInLandingState = true;
     private bool _isFlightControlCutoff = false; 
@@ -169,6 +173,8 @@ public class DroneControl : MonoBehaviour
             _audioSource.spatialBlend = 1.0f;   // 开启 3D 空间音效（声音从无人机位置发出）
             _audioSource.volume = maxVolume * 0.5f; // 初始给予基础音量
             _audioSource.pitch = 1.0f;
+            _lastAppliedAudioVolume = _audioSource.volume;
+            _lastAppliedAudioPitch = _audioSource.pitch;
             _audioSource.Play();               // Awake 时立刻开始播放
         }
         else
@@ -200,10 +206,20 @@ public class DroneControl : MonoBehaviour
         float speedRatio = Mathf.InverseLerp(basePropellerSpeed * 0.3f, maxPropellerSpeed, _currentPropellerRotationSpeed);
 
         // 1. 动态音量：转速快时声音大，断电摔落时声音变弱
-        _audioSource.volume = Mathf.Lerp(maxVolume * 0.3f, maxVolume, speedRatio);
+        float targetVolume = Mathf.Lerp(maxVolume * 0.3f, maxVolume, speedRatio);
+        if (Mathf.Abs(_lastAppliedAudioVolume - targetVolume) > 0.005f)
+        {
+            _audioSource.volume = targetVolume;
+            _lastAppliedAudioVolume = targetVolume;
+        }
 
         // 2. 动态音高：转速快时螺旋桨声音更尖锐高频
-        _audioSource.pitch = Mathf.Lerp(1.0f - pitchChangeRange, 1.0f + pitchChangeRange, speedRatio);
+        float targetPitch = Mathf.Lerp(1.0f - pitchChangeRange, 1.0f + pitchChangeRange, speedRatio);
+        if (Mathf.Abs(_lastAppliedAudioPitch - targetPitch) > 0.002f)
+        {
+            _audioSource.pitch = targetPitch;
+            _lastAppliedAudioPitch = targetPitch;
+        }
     }
 
     private void LateUpdate()
@@ -323,8 +339,20 @@ public class DroneControl : MonoBehaviour
 
     private void UpdateSlider(float progress, bool active)
     {
+        if (_cachedSlider != null && _lastSliderActive == active && Mathf.Approximately(_lastSliderProgress, progress))
+        {
+            return;
+        }
+
         if (_cachedSlider == null)
         {
+            if (!active)
+            {
+                _lastSliderActive = false;
+                _lastSliderProgress = progress;
+                return;
+            }
+
             UnityEngine.UI.Slider[] sliders = Resources.FindObjectsOfTypeAll<UnityEngine.UI.Slider>();
             foreach (UnityEngine.UI.Slider s in sliders)
             {
@@ -342,6 +370,9 @@ public class DroneControl : MonoBehaviour
             _cachedSlider.gameObject.SetActive(active);
             if (active) _cachedSlider.value = progress;
         }
+
+        _lastSliderActive = active;
+        _lastSliderProgress = progress;
     }
 
     private void GatherInputAndPhysics(float dt)

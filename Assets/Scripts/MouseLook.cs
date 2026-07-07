@@ -50,6 +50,7 @@ public class MouseLook : MonoBehaviour
         transform.SetParent(cameraHolder);
         transform.localPosition = Vector3.zero;
         transform.localRotation = Quaternion.identity;
+        InvalidateAppliedLookCache();
 
         _pitch = 0f;
         
@@ -74,6 +75,7 @@ public class MouseLook : MonoBehaviour
         {
             _yaw = player.eulerAngles.y;
         }
+        InvalidateAppliedLookCache();
     }
 
     /// <summary>
@@ -92,6 +94,7 @@ public void SetBaseRotation(Quaternion targetRotation)
     
     // 如果你的 MouseLook 是直接控制 transform 的：
     transform.rotation = targetRotation;
+    InvalidateAppliedLookCache();
     
     // 💡 记得同时重置你脚本内部用于累加鼠标输入的 pitch 和 yaw（或 lookAngles）变量！
     // 例如：
@@ -111,6 +114,16 @@ public void SetBaseRotation(Quaternion targetRotation)
     private bool _pendingStartCursorLock;
     private Rigidbody _playerRb;
     private float _yaw;
+    private float _lastAppliedPitch = float.NaN;
+    private float _lastAppliedYaw = float.NaN;
+    private int _inventoryModeCacheFrame = -1;
+    private bool _cachedInventoryModeActive;
+
+    private void InvalidateAppliedLookCache()
+    {
+        _lastAppliedPitch = float.NaN;
+        _lastAppliedYaw = float.NaN;
+    }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
     void Start()
@@ -203,22 +216,30 @@ public void SetBaseRotation(Quaternion targetRotation)
         
         if (!ShouldUseAttractOrbit())
         {
-            transform.localRotation = Quaternion.Euler(_pitch, 0f, 0f);
+            if (!Mathf.Approximately(_lastAppliedPitch, _pitch))
+            {
+                transform.localRotation = Quaternion.Euler(_pitch, 0f, 0f);
+                _lastAppliedPitch = _pitch;
+            }
         }
 
         // Horizontal yaw — rotates the player body so movement stays aligned with the view
         if (player != null)
         {
             _yaw += mouseX;
-            Quaternion targetRot = Quaternion.Euler(0f, _yaw, 0f);
-            if (_playerRb != null)
+            if (!Mathf.Approximately(_lastAppliedYaw, _yaw))
             {
-                _playerRb.rotation = targetRot;
-                // setting Rigidbody.rotation updates physics state immediately, preventing interpolation fighting
-            }
-            else
-            {
-                player.rotation = targetRot;
+                Quaternion targetRot = Quaternion.Euler(0f, _yaw, 0f);
+                if (_playerRb != null)
+                {
+                    _playerRb.rotation = targetRot;
+                    // setting Rigidbody.rotation updates physics state immediately, preventing interpolation fighting
+                }
+                else
+                {
+                    player.rotation = targetRot;
+                }
+                _lastAppliedYaw = _yaw;
             }
         }
     }
@@ -298,12 +319,14 @@ public void SetBaseRotation(Quaternion targetRotation)
         if (root == null || string.IsNullOrEmpty(childName))
             return null;
 
-        Transform[] all = root.GetComponentsInChildren<Transform>(true);
-        for (int i = 0; i < all.Length; i++)
+        if (root.name == childName)
+            return root;
+
+        for (int i = 0; i < root.childCount; i++)
         {
-            Transform t = all[i];
-            if (t != null && t.name == childName)
-                return t;
+            Transform match = FindChildByName(root.GetChild(i), childName);
+            if (match != null)
+                return match;
         }
 
         return null;
@@ -334,12 +357,18 @@ public void SetBaseRotation(Quaternion targetRotation)
 
     bool IsInventoryModeActive()
     {
+        int frame = Time.frameCount;
+        if (_inventoryModeCacheFrame == frame)
+            return _cachedInventoryModeActive;
+
         InventoryCameraController primary = InventoryCameraController.GetPrimaryController();
         if (primary != null)
             inventoryCameraController = primary;
         else if (inventoryCameraController == null)
             inventoryCameraController = FindObjectOfType<InventoryCameraController>();
 
-        return inventoryCameraController != null && inventoryCameraController.IsInventoryActive;
+        _cachedInventoryModeActive = inventoryCameraController != null && inventoryCameraController.IsInventoryActive;
+        _inventoryModeCacheFrame = frame;
+        return _cachedInventoryModeActive;
     }
 }

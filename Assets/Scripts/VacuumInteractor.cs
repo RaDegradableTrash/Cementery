@@ -7,19 +7,28 @@ public class VacuumInteractor : MonoBehaviour
     public float vacuumSpeed = 0.5f;
     public float maxDistance = 10f;
     public LayerMask terrainLayer = ~0; // Default hit everything
+    [SerializeField, Min(0.01f)] private float vacuumTickInterval = 0.05f;
+
+    private Transform _cachedTransform;
+    private float _nextVacuumTime;
+
+    private void Awake()
+    {
+        _cachedTransform = transform;
+    }
 
     private void Update()
     {
-        if (Input.GetMouseButton(0)) // Left click to vacuum
+        if (!Input.GetMouseButton(0) || Time.time < _nextVacuumTime)
+            return;
+
+        _nextVacuumTime = Time.time + Mathf.Max(0.01f, vacuumTickInterval);
+
+        Ray ray = new Ray(_cachedTransform.position, _cachedTransform.forward);
+        if (Physics.Raycast(ray, out RaycastHit hit, maxDistance, terrainLayer) &&
+            SnowAccumulationManager.Instance != null)
         {
-            Ray ray = new Ray(transform.position, transform.forward);
-            if (Physics.Raycast(ray, out RaycastHit hit, maxDistance, terrainLayer))
-            {
-                if (SnowAccumulationManager.Instance != null)
-                {
-                    SnowAccumulationManager.Instance.VacuumSnow(hit.point, interactionRadius, vacuumSpeed);
-                }
-            }
+            SnowAccumulationManager.Instance.VacuumSnow(hit.point, interactionRadius, vacuumSpeed);
         }
     }
 }
