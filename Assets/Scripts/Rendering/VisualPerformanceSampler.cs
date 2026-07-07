@@ -46,20 +46,18 @@ namespace Cementery.Rendering
             _mainThreadRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Internal, "Main Thread");
             _renderThreadRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Internal, "Render Thread");
 
+            EnsureSessionHeader();
+        }
+
+        private void EnsureSessionHeader()
+        {
             if (!File.Exists(_samplePath))
             {
                 File.WriteAllText(_samplePath, CsvHeader + "\n");
-            }
-            string firstLine;
-            using (StreamReader reader = File.OpenText(_samplePath))
-            {
-                firstLine = reader.ReadLine();
+                return;
             }
 
-            if (firstLine == null || !firstLine.Contains("time_of_day"))
-            {
-                File.AppendAllText(_samplePath, CsvHeader + "\n");
-            }
+            File.AppendAllText(_samplePath, CsvHeader + "\n");
         }
 
         private void OnDestroy()

@@ -101,7 +101,9 @@ namespace Cementery.Rendering.Editor
                 MaxFogEndDistance = -1f,
                 MaxAmbientIntensity = -1f
             };
-            for (int i = 1; i < lines.Length; i++)
+            int startLine = FindLatestHeaderLine(lines) + 1;
+            summary.SessionStartLine = startLine + 1;
+            for (int i = startLine; i < lines.Length; i++)
             {
                 if (string.IsNullOrWhiteSpace(lines[i]))
                     continue;
@@ -168,6 +170,18 @@ namespace Cementery.Rendering.Editor
             return summary;
         }
 
+        private static int FindLatestHeaderLine(string[] lines)
+        {
+            int headerLine = 0;
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (lines[i].StartsWith("time,scene,", StringComparison.Ordinal))
+                    headerLine = i;
+            }
+
+            return headerLine;
+        }
+
         private static string BuildReport(string samplePath, Summary summary)
         {
             StringBuilder builder = new StringBuilder(2048);
@@ -175,6 +189,7 @@ namespace Cementery.Rendering.Editor
             builder.AppendLine();
             builder.AppendLine($"Generated: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
             builder.AppendLine($"Source CSV: `{samplePath}`");
+            builder.AppendLine($"CSV session starts at data line: {summary.SessionStartLine}");
             builder.AppendLine();
 
             if (summary.SampleRows == 0)
@@ -262,10 +277,11 @@ namespace Cementery.Rendering.Editor
             AppendCheck(builder, "Frame timing stats enabled", Contains(projectSettings, "enableFrameTimingStats: 1"), ProjectSettingsPath, ref failures);
             AppendCheck(builder, "Gameplay post-processing is camera-gated", ContainsAll(bootstrapper, "renderPostProcessing = true", "targetTexture != null", "CameraRenderType.Base"), BootstrapperPath, ref failures);
             AppendCheck(builder, "Sampler writes frame-time CSV", ContainsAll(sampler, "visual-performance-samples.csv", "p95", "FrameTimingManager"), SamplerPath, ref failures);
+            AppendCheck(builder, "Sampler delimits each profiling session", ContainsAll(sampler, "EnsureSessionHeader", "File.AppendAllText(_samplePath, CsvHeader"), SamplerPath, ref failures);
             AppendCheck(builder, "Sampler records profiling counters", ContainsAll(sampler, "ProfilerRecorder", "GC Allocated In Frame", "Main Thread", "Render Thread"), SamplerPath, ref warnings, true);
             AppendCheck(builder, "Sampler records visual route state", ContainsAll(sampler, "time_of_day", "RenderSettings.fog", "ambientIntensity"), SamplerPath, ref failures);
             AppendCheck(builder, "Evidence route driver is available", ContainsAll(evidenceRouteDriver, "VisualEvidenceRouteDriver", "day clear", "night fog"), EvidenceRouteDriverPath, ref failures);
-            AppendCheck(builder, "Report gates visual evidence coverage", ContainsAll(sampler, "time_of_day") && ContainsAll(reportGenerator, "Day/night route coverage", "Fog route coverage", "MinimumEvidenceDurationSeconds"), ReportGeneratorPath, ref failures);
+            AppendCheck(builder, "Report gates latest-session visual evidence", ContainsAll(sampler, "time_of_day") && ContainsAll(reportGenerator, "FindLatestHeaderLine", "Day/night route coverage", "Fog route coverage", "MinimumEvidenceDurationSeconds"), ReportGeneratorPath, ref failures);
             AppendCheck(builder, "Color space is Linear", Contains(projectSettings, "m_ActiveColorSpace: 1"), ProjectSettingsPath, ref failures);
             AppendCheck(builder, "Lights use linear intensity", Contains(graphicsSettings, "m_LightsUseLinearIntensity: 1"), GraphicsSettingsPath, ref failures);
 
@@ -396,6 +412,7 @@ namespace Cementery.Rendering.Editor
         private struct Summary
         {
             public int SampleRows;
+            public int SessionStartLine;
             public string LastScene;
             public float FirstTimestamp;
             public float LastTimestamp;
