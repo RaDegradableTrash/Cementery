@@ -21,12 +21,21 @@ namespace EnvironmentSystem
         [Tooltip("How often (seconds) the visibility check runs. Higher = cheaper but less responsive.")]
         public float checkInterval = 0.4f;
 
+        [Tooltip("Maximum props checked per interval. Large holders are spread across multiple ticks.")]
+        [Min(8)] public int maxPropsCheckedPerTick = 256;
+
         // Cached list of all direct child renderers grouped by child index for batch toggling
         private Transform[] _props;
         private bool[] _visible;
+        private int _visibilityCursor;
+        private WaitForSeconds _visibilityWait;
+        private float _cachedCheckInterval = -1f;
 
         private Transform _playerTransform;
-        private float _checkTimer;
+        private RVSystem.RVController _cachedRv;
+        private Camera _cachedCamera;
+        private float _nextTargetSearchTime;
+        private const float TargetSearchInterval = 0.75f;
 
         // ── Lifecycle ─────────────────────────────────────────────────────────
 
@@ -48,6 +57,7 @@ namespace EnvironmentSystem
             int count = transform.childCount;
             _props = new Transform[count];
             _visible = new bool[count];
+            _visibilityCursor = 0;
 
             for (int i = 0; i < count; i++)
             {
@@ -58,26 +68,38 @@ namespace EnvironmentSystem
 
         private Transform FindPlayer()
         {
+            if (Time.time < _nextTargetSearchTime)
+                return null;
+
+            _nextTargetSearchTime = Time.time + TargetSearchInterval;
+
             // Priority: tagged Player → RV → Main Camera
             GameObject player = GameObject.FindGameObjectWithTag("Player");
             if (player != null && player.activeInHierarchy)
                 return player.transform;
 
-            var rv = FindObjectOfType<RVSystem.RVController>();
-            if (rv != null && rv.gameObject.activeInHierarchy)
-                return rv.transform;
+            if (_cachedRv == null || !_cachedRv.gameObject.activeInHierarchy)
+                _cachedRv = FindObjectOfType<RVSystem.RVController>();
 
-            return Camera.main != null ? Camera.main.transform : null;
+            if (_cachedRv != null && _cachedRv.gameObject.activeInHierarchy)
+                return _cachedRv.transform;
+
+            if (_cachedCamera == null || !_cachedCamera.gameObject.activeInHierarchy)
+                _cachedCamera = Camera.main;
+
+            return _cachedCamera != null ? _cachedCamera.transform : null;
         }
 
         private IEnumerator VisibilityLoop()
         {
             // Stagger startup across all managers to spread the load across frames
             yield return new WaitForSeconds(Random.Range(0f, checkInterval));
+            RefreshVisibilityWait();
 
             while (true)
             {
-                yield return new WaitForSeconds(checkInterval);
+                RefreshVisibilityWait();
+                yield return _visibilityWait;
 
                 // Re-find player lazily (handles RV/player switching)
                 if (_playerTransform == null || !_playerTransform.gameObject.activeInHierarchy)
@@ -85,37 +107,57 @@ namespace EnvironmentSystem
 
                 if (_playerTransform == null || _props == null) continue;
 
-                Vector3 playerXZ = new Vector3(_playerTransform.position.x, 0f, _playerTransform.position.z);
+                Vector3 playerPos = _playerTransform.position;
 
-                float showDist = visibilityRadius;
+                float showDistSq = visibilityRadius * visibilityRadius;
                 float hideDist = visibilityRadius + hysteresis;
+                float hideDistSq = hideDist * hideDist;
 
-                for (int i = 0; i < _props.Length; i++)
+                int propCount = _props.Length;
+                int checksThisTick = Mathf.Min(Mathf.Max(8, maxPropsCheckedPerTick), propCount);
+                for (int i = 0; i < checksThisTick; i++)
                 {
-                    if (_props[i] == null) continue;
+                    if (_visibilityCursor >= propCount)
+                        _visibilityCursor = 0;
 
-                    Vector3 propXZ = new Vector3(_props[i].position.x, 0f, _props[i].position.z);
-                    float dist = Vector3.Distance(playerXZ, propXZ);
+                    int propIndex = _visibilityCursor++;
+                    Transform prop = _props[propIndex];
+                    if (prop == null) continue;
 
-                    if (_visible[i])
+                    Vector3 propPos = prop.position;
+                    float dx = playerPos.x - propPos.x;
+                    float dz = playerPos.z - propPos.z;
+                    float distSq = dx * dx + dz * dz;
+
+                    if (_visible[propIndex])
                     {
                         // Currently visible → hide if beyond hide threshold
-                        if (dist > hideDist)
+                        if (distSq > hideDistSq)
                         {
-                            _props[i].gameObject.SetActive(false);
-                            _visible[i] = false;
+                            prop.gameObject.SetActive(false);
+                            _visible[propIndex] = false;
                         }
                     }
                     else
                     {
                         // Currently hidden → show if within show threshold
-                        if (dist <= showDist)
+                        if (distSq <= showDistSq)
                         {
-                            _props[i].gameObject.SetActive(true);
-                            _visible[i] = true;
+                            prop.gameObject.SetActive(true);
+                            _visible[propIndex] = true;
                         }
                     }
                 }
+            }
+        }
+
+        private void RefreshVisibilityWait()
+        {
+            float interval = Mathf.Max(0.05f, checkInterval);
+            if (_visibilityWait == null || !Mathf.Approximately(_cachedCheckInterval, interval))
+            {
+                _cachedCheckInterval = interval;
+                _visibilityWait = new WaitForSeconds(interval);
             }
         }
 

@@ -45,10 +45,19 @@ namespace EnvironmentSystem
 
         [Tooltip("Extra pass: hidden objects that are within range get re-checked this many " +
                  "times per frame to reduce re-appearance latency. Keep <= objectsCheckedPerFrame.")]
-        public int hiddenObjectFastRecheck = 200;
+        public int hiddenObjectFastRecheck = 80;
+
+        [Tooltip("Minimum seconds between expensive full visibility sweeps triggered by sharp camera turns.")]
+        public float fullSweepCooldown = 0.35f;
+
+        [Tooltip("Maximum objects processed per frame during a camera-turn visibility sweep.")]
+        public int fullSweepObjectsPerFrame = 750;
 
         [Tooltip("Delay (frames) after a scene loads before scanning it, to let Awake/Start settle.")]
         public int scanDelayFrames = 3;
+
+        [Tooltip("Maximum scene roots to scan per frame after a chunk scene loads.")]
+        public int scanRootsPerFrame = 32;
 
         [Header("Debug")]
         [Tooltip("Log scan results to the Console.")]
@@ -57,8 +66,11 @@ namespace EnvironmentSystem
         // ── Internal state ─────────────────────────────────────────────────────
 
         private readonly List<OptimizableObject> _managedObjects   = new List<OptimizableObject>(512);
+        private readonly Dictionary<OptimizableObject, int> _managedObjectIndex = new Dictionary<OptimizableObject, int>(512);
         // Separate bucket of objects that are currently hidden but within load range — checked first.
         private readonly List<OptimizableObject> _hiddenNearby     = new List<OptimizableObject>(128);
+        private readonly HashSet<OptimizableObject> _hiddenNearbySet = new HashSet<OptimizableObject>();
+        private readonly List<Rigidbody> _rigidbodyBuffer = new List<Rigidbody>(64);
         private int _currentIndex = 0;
 
         private Camera    _mainCamera;
@@ -66,6 +78,27 @@ namespace EnvironmentSystem
         private readonly Plane[] _frustumPlanes = new Plane[6];
 
         private Quaternion _lastCamRot;
+        private Vector3 _lastFrustumPosition;
+        private Quaternion _lastFrustumRotation;
+        private float _lastFrustumFieldOfView = -1f;
+        private float _lastFrustumAspect = -1f;
+        private float _lastFrustumNearClip = -1f;
+        private float _lastFrustumFarClip = -1f;
+        private bool _hasFrustumSample;
+        private float _nextFullSweepTime;
+        private Coroutine _fullSweepRoutine;
+        private float _cachedDefaultVisibilityRadius = -1f;
+        private float _cachedHysteresis = -1f;
+        private float _cachedShowDistSq;
+        private float _cachedHideDistSq;
+        private float _cachedNeverFrustumCullRadius = -1f;
+        private float _cachedNeverCullSq;
+        private float _cachedFullSweepCooldownSource = -1f;
+        private float _cachedFullSweepCooldown = 0.05f;
+        private int _cachedFullSweepObjectsPerFrameSource = int.MinValue;
+        private int _cachedFullSweepObjectsPerFrame = 64;
+        private int _cachedScanRootsPerFrameSource = int.MinValue;
+        private int _cachedScanRootsPerFrame = 1;
 
         // Name of the scene this BetterGameplayManager lives in — objects here are NEVER managed.
         private string _ownSceneName;
@@ -93,12 +126,15 @@ namespace EnvironmentSystem
         {
             SceneManager.sceneLoaded   -= OnSceneLoaded;
             SceneManager.sceneUnloaded -= OnSceneUnloaded;
+            if (_fullSweepRoutine != null)
+            {
+                StopCoroutine(_fullSweepRoutine);
+                _fullSweepRoutine = null;
+            }
         }
 
         private void Start()
         {
-            var go = new GameObject("DebugPhysics");
-            go.AddComponent<DebugPhysicsState>();
             FindPlayerAndCamera();
 
             // Freeze ALL Rigidbodies in every already-loaded scene immediately (frame 0),
@@ -147,8 +183,13 @@ namespace EnvironmentSystem
             foreach (GameObject root in scene.GetRootGameObjects())
             {
                 if (ShouldSkipRoot(root)) continue;
-                foreach (Rigidbody rb in root.GetComponentsInChildren<Rigidbody>(true))
+                _rigidbodyBuffer.Clear();
+                root.GetComponentsInChildren<Rigidbody>(true, _rigidbodyBuffer);
+                for (int i = 0; i < _rigidbodyBuffer.Count; i++)
                 {
+                    Rigidbody rb = _rigidbodyBuffer[i];
+                    if (rb == null) continue;
+
                     rb.isKinematic = true;
                     rb.useGravity  = false;
                     rb.velocity        = Vector3.zero;
@@ -162,19 +203,20 @@ namespace EnvironmentSystem
             if (_mainCamera == null || !_mainCamera.gameObject.activeInHierarchy || !_mainCamera.enabled)
             {
                 _mainCamera = Camera.main;
+                _hasFrustumSample = false;
             }
 
             if (_mainCamera != null)
             {
-                // Recalculate frustum planes every frame (critical — without this objects stay hidden forever).
-                GeometryUtility.CalculateFrustumPlanes(_mainCamera, _frustumPlanes);
+                RefreshFrustumPlanesIfNeeded();
 
                 // On a significant rotation, do a full sweep immediately to avoid edge-popping.
                 float rotDelta = Quaternion.Angle(_mainCamera.transform.rotation, _lastCamRot);
-                if (rotDelta > 8f)
+                if (rotDelta > 8f && Time.time >= _nextFullSweepTime)
                 {
                     _lastCamRot = _mainCamera.transform.rotation;
-                    DoFullVisibilitySweep();
+                    _nextFullSweepTime = Time.time + GetFullSweepCooldown();
+                    StartBudgetedFullVisibilitySweep();
                     return;
                 }
                 _lastCamRot = _mainCamera.transform.rotation;
@@ -191,31 +233,48 @@ namespace EnvironmentSystem
 
         // ── Visibility passes ──────────────────────────────────────────────────
 
-        /// <summary>
-        /// Full sweep of every managed object. Called when the camera rotates sharply.
-        /// </summary>
-        private void DoFullVisibilitySweep()
+        private void StartBudgetedFullVisibilitySweep()
         {
-            if (_managedObjects.Count == 0) return;
+            if (_fullSweepRoutine != null)
+                return;
 
-            Vector3 playerPos     = PlayerPos();
-            float   showDistSq    = defaultVisibilityRadius * defaultVisibilityRadius;
-            float   hideDistSq    = (defaultVisibilityRadius + hysteresis) * (defaultVisibilityRadius + hysteresis);
-            float   neverCullSq   = neverFrustumCullRadius * neverFrustumCullRadius;
+            _fullSweepRoutine = StartCoroutine(BudgetedFullVisibilitySweep());
+        }
 
+        private IEnumerator BudgetedFullVisibilitySweep()
+        {
             _hiddenNearby.Clear();
+            _hiddenNearbySet.Clear();
 
-            for (int i = _managedObjects.Count - 1; i >= 0; i--)
+            int budget = GetFullSweepObjectsPerFrame();
+            int index = 0;
+            while (index < _managedObjects.Count)
             {
-                OptimizableObject obj = _managedObjects[i];
-                if (obj == null || obj.isDestroyed) { _managedObjects.RemoveAt(i); continue; }
-                ProcessObject(obj, playerPos, showDistSq, hideDistSq, neverCullSq);
+                Vector3 playerPos = PlayerPos();
+                GetVisibilityDistanceSquares(out float showDistSq, out float hideDistSq, out float neverCullSq);
+
+                int processed = 0;
+                while (index < _managedObjects.Count && processed < budget)
+                {
+                    OptimizableObject obj = _managedObjects[index];
+                    if (obj == null || obj.isDestroyed)
+                    {
+                        RemoveManagedAt(index);
+                        continue;
+                    }
+
+                    ProcessObject(obj, playerPos, showDistSq, hideDistSq, neverCullSq);
+                    index++;
+                    processed++;
+                }
+
+                if (index < _managedObjects.Count)
+                    yield return null;
             }
 
-            // Rebuild the hidden-nearby bucket after the full sweep.
-            RebuildHiddenNearbyBucket(playerPos, showDistSq);
-
-            _currentIndex = 0; // Reset incremental pointer after a full sweep.
+            RebuildHiddenNearbyBucket(PlayerPos());
+            _currentIndex = 0;
+            _fullSweepRoutine = null;
         }
 
         /// <summary>
@@ -227,18 +286,16 @@ namespace EnvironmentSystem
             if (_hiddenNearby.Count == 0) return;
 
             Vector3 playerPos   = PlayerPos();
-            float   showDistSq  = defaultVisibilityRadius * defaultVisibilityRadius;
-            float   hideDistSq  = (defaultVisibilityRadius + hysteresis) * (defaultVisibilityRadius + hysteresis);
-            float   neverCullSq = neverFrustumCullRadius * neverFrustumCullRadius;
+            GetVisibilityDistanceSquares(out float showDistSq, out float hideDistSq, out float neverCullSq);
 
-            int limit = Mathf.Min(hiddenObjectFastRecheck, _hiddenNearby.Count);
+            int limit = Mathf.Min(hiddenObjectFastRecheck, objectsCheckedPerFrame, _hiddenNearby.Count);
 
             for (int i = _hiddenNearby.Count - 1; i >= 0 && limit > 0; i--, limit--)
             {
                 OptimizableObject obj = _hiddenNearby[i];
                 if (obj == null || obj.isDestroyed || !obj.isHiddenByManager)
                 {
-                    _hiddenNearby.RemoveAt(i);
+                    RemoveHiddenNearbyAt(i);
                     continue;
                 }
 
@@ -246,7 +303,7 @@ namespace EnvironmentSystem
                 if (sqrDist > hideDistSq)
                 {
                     // Moved out of range — remove from bucket.
-                    _hiddenNearby.RemoveAt(i);
+                    RemoveHiddenNearbyAt(i);
                     continue;
                 }
 
@@ -255,7 +312,7 @@ namespace EnvironmentSystem
 
                 // If ProcessObject made it visible, remove from bucket.
                 if (!obj.isHiddenByManager)
-                    _hiddenNearby.RemoveAt(i);
+                    RemoveHiddenNearbyAt(i);
             }
         }
 
@@ -267,9 +324,7 @@ namespace EnvironmentSystem
             if (_managedObjects.Count == 0) return;
 
             Vector3 playerPos   = PlayerPos();
-            float   showDistSq  = defaultVisibilityRadius * defaultVisibilityRadius;
-            float   hideDistSq  = (defaultVisibilityRadius + hysteresis) * (defaultVisibilityRadius + hysteresis);
-            float   neverCullSq = neverFrustumCullRadius * neverFrustumCullRadius;
+            GetVisibilityDistanceSquares(out float showDistSq, out float hideDistSq, out float neverCullSq);
 
             for (int i = 0; i < limit; i++)
             {
@@ -278,7 +333,7 @@ namespace EnvironmentSystem
                 OptimizableObject obj = _managedObjects[_currentIndex];
                 if (obj == null || obj.isDestroyed)
                 {
-                    _managedObjects.RemoveAt(_currentIndex);
+                    RemoveManagedAt(_currentIndex);
                     continue;
                 }
 
@@ -289,8 +344,8 @@ namespace EnvironmentSystem
                 if (!wasHidden && obj.isHiddenByManager)
                 {
                     float sqrDist = (obj.CachedPosition - playerPos).sqrMagnitude;
-                    if (sqrDist <= hideDistSq && !_hiddenNearby.Contains(obj))
-                        _hiddenNearby.Add(obj);
+                    if (sqrDist <= hideDistSq)
+                        AddHiddenNearby(obj);
                 }
 
                 _currentIndex++;
@@ -366,17 +421,155 @@ namespace EnvironmentSystem
             return true;
         }
 
-        private void RebuildHiddenNearbyBucket(Vector3 playerPos, float showDistSq)
+        private void RefreshFrustumPlanesIfNeeded()
+        {
+            Transform cameraTransform = _mainCamera.transform;
+            Vector3 position = cameraTransform.position;
+            Quaternion rotation = cameraTransform.rotation;
+            float fieldOfView = _mainCamera.fieldOfView;
+            float aspect = _mainCamera.aspect;
+            float nearClip = _mainCamera.nearClipPlane;
+            float farClip = _mainCamera.farClipPlane;
+
+            if (_hasFrustumSample
+                && position == _lastFrustumPosition
+                && rotation == _lastFrustumRotation
+                && Mathf.Approximately(fieldOfView, _lastFrustumFieldOfView)
+                && Mathf.Approximately(aspect, _lastFrustumAspect)
+                && Mathf.Approximately(nearClip, _lastFrustumNearClip)
+                && Mathf.Approximately(farClip, _lastFrustumFarClip))
+            {
+                return;
+            }
+
+            GeometryUtility.CalculateFrustumPlanes(_mainCamera, _frustumPlanes);
+            _lastFrustumPosition = position;
+            _lastFrustumRotation = rotation;
+            _lastFrustumFieldOfView = fieldOfView;
+            _lastFrustumAspect = aspect;
+            _lastFrustumNearClip = nearClip;
+            _lastFrustumFarClip = farClip;
+            _hasFrustumSample = true;
+        }
+
+        private void GetVisibilityDistanceSquares(out float showDistSq, out float hideDistSq, out float neverCullSq)
+        {
+            RefreshVisibilityDistanceCache();
+            showDistSq = _cachedShowDistSq;
+            hideDistSq = _cachedHideDistSq;
+            neverCullSq = GetNeverCullSq();
+        }
+
+        private float GetHideDistSq()
+        {
+            RefreshVisibilityDistanceCache();
+            return _cachedHideDistSq;
+        }
+
+        private float GetNeverCullSq()
+        {
+            if (!Mathf.Approximately(_cachedNeverFrustumCullRadius, neverFrustumCullRadius))
+            {
+                _cachedNeverFrustumCullRadius = neverFrustumCullRadius;
+                _cachedNeverCullSq = neverFrustumCullRadius * neverFrustumCullRadius;
+            }
+
+            return _cachedNeverCullSq;
+        }
+
+        private void RefreshVisibilityDistanceCache()
+        {
+            if (Mathf.Approximately(_cachedDefaultVisibilityRadius, defaultVisibilityRadius) &&
+                Mathf.Approximately(_cachedHysteresis, hysteresis))
+            {
+                return;
+            }
+
+            _cachedDefaultVisibilityRadius = defaultVisibilityRadius;
+            _cachedHysteresis = hysteresis;
+            _cachedShowDistSq = defaultVisibilityRadius * defaultVisibilityRadius;
+            float hideDistance = defaultVisibilityRadius + hysteresis;
+            _cachedHideDistSq = hideDistance * hideDistance;
+        }
+
+        private float GetFullSweepCooldown()
+        {
+            if (!Mathf.Approximately(_cachedFullSweepCooldownSource, fullSweepCooldown))
+            {
+                _cachedFullSweepCooldownSource = fullSweepCooldown;
+                _cachedFullSweepCooldown = Mathf.Max(0.05f, fullSweepCooldown);
+            }
+
+            return _cachedFullSweepCooldown;
+        }
+
+        private int GetFullSweepObjectsPerFrame()
+        {
+            if (_cachedFullSweepObjectsPerFrameSource != fullSweepObjectsPerFrame)
+            {
+                _cachedFullSweepObjectsPerFrameSource = fullSweepObjectsPerFrame;
+                _cachedFullSweepObjectsPerFrame = Mathf.Max(64, fullSweepObjectsPerFrame);
+            }
+
+            return _cachedFullSweepObjectsPerFrame;
+        }
+
+        private int GetScanRootsPerFrame()
+        {
+            if (_cachedScanRootsPerFrameSource != scanRootsPerFrame)
+            {
+                _cachedScanRootsPerFrameSource = scanRootsPerFrame;
+                _cachedScanRootsPerFrame = Mathf.Max(1, scanRootsPerFrame);
+            }
+
+            return _cachedScanRootsPerFrame;
+        }
+
+        private void RebuildHiddenNearbyBucket(Vector3 playerPos)
         {
             _hiddenNearby.Clear();
-            float hideDistSq = (defaultVisibilityRadius + hysteresis) * (defaultVisibilityRadius + hysteresis);
+            _hiddenNearbySet.Clear();
+            float hideDistSq = GetHideDistSq();
             foreach (var obj in _managedObjects)
             {
                 if (obj == null || !obj.isHiddenByManager) continue;
                 float sqrDist = (obj.CachedPosition - playerPos).sqrMagnitude;
                 if (sqrDist <= hideDistSq)
-                    _hiddenNearby.Add(obj);
+                    AddHiddenNearby(obj);
             }
+        }
+
+        private void AddHiddenNearby(OptimizableObject obj)
+        {
+            if (obj != null && _hiddenNearbySet.Add(obj))
+                _hiddenNearby.Add(obj);
+        }
+
+        private void RemoveHiddenNearbyAt(int index)
+        {
+            OptimizableObject obj = _hiddenNearby[index];
+            if (obj != null)
+                _hiddenNearbySet.Remove(obj);
+
+            int lastIndex = _hiddenNearby.Count - 1;
+            if (index != lastIndex)
+            {
+                _hiddenNearby[index] = _hiddenNearby[lastIndex];
+            }
+
+            _hiddenNearby.RemoveAt(lastIndex);
+        }
+
+        private void RemoveHiddenNearby(OptimizableObject obj)
+        {
+            if (obj == null || !_hiddenNearbySet.Contains(obj))
+                return;
+
+            int index = _hiddenNearby.IndexOf(obj);
+            if (index >= 0)
+                RemoveHiddenNearbyAt(index);
+            else
+                _hiddenNearbySet.Remove(obj);
         }
 
         // ── Scene event handlers ───────────────────────────────────────────────
@@ -395,8 +588,8 @@ namespace EnvironmentSystem
 
         private void OnSceneUnloaded(Scene scene)
         {
-            _managedObjects.RemoveAll(o => o == null || o.isDestroyed);
-            _hiddenNearby.RemoveAll(o => o == null || o.isDestroyed);
+            RebuildManagedObjectIndex();
+            RebuildHiddenNearbySet();
             if (_currentIndex >= _managedObjects.Count) _currentIndex = 0;
         }
 
@@ -404,21 +597,76 @@ namespace EnvironmentSystem
 
         public void Register(OptimizableObject obj)
         {
-            if (!_managedObjects.Contains(obj))
-                _managedObjects.Add(obj);
+            if (obj == null || _managedObjectIndex.ContainsKey(obj))
+                return;
+
+            _managedObjectIndex[obj] = _managedObjects.Count;
+            _managedObjects.Add(obj);
         }
 
         public void Unregister(OptimizableObject obj)
         {
-            _hiddenNearby.Remove(obj);
+            RemoveHiddenNearby(obj);
+            if (obj == null || !_managedObjectIndex.TryGetValue(obj, out int index))
+                return;
 
-            int index = _managedObjects.IndexOf(obj);
-            if (index == -1) return;
+            RemoveManagedAt(index);
+        }
 
-            _managedObjects.RemoveAt(index);
+        private void RemoveManagedAt(int index)
+        {
+            OptimizableObject obj = _managedObjects[index];
+            if (obj != null)
+                _managedObjectIndex.Remove(obj);
 
-            if (index < _currentIndex) _currentIndex--;
-            if (_currentIndex >= _managedObjects.Count) _currentIndex = 0;
+            int lastIndex = _managedObjects.Count - 1;
+            if (index != lastIndex)
+            {
+                OptimizableObject movedObj = _managedObjects[lastIndex];
+                _managedObjects[index] = movedObj;
+                if (movedObj != null)
+                    _managedObjectIndex[movedObj] = index;
+            }
+
+            _managedObjects.RemoveAt(lastIndex);
+
+            if (index < _currentIndex)
+                _currentIndex--;
+
+            if (_currentIndex >= _managedObjects.Count)
+                _currentIndex = 0;
+        }
+
+        private void RebuildManagedObjectIndex()
+        {
+            _managedObjectIndex.Clear();
+            for (int i = _managedObjects.Count - 1; i >= 0; i--)
+            {
+                OptimizableObject obj = _managedObjects[i];
+                if (obj == null || obj.isDestroyed)
+                {
+                    RemoveManagedAt(i);
+                    continue;
+                }
+
+                _managedObjectIndex[obj] = i;
+            }
+        }
+
+        private void RebuildHiddenNearbySet()
+        {
+            _hiddenNearbySet.Clear();
+            for (int i = _hiddenNearby.Count - 1; i >= 0; i--)
+            {
+                OptimizableObject obj = _hiddenNearby[i];
+                if (obj == null || obj.isDestroyed)
+                {
+                    RemoveHiddenNearbyAt(i);
+                    continue;
+                }
+
+                _hiddenNearbySet.Add(obj);
+            }
         }
 
         // ── Auto-scanning ──────────────────────────────────────────────────────
@@ -429,20 +677,25 @@ namespace EnvironmentSystem
                 yield return null;
 
             if (!scene.isLoaded) yield break;
-            ScanScene(scene);
-        }
-
-        private void ScanScene(Scene scene)
-        {
-            if (!scene.isLoaded) return;
 
             GameObject[] roots = scene.GetRootGameObjects();
             int added = 0;
+            int budget = GetScanRootsPerFrame();
+            int processedThisFrame = 0;
 
             foreach (GameObject root in roots)
             {
-                if (ShouldSkipRoot(root)) continue;
-                added += EnsureOptimizableRecursive(root);
+                if (!scene.isLoaded) yield break;
+
+                if (!ShouldSkipRoot(root))
+                    added += EnsureOptimizableRecursive(root);
+
+                processedThisFrame++;
+                if (processedThisFrame >= budget)
+                {
+                    processedThisFrame = 0;
+                    yield return null;
+                }
             }
 
             if (verboseLogging)

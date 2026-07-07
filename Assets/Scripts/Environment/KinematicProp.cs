@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace EnvironmentSystem
@@ -18,6 +19,8 @@ namespace EnvironmentSystem
 
         private Rigidbody _rb;
         private bool _awoken = false;
+        private const int MaxTerrainColliderCacheSize = 1024;
+        private static readonly Dictionary<int, bool> TerrainColliderCache = new Dictionary<int, bool>(256);
 
         private void Awake()
         {
@@ -30,10 +33,19 @@ namespace EnvironmentSystem
         public void Sleep()
         {
             if (_rb == null) return;
-            _rb.isKinematic     = true;
-            _rb.useGravity      = false;
-            _rb.velocity        = Vector3.zero;
-            _rb.angularVelocity = Vector3.zero;
+
+            if (!_rb.isKinematic)
+            {
+                _rb.velocity = Vector3.zero;
+                _rb.angularVelocity = Vector3.zero;
+                _rb.isKinematic = true;
+            }
+
+            if (_rb.useGravity)
+            {
+                _rb.useGravity = false;
+            }
+
             _awoken = false;
         }
 
@@ -43,17 +55,6 @@ namespace EnvironmentSystem
             _awoken         = true;
             _rb.isKinematic = false;
             _rb.useGravity  = true;
-        }
-
-        private void FixedUpdate()
-        {
-            if (!_awoken && _rb != null)
-            {
-                _rb.isKinematic = true;
-                _rb.useGravity = false;
-                _rb.velocity = Vector3.zero;
-                _rb.angularVelocity = Vector3.zero;
-            }
         }
 
         // ── Collision handling ─────────────────────────────────────────────────
@@ -86,6 +87,20 @@ namespace EnvironmentSystem
         {
             if (col == null) return true;   // treat null as ground (safe default)
 
+            int cacheKey = col.GetInstanceID();
+            if (TerrainColliderCache.TryGetValue(cacheKey, out bool cachedResult))
+                return cachedResult;
+
+            bool isTerrain = ComputeIsTerrainCollider(col);
+            if (TerrainColliderCache.Count >= MaxTerrainColliderCacheSize)
+                TerrainColliderCache.Clear();
+
+            TerrainColliderCache[cacheKey] = isTerrain;
+            return isTerrain;
+        }
+
+        private static bool ComputeIsTerrainCollider(Collider col)
+        {
             // Unity built-in height-map terrain.
             if (col.GetComponent<TerrainCollider>() != null) return true;
 

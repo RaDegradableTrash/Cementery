@@ -1,28 +1,21 @@
+using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
 
 [DefaultExecutionOrder(-100)] // 重点：让这个脚本比你同学的破脚本更早执行！
 public class ForceShowUI : MonoBehaviour
 {
-
-    private int counter = 0; // 计数器，记录强制显示的次数
     private void Awake()
     {
         ForceShowEverything();
+        StartCoroutine(ForceShowNextFrame());
     }
 
-    private void Update()
+    private IEnumerator ForceShowNextFrame()
     {
-        if(counter < 1) // 最多尝试强制显示1次，防止死循环
-        {
-            ForceShowEverything();
-            counter++;
-        }
-        else
-        {
-            Debug.LogWarning($"[{gameObject.name}] 已经尝试强制显示 {counter} 次了，停止继续尝试了。");
-            this.enabled = false;
-        }
+        yield return null;
+        ForceShowEverything();
+        enabled = false;
     }
 
     /// <summary>

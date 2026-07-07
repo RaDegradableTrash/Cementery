@@ -14,6 +14,15 @@ public class CinematicFilterController : MonoBehaviour
 
     private Color _tealShadows;
     private Color _orangeMidtones;
+    private float _lastAppliedIntensity = -1f;
+    private FilmGrain _filmGrain;
+    private ShadowsMidtonesHighlights _shadowsMidtonesHighlights;
+    private LiftGammaGain _liftGammaGain;
+    private Bloom _bloom;
+    private bool _hasFilmGrain;
+    private bool _hasShadowsMidtonesHighlights;
+    private bool _hasLiftGammaGain;
+    private bool _hasBloom;
 
     void Start()
     {
@@ -32,11 +41,9 @@ public class CinematicFilterController : MonoBehaviour
         // Parse hex colors for Teal & Orange grading
         ColorUtility.TryParseHtmlString("#1be2adff", out _tealShadows);
         ColorUtility.TryParseHtmlString("#f78c29ff", out _orangeMidtones);
-    }
-
-    void Update()
-    {
-        SetCinematicLook();
+        CacheProfileComponents();
+        SetCinematicLook(true);
+        enabled = false;
     }
 
     /// <summary>
@@ -45,70 +52,89 @@ public class CinematicFilterController : MonoBehaviour
     /// </summary>
     public void SetCinematicLook()
     {
+        SetCinematicLook(true);
+        enabled = false;
+    }
+
+    private void CacheProfileComponents()
+    {
+        _hasFilmGrain = _profile.TryGet(out _filmGrain);
+        _hasShadowsMidtonesHighlights = _profile.TryGet(out _shadowsMidtonesHighlights);
+        _hasLiftGammaGain = _profile.TryGet(out _liftGammaGain);
+        _hasBloom = _profile.TryGet(out _bloom);
+    }
+
+    private void SetCinematicLook(bool force)
+    {
         if (_profile == null) return;
+        float clampedIntensity = Mathf.Clamp01(filterIntensity);
+        if (!force && Mathf.Abs(clampedIntensity - _lastAppliedIntensity) < 0.001f)
+            return;
+
+        _lastAppliedIntensity = clampedIntensity;
 
         // 1. Film Grain
-        if (_profile.TryGet(out FilmGrain grain))
+        if (_hasFilmGrain)
         {
-            grain.intensity.overrideState = true;
+            _filmGrain.intensity.overrideState = true;
             // Medium intensity (0.3)
-            grain.intensity.value = Mathf.Lerp(0f, 0.3f, filterIntensity);
+            _filmGrain.intensity.value = Mathf.Lerp(0f, 0.3f, clampedIntensity);
             
-            grain.response.overrideState = true;
+            _filmGrain.response.overrideState = true;
             // Lower response means visible mostly in darker areas/midtones
-            grain.response.value = Mathf.Lerp(0.8f, 0.5f, filterIntensity); 
+            _filmGrain.response.value = Mathf.Lerp(0.8f, 0.5f, clampedIntensity);
         }
 
         // 2. Teal & Orange Grade
-        if (_profile.TryGet(out ShadowsMidtonesHighlights smh))
+        if (_hasShadowsMidtonesHighlights)
         {
-            smh.shadows.overrideState = true;
+            _shadowsMidtonesHighlights.shadows.overrideState = true;
             // Shadows to Teal
             Vector4 baseShadows = new Vector4(1f, 1f, 1f, 0f);
             Vector4 targetShadows = new Vector4(_tealShadows.r, _tealShadows.g, _tealShadows.b, 0f);
-            smh.shadows.value = Vector4.Lerp(baseShadows, targetShadows, filterIntensity);
+            _shadowsMidtonesHighlights.shadows.value = Vector4.Lerp(baseShadows, targetShadows, clampedIntensity);
 
-            smh.midtones.overrideState = true;
+            _shadowsMidtonesHighlights.midtones.overrideState = true;
             // Midtones to Warm Orange
             Vector4 baseMidtones = new Vector4(1f, 1f, 1f, 0f);
             Vector4 targetMidtones = new Vector4(_orangeMidtones.r, _orangeMidtones.g, _orangeMidtones.b, 0f);
-            smh.midtones.value = Vector4.Lerp(baseMidtones, targetMidtones, filterIntensity);
+            _shadowsMidtonesHighlights.midtones.value = Vector4.Lerp(baseMidtones, targetMidtones, clampedIntensity);
 
-            smh.highlights.overrideState = true;
+            _shadowsMidtonesHighlights.highlights.overrideState = true;
             // Highlights to Warm Orange
             Vector4 baseHighlights = new Vector4(1f, 1f, 1f, 0f);
             Vector4 targetHighlights = new Vector4(_orangeMidtones.r, _orangeMidtones.g, _orangeMidtones.b, 0f);
-            smh.highlights.value = Vector4.Lerp(baseHighlights, targetHighlights, filterIntensity);
+            _shadowsMidtonesHighlights.highlights.value = Vector4.Lerp(baseHighlights, targetHighlights, clampedIntensity);
         }
 
         // 3 & 4. High-light Suppression and Low Contrast Shadows
-        if (_profile.TryGet(out LiftGammaGain lgg))
+        if (_hasLiftGammaGain)
         {
             // Lift shadow floor (Lift) -> Low Contrast Shadows
-            lgg.lift.overrideState = true;
+            _liftGammaGain.lift.overrideState = true;
             Vector4 baseLift = new Vector4(1f, 1f, 1f, 0f);
             // Positive w component lifts the shadows (greys out blacks)
             Vector4 targetLift = new Vector4(1f, 1f, 1f, 0.05f); 
-            lgg.lift.value = Vector4.Lerp(baseLift, targetLift, filterIntensity);
+            _liftGammaGain.lift.value = Vector4.Lerp(baseLift, targetLift, clampedIntensity);
 
             // Highlight Suppression (Gain) -> Prevent highlights from over-exposing
-            lgg.gain.overrideState = true;
+            _liftGammaGain.gain.overrideState = true;
             Vector4 baseGain = new Vector4(1f, 1f, 1f, 0f);
             // Negative w component reduces gain (suppresses highlights)
             Vector4 targetGain = new Vector4(1f, 1f, 1f, -0.08f); 
-            lgg.gain.value = Vector4.Lerp(baseGain, targetGain, filterIntensity);
+            _liftGammaGain.gain.value = Vector4.Lerp(baseGain, targetGain, clampedIntensity);
         }
 
         // 5. Soft Lighting (Bloom)
-        if (_profile.TryGet(out Bloom bloom))
+        if (_hasBloom)
         {
-            bloom.intensity.overrideState = true;
+            _bloom.intensity.overrideState = true;
             // Low intensity (0.4)
-            bloom.intensity.value = Mathf.Lerp(0f, 0.4f, filterIntensity);
+            _bloom.intensity.value = Mathf.Lerp(0f, 0.4f, clampedIntensity);
 
-            bloom.scatter.overrideState = true;
+            _bloom.scatter.overrideState = true;
             // High scatter (0.7) for a hazy, soft look
-            bloom.scatter.value = Mathf.Lerp(0.5f, 0.7f, filterIntensity);
+            _bloom.scatter.value = Mathf.Lerp(0.5f, 0.7f, clampedIntensity);
         }
     }
 }

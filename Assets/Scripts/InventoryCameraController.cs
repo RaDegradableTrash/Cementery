@@ -52,6 +52,15 @@ public class InventoryCameraController : MonoBehaviour
     private float _nextCullingCacheRefreshTime;
     private int _cullingCursor;
     private bool _hasForcedRenderersOff;
+    private readonly Plane[] _cullingPlanes = new Plane[6];
+    private Camera _lastCullingCamera;
+    private Vector3 _lastCullingCameraPosition;
+    private Quaternion _lastCullingCameraRotation;
+    private float _lastCullingCameraFieldOfView = -1f;
+    private float _lastCullingCameraAspect = -1f;
+    private float _lastCullingCameraNearClip = -1f;
+    private float _lastCullingCameraFarClip = -1f;
+    private bool _hasCullingCameraSample;
     public bool IsInventoryActive
     {
         get
@@ -129,7 +138,7 @@ public class InventoryCameraController : MonoBehaviour
             return;
 
         SetInventoryActive(false);
-        if (aggressivelyCullOutOfViewRenderers)
+        if (aggressivelyCullOutOfViewRenderers && !cullOnlyWhenInventoryOpen)
             RebuildRendererCache();
     }
 
@@ -261,6 +270,7 @@ void Update()
             return;
         }
 
+        bool wasActive = inventoryActive;
         inventoryActive = active;
         if (active)
         {
@@ -272,6 +282,14 @@ void Update()
 
         if (active)
             AutoFrameInventoryCamera();
+
+        if (active && !wasActive && aggressivelyCullOutOfViewRenderers)
+        {
+            RebuildRendererCache();
+            _hasCullingCameraSample = false;
+            _nextCullingTickTime = 0f;
+            _nextCullingCacheRefreshTime = Time.unscaledTime + GetCullingCacheRefreshInterval();
+        }
 
         ApplyCursorState(active);
 
@@ -416,7 +434,7 @@ void Update()
         if (_cachedRenderers == null || _cachedRenderers.Length == 0 || now >= _nextCullingCacheRefreshTime)
         {
             RebuildRendererCache();
-            _nextCullingCacheRefreshTime = now + Mathf.Max(0.2f, cullingCacheRefreshInterval);
+            _nextCullingCacheRefreshTime = now + GetCullingCacheRefreshInterval();
         }
 
         if (now < _nextCullingTickTime)
@@ -436,7 +454,7 @@ void Update()
 
         int rendererCount = _cachedRenderers.Length;
         int batch = Mathf.Clamp(cullingBatchSize, 16, rendererCount);
-        Plane[] planes = GeometryUtility.CalculateFrustumPlanes(activeCamera);
+        RefreshCullingPlanesIfNeeded(activeCamera);
         bool forcedAnyOffThisTick = false;
         for (int i = 0; i < batch; i++)
         {
@@ -452,7 +470,7 @@ void Update()
                 continue;
             }
 
-            bool inView = GeometryUtility.TestPlanesAABB(planes, r.bounds);
+            bool inView = GeometryUtility.TestPlanesAABB(_cullingPlanes, r.bounds);
             bool forceOff = !inView && CanForceHideRenderer(r);
 
             if (r.forceRenderingOff != forceOff)
@@ -483,10 +501,48 @@ void Update()
         return true;
     }
 
+    void RefreshCullingPlanesIfNeeded(Camera activeCamera)
+    {
+        Transform cameraTransform = activeCamera.transform;
+        Vector3 position = cameraTransform.position;
+        Quaternion rotation = cameraTransform.rotation;
+        float fieldOfView = activeCamera.fieldOfView;
+        float aspect = activeCamera.aspect;
+        float nearClip = activeCamera.nearClipPlane;
+        float farClip = activeCamera.farClipPlane;
+
+        if (_hasCullingCameraSample
+            && _lastCullingCamera == activeCamera
+            && position == _lastCullingCameraPosition
+            && rotation == _lastCullingCameraRotation
+            && Mathf.Approximately(fieldOfView, _lastCullingCameraFieldOfView)
+            && Mathf.Approximately(aspect, _lastCullingCameraAspect)
+            && Mathf.Approximately(nearClip, _lastCullingCameraNearClip)
+            && Mathf.Approximately(farClip, _lastCullingCameraFarClip))
+        {
+            return;
+        }
+
+        GeometryUtility.CalculateFrustumPlanes(activeCamera, _cullingPlanes);
+        _lastCullingCamera = activeCamera;
+        _lastCullingCameraPosition = position;
+        _lastCullingCameraRotation = rotation;
+        _lastCullingCameraFieldOfView = fieldOfView;
+        _lastCullingCameraAspect = aspect;
+        _lastCullingCameraNearClip = nearClip;
+        _lastCullingCameraFarClip = farClip;
+        _hasCullingCameraSample = true;
+    }
+
     void RebuildRendererCache()
     {
         _cachedRenderers = FindObjectsOfType<Renderer>(true);
         _cullingCursor = 0;
+    }
+
+    float GetCullingCacheRefreshInterval()
+    {
+        return Mathf.Max(3f, cullingCacheRefreshInterval);
     }
 
     void RestoreForcedRendering()

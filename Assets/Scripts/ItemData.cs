@@ -25,6 +25,26 @@ public class ItemData : ScriptableObject
             yield return new Vector3Int(Mathf.RoundToInt(rotated.x), Mathf.RoundToInt(rotated.y), Mathf.RoundToInt(rotated.z));
         }
     }
+
+    public void FillRotatedOffsets(List<Vector3Int> target, Quaternion rotation)
+    {
+        if (target == null)
+            return;
+
+        target.Clear();
+        if (localOffsets == null)
+            return;
+
+        for (int i = 0; i < localOffsets.Count; i++)
+        {
+            Vector3 rotated = rotation * localOffsets[i];
+            target.Add(new Vector3Int(
+                Mathf.RoundToInt(rotated.x),
+                Mathf.RoundToInt(rotated.y),
+                Mathf.RoundToInt(rotated.z)
+            ));
+        }
+    }
 }
 
 /// <summary>

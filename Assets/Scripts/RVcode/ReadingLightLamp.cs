@@ -15,6 +15,9 @@ public class ReadingLightLamp : MonoBehaviour
 
     private Color baseEmissionColor = Color.white;
     private bool hasEmission;
+    private bool lastHasPower;
+    private bool lastIsOn;
+    private bool hasAppliedState;
     private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
 
     private void Awake()
@@ -53,6 +56,9 @@ public class ReadingLightLamp : MonoBehaviour
         {
             system.OnStateChanged += UpdateLamp;
         }
+
+        hasAppliedState = false;
+        UpdateLamp();
     }
 
     private void OnDisable()
@@ -61,11 +67,6 @@ public class ReadingLightLamp : MonoBehaviour
         {
             system.OnStateChanged -= UpdateLamp;
         }
-    }
-
-    private void Update()
-    {
-        UpdateLamp();
     }
 
     private void CacheEmissionColor()
@@ -92,6 +93,15 @@ public class ReadingLightLamp : MonoBehaviour
 
         bool hasPower = system == null || system.HasPower;
         bool isOn = system != null && system.IsLightOn(lightIndex);
+        if (hasAppliedState && hasPower == lastHasPower && isOn == lastIsOn)
+        {
+            return;
+        }
+
+        hasAppliedState = true;
+        lastHasPower = hasPower;
+        lastIsOn = isOn;
+
         float hdr = hasPower && isOn ? onEmissionHdr : offEmissionHdr;
         float intensity = Mathf.Pow(2f, hdr);
 

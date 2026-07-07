@@ -7,9 +7,11 @@ public class DynamicSnowObject : MonoBehaviour
     public float cutoff = 0.1f;
     
     private RenderTexture localSnowMap;
+    private RenderTexture localScratchMap;
     private Material localSnowMat;
     private Material localModMat;
     private Bounds localBounds;
+    private bool hasLocalSnowMaterial;
 
     void Start()
     {
@@ -28,6 +30,12 @@ public class DynamicSnowObject : MonoBehaviour
         localSnowMap = new RenderTexture(width, depth, 0, RenderTextureFormat.ARGBHalf);
         localSnowMap.filterMode = FilterMode.Bilinear;
         localSnowMap.wrapMode = TextureWrapMode.Clamp;
+
+        localScratchMap = new RenderTexture(width, depth, 0, RenderTextureFormat.ARGBHalf);
+        localScratchMap.name = name + "_LocalSnowScratchMap";
+        localScratchMap.filterMode = FilterMode.Bilinear;
+        localScratchMap.wrapMode = TextureWrapMode.Clamp;
+        localScratchMap.Create();
         // Initialize to black
         localSnowMap.DiscardContents();
         RenderTexture.active = localSnowMap;
@@ -42,6 +50,8 @@ public class DynamicSnowObject : MonoBehaviour
             localSnowMat.SetTexture("_LocalSnowHeightMap", localSnowMap);
             localSnowMat.SetVector("_LocalSnowBounds", new Vector4(localBounds.min.x, localBounds.min.z, localBounds.size.x, localBounds.size.z));
             localSnowMat.SetFloat("_Cutoff", cutoff);
+            UpdateSnowMaterialTransform();
+            hasLocalSnowMaterial = true;
         }
         
         Shader modShader = Shader.Find("Hidden/LocalSnowModification");
@@ -87,10 +97,21 @@ public class DynamicSnowObject : MonoBehaviour
 
     void Update()
     {
-        if (localSnowMat != null)
+        if (hasLocalSnowMaterial && transform.hasChanged)
         {
-            localSnowMat.SetMatrix("_RootWorldToLocal", transform.worldToLocalMatrix);
+            UpdateSnowMaterialTransform();
         }
+    }
+
+    private void UpdateSnowMaterialTransform()
+    {
+        if (localSnowMat == null)
+        {
+            return;
+        }
+
+        localSnowMat.SetMatrix("_RootWorldToLocal", transform.worldToLocalMatrix);
+        transform.hasChanged = false;
     }
 
     public void AddSnowLocal(Vector3 worldPos, float radius, float amount)
@@ -111,15 +132,43 @@ public class DynamicSnowObject : MonoBehaviour
 
         if (localModMat == null) return;
         
-        RenderTexture temp = RenderTexture.GetTemporary(localSnowMap.width, localSnowMap.height, 0, localSnowMap.format);
+        if (!EnsureLocalScratchMap())
+        {
+            return;
+        }
         
         localModMat.SetVector("_BrushParams", new Vector4(u, v, radiusU, radiusV));
         localModMat.SetVector("_BrushStrength", new Vector4(amount, localPos.y, 0, 0));
         
-        Graphics.Blit(localSnowMap, temp, localModMat, 0);
-        Graphics.Blit(temp, localSnowMap);
-        
-        RenderTexture.ReleaseTemporary(temp);
+        Graphics.Blit(localSnowMap, localScratchMap, localModMat, 0);
+        Graphics.Blit(localScratchMap, localSnowMap);
+    }
+
+    private bool EnsureLocalScratchMap()
+    {
+        if (localSnowMap == null)
+            return false;
+
+        if (localScratchMap != null &&
+            localScratchMap.width == localSnowMap.width &&
+            localScratchMap.height == localSnowMap.height &&
+            localScratchMap.format == localSnowMap.format)
+        {
+            return true;
+        }
+
+        if (localScratchMap != null)
+        {
+            localScratchMap.Release();
+            Destroy(localScratchMap);
+        }
+
+        localScratchMap = new RenderTexture(localSnowMap.width, localSnowMap.height, 0, localSnowMap.format);
+        localScratchMap.name = name + "_LocalSnowScratchMap";
+        localScratchMap.filterMode = localSnowMap.filterMode;
+        localScratchMap.wrapMode = localSnowMap.wrapMode;
+        localScratchMap.Create();
+        return true;
     }
 
     private void OnDestroy()
@@ -128,6 +177,11 @@ public class DynamicSnowObject : MonoBehaviour
         {
             localSnowMap.Release();
             Destroy(localSnowMap);
+        }
+        if (localScratchMap != null)
+        {
+            localScratchMap.Release();
+            Destroy(localScratchMap);
         }
         if (localSnowMat != null) Destroy(localSnowMat);
         if (localModMat != null) Destroy(localModMat);

@@ -22,6 +22,9 @@ public class SimpleLightButton : MonoBehaviour, ICockpitInteractable, ICockpitHi
     private Color inactiveEmissionColor = Color.black;
     private bool hasEmission;
     private bool isHighlighted;
+    private bool lastAnyLightOn;
+    private bool lastHighlighted;
+    private bool hasAppliedVisual;
     private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
 
     private void Awake()
@@ -53,9 +56,50 @@ public class SimpleLightButton : MonoBehaviour, ICockpitInteractable, ICockpitHi
         // ────────────────────────────────────────────────────────────────────────
     }
 
-    private void Update()
+    private void OnEnable()
     {
+        SubscribeToLights();
         UpdateVisual();
+    }
+
+    private void OnDisable()
+    {
+        UnsubscribeFromLights();
+    }
+
+    private void SubscribeToLights()
+    {
+        if (lightTargets == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < lightTargets.Length; i++)
+        {
+            SimpleLight light = lightTargets[i];
+            if (light != null)
+            {
+                light.OnStateChanged -= UpdateVisual;
+                light.OnStateChanged += UpdateVisual;
+            }
+        }
+    }
+
+    private void UnsubscribeFromLights()
+    {
+        if (lightTargets == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < lightTargets.Length; i++)
+        {
+            SimpleLight light = lightTargets[i];
+            if (light != null)
+            {
+                light.OnStateChanged -= UpdateVisual;
+            }
+        }
     }
 
     public void Interact()
@@ -124,8 +168,18 @@ public class SimpleLightButton : MonoBehaviour, ICockpitInteractable, ICockpitHi
             return;
         }
 
+        bool anyLightOn = IsAnyLightOn();
+        if (hasAppliedVisual && anyLightOn == lastAnyLightOn && isHighlighted == lastHighlighted)
+        {
+            return;
+        }
+
+        hasAppliedVisual = true;
+        lastAnyLightOn = anyLightOn;
+        lastHighlighted = isHighlighted;
+
         Material mat = targetRenderer.material;
-        if (IsAnyLightOn())
+        if (anyLightOn)
         {
             mat.EnableKeyword("_EMISSION");
             float intensity = Mathf.Pow(2f, activeEmissionHdr);

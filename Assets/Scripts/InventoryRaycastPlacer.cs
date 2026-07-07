@@ -76,7 +76,9 @@ public class InventoryRaycastPlacer : MonoBehaviour
     private readonly List<Renderer> _previewCellTiles = new List<Renderer>();
     private readonly HashSet<Vector2Int> _previewFootprintCells = new HashSet<Vector2Int>();
     private readonly Dictionary<Vector2Int, bool> _previewFootprintBlocked = new Dictionary<Vector2Int, bool>();
-    private readonly HashSet<Vector2Int> _occupiedFailFlashCells = new HashSet<Vector2Int>();
+    private readonly HashSet<int> _occupiedFailFlashCells = new HashSet<int>();
+    private readonly Dictionary<ItemData, Vector3> _previewCenterOffsetCache = new Dictionary<ItemData, Vector3>();
+    private readonly List<Vector3Int> _rotatedOffsetBuffer = new List<Vector3Int>(16);
     private Transform _cellRoot;
     private Material _runtimeCellMaterial;
     private int _cachedCellWidth = -1;
@@ -147,7 +149,7 @@ public class InventoryRaycastPlacer : MonoBehaviour
 
             if (mouseInGrid)
             {
-                var offsets = previewItemData.GetRotatedOffsets(previewRotation);
+                List<Vector3Int> offsets = GetRotatedOffsetBuffer(previewItemData, previewRotation);
                 int minX = 0, maxX = 0, minZ = 0, maxZ = 0;
                 bool first = true;
                 foreach (var off in offsets)
@@ -395,22 +397,7 @@ public class InventoryRaycastPlacer : MonoBehaviour
             GameObject prefabInstance = Instantiate(instance.item.previewPrefab, root.transform);
             prefabInstance.transform.localScale = instance.item.previewPrefab.transform.localScale;
             
-            Vector3 offset = Vector3.zero;
-            if (instance.item.localOffsets != null && instance.item.localOffsets.Count > 0)
-            {
-                Vector3Int min = instance.item.localOffsets[0];
-                Vector3Int max = instance.item.localOffsets[0];
-                for (int i = 1; i < instance.item.localOffsets.Count; i++)
-                {
-                    min = Vector3Int.Min(min, instance.item.localOffsets[i]);
-                    max = Vector3Int.Max(max, instance.item.localOffsets[i]);
-                }
-                offset = new Vector3(
-                    (min.x + max.x) * 0.5f,
-                    (min.y + max.y) * 0.5f,
-                    (min.z + max.z) * 0.5f
-                );
-            }
+            Vector3 offset = GetPreviewCenterOffset(instance.item);
             prefabInstance.transform.localPosition = instance.item.previewPrefab.transform.localPosition + offset;
             prefabInstance.transform.localRotation = instance.item.previewPrefab.transform.localRotation;
             previewGo = root;
@@ -447,7 +434,8 @@ public class InventoryRaycastPlacer : MonoBehaviour
         _occupiedFailFlashCells.Clear();
 
         int layer = inventorySystem.currentLayer;
-        foreach (Vector3Int offset in previewItemData.GetRotatedOffsets(previewRotation))
+        List<Vector3Int> offsets = GetRotatedOffsetBuffer(previewItemData, previewRotation);
+        foreach (Vector3Int offset in offsets)
         {
             Vector3Int pos = anchor + offset;
             if (!inventorySystem.InBounds(pos) || pos.y != layer)
@@ -456,7 +444,7 @@ public class InventoryRaycastPlacer : MonoBehaviour
             if (!inventorySystem.IsOccupied(pos))
                 continue;
 
-            _occupiedFailFlashCells.Add(new Vector2Int(pos.x, pos.z));
+            _occupiedFailFlashCells.Add(PackCellKey(pos.x, pos.z));
         }
 
         if (_occupiedFailFlashCells.Count <= 0)
@@ -493,22 +481,7 @@ public class InventoryRaycastPlacer : MonoBehaviour
             GameObject prefabInstance = Instantiate(item.previewPrefab, root.transform);
             prefabInstance.transform.localScale = item.previewPrefab.transform.localScale;
             
-            Vector3 offset = Vector3.zero;
-            if (item.localOffsets != null && item.localOffsets.Count > 0)
-            {
-                Vector3Int min = item.localOffsets[0];
-                Vector3Int max = item.localOffsets[0];
-                for (int i = 1; i < item.localOffsets.Count; i++)
-                {
-                    min = Vector3Int.Min(min, item.localOffsets[i]);
-                    max = Vector3Int.Max(max, item.localOffsets[i]);
-                }
-                offset = new Vector3(
-                    (min.x + max.x) * 0.5f,
-                    (min.y + max.y) * 0.5f,
-                    (min.z + max.z) * 0.5f
-                );
-            }
+            Vector3 offset = GetPreviewCenterOffset(item);
             prefabInstance.transform.localPosition = item.previewPrefab.transform.localPosition + offset;
             prefabInstance.transform.localRotation = item.previewPrefab.transform.localRotation;
             previewGo = root;
@@ -666,22 +639,7 @@ public class InventoryRaycastPlacer : MonoBehaviour
             GameObject prefabInstance = Instantiate(item.previewPrefab, root.transform);
             prefabInstance.transform.localScale = item.previewPrefab.transform.localScale;
             
-            Vector3 offset = Vector3.zero;
-            if (item.localOffsets != null && item.localOffsets.Count > 0)
-            {
-                Vector3Int min = item.localOffsets[0];
-                Vector3Int max = item.localOffsets[0];
-                for (int i = 1; i < item.localOffsets.Count; i++)
-                {
-                    min = Vector3Int.Min(min, item.localOffsets[i]);
-                    max = Vector3Int.Max(max, item.localOffsets[i]);
-                }
-                offset = new Vector3(
-                    (min.x + max.x) * 0.5f,
-                    (min.y + max.y) * 0.5f,
-                    (min.z + max.z) * 0.5f
-                );
-            }
+            Vector3 offset = GetPreviewCenterOffset(item);
             prefabInstance.transform.localPosition = item.previewPrefab.transform.localPosition + offset;
             prefabInstance.transform.localRotation = item.previewPrefab.transform.localRotation;
             previewGo = root;
@@ -920,7 +878,7 @@ public class InventoryRaycastPlacer : MonoBehaviour
         _previewFootprintBlocked.Clear();
         if (hasPreviewItem)
         {
-            List<Vector3Int> offsets = new List<Vector3Int>(previewItemData.GetRotatedOffsets(previewRotation));
+            List<Vector3Int> offsets = GetRotatedOffsetBuffer(previewItemData, previewRotation);
             while (_previewCellTiles.Count < offsets.Count)
             {
                 GameObject tile = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -1014,8 +972,7 @@ public class InventoryRaycastPlacer : MonoBehaviour
         if (!IsOccupiedFailFlashActive())
             return false;
 
-        Vector2Int key = new Vector2Int(x, z);
-        if (!_occupiedFailFlashCells.Contains(key))
+        if (!_occupiedFailFlashCells.Contains(PackCellKey(x, z)))
             return false;
 
         float elapsed = Time.unscaledTime - _occupiedFailFlashStartTime;
@@ -1037,10 +994,54 @@ public class InventoryRaycastPlacer : MonoBehaviour
         return false;
     }
 
+    List<Vector3Int> GetRotatedOffsetBuffer(ItemData item, Quaternion rotation)
+    {
+        _rotatedOffsetBuffer.Clear();
+        if (item == null)
+            return _rotatedOffsetBuffer;
+
+        item.FillRotatedOffsets(_rotatedOffsetBuffer, rotation);
+        return _rotatedOffsetBuffer;
+    }
+
     void ClearOccupiedFailFlash()
     {
         _occupiedFailFlashStartTime = -1f;
         _occupiedFailFlashCells.Clear();
+    }
+
+    static int PackCellKey(int x, int z)
+    {
+        unchecked
+        {
+            return (x * 397) ^ z;
+        }
+    }
+
+    Vector3 GetPreviewCenterOffset(ItemData item)
+    {
+        if (item == null || item.localOffsets == null || item.localOffsets.Count == 0)
+            return Vector3.zero;
+
+        if (_previewCenterOffsetCache.TryGetValue(item, out Vector3 offset))
+            return offset;
+
+        Vector3Int min = item.localOffsets[0];
+        Vector3Int max = item.localOffsets[0];
+        for (int i = 1; i < item.localOffsets.Count; i++)
+        {
+            Vector3Int cell = item.localOffsets[i];
+            min = Vector3Int.Min(min, cell);
+            max = Vector3Int.Max(max, cell);
+        }
+
+        offset = new Vector3(
+            (min.x + max.x) * 0.5f,
+            (min.y + max.y) * 0.5f,
+            (min.z + max.z) * 0.5f
+        );
+        _previewCenterOffsetCache[item] = offset;
+        return offset;
     }
 
     void SetCellOverlayVisible(bool visible)

@@ -13,12 +13,15 @@ public class WiperButton : MonoBehaviour, ICockpitInteractable, ICockpitHighligh
     private bool hasEmission;
     private bool isHighlighted;
     private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
+    private static WiperControl[] s_cachedWiperControls;
+    private static float s_nextWiperControlCacheRefreshTime;
+    private const float WiperControlCacheRefreshInterval = 1f;
 
     private void Awake()
     {
         if (wiperControls == null || wiperControls.Length == 0)
         {
-            wiperControls = FindObjectsOfType<WiperControl>();
+            wiperControls = GetCachedWiperControls();
         }
 
         if (startProcedure == null)
@@ -33,6 +36,18 @@ public class WiperButton : MonoBehaviour, ICockpitInteractable, ICockpitHighligh
 
         CacheEmissionColor();
         UpdateHighlight();
+    }
+
+    private static WiperControl[] GetCachedWiperControls()
+    {
+        if (s_cachedWiperControls != null && Time.time < s_nextWiperControlCacheRefreshTime)
+        {
+            return s_cachedWiperControls;
+        }
+
+        s_nextWiperControlCacheRefreshTime = Time.time + WiperControlCacheRefreshInterval;
+        s_cachedWiperControls = FindObjectsOfType<WiperControl>();
+        return s_cachedWiperControls;
     }
 
     public void Interact()

@@ -18,9 +18,23 @@ namespace EnvironmentSystem
         [Tooltip("Enable smooth transitioning from near volumetric fog to native far height fog.")]
         public bool enableCrossFade = true;
 
+        [Header("Performance")]
+        [SerializeField, Min(0.02f)] private float runtimeRefreshInterval = 0.1f;
+
         [Header("Diagnostics")]
         [ReadOnlyPlayMode] public float currentAuraMaxDistance;
         [ReadOnlyPlayMode] public float currentNativeFogDensity;
+
+        private float _nextRuntimeRefreshTime;
+        private bool _hasAppliedNativeFog;
+        private bool _lastFogEnabled;
+        private Color _lastFogColor;
+        private FogMode _lastFogMode;
+        private float _lastFogStartDistance;
+        private float _lastFogEndDistance;
+        private float _lastFogDensity;
+        private static readonly int CloudThresholdId = Shader.PropertyToID("_CloudThreshold");
+        private static readonly int CloudDensityScaleId = Shader.PropertyToID("_CloudDensityScale");
 
         private void OnEnable()
         {
@@ -28,11 +42,23 @@ namespace EnvironmentSystem
             {
                 dayNightController = FindFirstObjectByType<DayNightSkyboxController>();
             }
+
+            _hasAppliedNativeFog = false;
+            _nextRuntimeRefreshTime = 0f;
             ApplyFogSettings();
         }
 
         private void Update()
         {
+            if (Application.isPlaying)
+            {
+                float now = Time.unscaledTime;
+                if (now < _nextRuntimeRefreshTime)
+                    return;
+
+                _nextRuntimeRefreshTime = now + Mathf.Max(0.02f, runtimeRefreshInterval);
+            }
+
             ApplyFogSettings();
         }
 
@@ -55,8 +81,8 @@ namespace EnvironmentSystem
                 float daylight = Mathf.Clamp01((sunElevation + 0.08f) / 1.08f);
                 daylight = Mathf.SmoothStep(0f, 1f, daylight);
 
-                float cloudThreshold = Shader.GetGlobalFloat("_CloudThreshold");
-                float cloudDensityScale = Shader.GetGlobalFloat("_CloudDensityScale");
+                float cloudThreshold = Shader.GetGlobalFloat(CloudThresholdId);
+                float cloudDensityScale = Shader.GetGlobalFloat(CloudDensityScaleId);
                 float cloudFactor = 0f;
                 if (cloudDensityScale > 0.001f)
                 {
@@ -85,24 +111,26 @@ namespace EnvironmentSystem
         {
             if (activePreset == null) return;
 
-            RenderSettings.fog = true;
-            RenderSettings.fogColor = fogColor;
-            RenderSettings.fogMode = activePreset.nativeFogMode;
+            const bool targetFogEnabled = true;
+            FogMode targetFogMode = activePreset.nativeFogMode;
 
             float crossFadeStart = Mathf.Max(0f, activePreset.maxDistance - activePreset.blendRange);
+            float targetFogStartDistance = RenderSettings.fogStartDistance;
+            float targetFogEndDistance = RenderSettings.fogEndDistance;
+            float targetFogDensity = RenderSettings.fogDensity;
 
-            if (activePreset.nativeFogMode == FogMode.Linear)
+            if (targetFogMode == FogMode.Linear)
             {
                 if (enableCrossFade)
                 {
                     // Linear fog starts right where volumetric starts fading out
-                    RenderSettings.fogStartDistance = crossFadeStart;
-                    RenderSettings.fogEndDistance = Mathf.Max(crossFadeStart + 10f, activePreset.nativeFogEndDistance);
+                    targetFogStartDistance = crossFadeStart;
+                    targetFogEndDistance = Mathf.Max(crossFadeStart + 10f, activePreset.nativeFogEndDistance);
                 }
                 else
                 {
-                    RenderSettings.fogStartDistance = activePreset.nativeFogStartDistance;
-                    RenderSettings.fogEndDistance = activePreset.nativeFogEndDistance;
+                    targetFogStartDistance = activePreset.nativeFogStartDistance;
+                    targetFogEndDistance = activePreset.nativeFogEndDistance;
                 }
             }
             else
@@ -110,22 +138,50 @@ namespace EnvironmentSystem
                 // Exponential / ExponentialSquared
                 if (enableCrossFade)
                 {
-                    // Scale native fog density to kick in smoothly past the crossFadeStart distance
-                    // Fog equation: intensity = exp(-density * distance)
-                    // If we want it to be 1% dense at crossFadeStart, and match target density at maxDistance:
-                    float distanceDelta = Mathf.Max(1f, activePreset.maxDistance - crossFadeStart);
-                    float targetDensity = activePreset.nativeFogDensity;
-                    
                     // Simple smooth density blending: scale by the distance where the volumetric fog starts fading
-                    RenderSettings.fogDensity = targetDensity;
+                    targetFogDensity = activePreset.nativeFogDensity;
                 }
                 else
                 {
-                    RenderSettings.fogDensity = activePreset.nativeFogDensity;
+                    targetFogDensity = activePreset.nativeFogDensity;
                 }
             }
 
-            currentNativeFogDensity = RenderSettings.fogDensity;
+            bool needsApply = !_hasAppliedNativeFog
+                              || _lastFogEnabled != targetFogEnabled
+                              || _lastFogMode != targetFogMode
+                              || !Approximately(_lastFogColor, fogColor)
+                              || !Mathf.Approximately(_lastFogStartDistance, targetFogStartDistance)
+                              || !Mathf.Approximately(_lastFogEndDistance, targetFogEndDistance)
+                              || !Mathf.Approximately(_lastFogDensity, targetFogDensity);
+
+            if (needsApply)
+            {
+                RenderSettings.fog = targetFogEnabled;
+                RenderSettings.fogColor = fogColor;
+                RenderSettings.fogMode = targetFogMode;
+                RenderSettings.fogStartDistance = targetFogStartDistance;
+                RenderSettings.fogEndDistance = targetFogEndDistance;
+                RenderSettings.fogDensity = targetFogDensity;
+
+                _lastFogEnabled = targetFogEnabled;
+                _lastFogColor = fogColor;
+                _lastFogMode = targetFogMode;
+                _lastFogStartDistance = targetFogStartDistance;
+                _lastFogEndDistance = targetFogEndDistance;
+                _lastFogDensity = targetFogDensity;
+                _hasAppliedNativeFog = true;
+            }
+
+            currentNativeFogDensity = targetFogDensity;
+        }
+
+        private static bool Approximately(Color a, Color b)
+        {
+            return Mathf.Abs(a.r - b.r) < 0.001f
+                   && Mathf.Abs(a.g - b.g) < 0.001f
+                   && Mathf.Abs(a.b - b.b) < 0.001f
+                   && Mathf.Abs(a.a - b.a) < 0.001f;
         }
 
 #if AURA_2_PRESENT
