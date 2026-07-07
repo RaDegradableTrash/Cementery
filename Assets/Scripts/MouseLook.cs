@@ -90,6 +90,7 @@ public class MouseLook : MonoBehaviour
         ResolveAttractPivot();
         InitializeAttractOrbitBaseline();
         CachePlayerRenderers();
+        NormalizeThirdPersonSettings();
         InitializeThirdPersonOrbitPitch();
         ApplyPerspectiveImmediate();
     }
@@ -210,6 +211,7 @@ public void SetBaseRotation(Quaternion targetRotation)
         InitializeAttractOrbitBaseline();
         CachePlayerRenderers();
         _thirdPersonActive = startInThirdPerson;
+        NormalizeThirdPersonSettings();
         InitializeThirdPersonOrbitPitch();
         ApplyPerspectiveImmediate();
     }
@@ -392,7 +394,8 @@ public void SetBaseRotation(Quaternion targetRotation)
 
     void HandlePerspectiveToggle()
     {
-        if (perspectiveToggleKey == KeyCode.None || !Input.GetKeyDown(perspectiveToggleKey))
+        KeyCode toggleKey = GetPerspectiveToggleKey();
+        if (toggleKey == KeyCode.None || !Input.GetKeyDown(toggleKey))
             return;
 
         _thirdPersonActive = !_thirdPersonActive;
@@ -421,6 +424,34 @@ public void SetBaseRotation(Quaternion targetRotation)
             RestoreFirstPersonTransform();
 
         SyncOwnedAudioListener(true);
+    }
+
+    KeyCode GetPerspectiveToggleKey()
+    {
+        return perspectiveToggleKey == KeyCode.None ? KeyCode.V : perspectiveToggleKey;
+    }
+
+    void NormalizeThirdPersonSettings()
+    {
+        if (thirdPersonDistance <= 0.01f)
+            thirdPersonDistance = 6.5f;
+        if (thirdPersonLookAtHeight <= 0.01f)
+            thirdPersonLookAtHeight = 1.1f;
+        if (thirdPersonDefaultPitch <= 0.01f)
+            thirdPersonDefaultPitch = 32f;
+        if (thirdPersonMinPitch <= 0.01f && thirdPersonMaxPitch <= 0.01f)
+        {
+            thirdPersonMinPitch = 18f;
+            thirdPersonMaxPitch = 58f;
+        }
+        if (thirdPersonPositionSharpness <= 0.01f)
+            thirdPersonPositionSharpness = 14f;
+        if (thirdPersonRotationSharpness <= 0.01f)
+            thirdPersonRotationSharpness = 18f;
+        if (thirdPersonCollisionRadius <= 0.01f)
+            thirdPersonCollisionRadius = 0.28f;
+        if (thirdPersonCollisionPadding <= 0.01f)
+            thirdPersonCollisionPadding = 0.12f;
     }
 
     void InitializeThirdPersonOrbitPitch()
