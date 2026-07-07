@@ -64,5 +64,5 @@ Follow-up issues:
 - The active renderer asset is `Assets/Settings/URP/URP_Performance_Renderer.asset`.
 - The reusable vibrant gameplay volume profile is `Assets/New Volume Profile.asset`.
 - `Assets/Scenes/Main_Persistent.unity` now uses that reusable volume profile on its global Volume.
-- `Assets/Scripts/Rendering/VisualPipelineBootstrapper.cs` enables URP post-processing on loaded cameras so the global profile is visible in gameplay cameras.
+- `Assets/Scripts/Rendering/VisualPipelineBootstrapper.cs` enables URP post-processing only on base, world-facing gameplay cameras so inventory, storage, preview, render texture, overlay, and reflection cameras do not pay for the global profile.
 - Known expensive visual systems to watch: custom volumetric clouds, snow accumulation, silhouette/outline rendering, fog volumes, screen shatter, and additive chunk loading.

@@ -6,6 +6,10 @@ namespace Cementery.Rendering
 {
     public static class VisualPipelineBootstrapper
     {
+        private const string StorageCameraNameToken = "storage";
+        private const string InventoryCameraNameToken = "inventory";
+        private const string PreviewCameraNameToken = "preview";
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Initialize()
         {
@@ -29,8 +33,33 @@ namespace Cementery.Rendering
                     continue;
 
                 UniversalAdditionalCameraData cameraData = camera.GetUniversalAdditionalCameraData();
+                if (!ShouldUseGameplayPostProcessing(camera, cameraData))
+                    continue;
+
                 cameraData.renderPostProcessing = true;
             }
+        }
+
+        private static bool ShouldUseGameplayPostProcessing(Camera camera, UniversalAdditionalCameraData cameraData)
+        {
+            if (cameraData.renderType != CameraRenderType.Base)
+                return false;
+
+            if (camera.targetTexture != null)
+                return false;
+
+            if (camera.cameraType == CameraType.Preview || camera.cameraType == CameraType.Reflection)
+                return false;
+
+            string cameraName = camera.name.ToLowerInvariant();
+            if (cameraName.Contains(StorageCameraNameToken) ||
+                cameraName.Contains(InventoryCameraNameToken) ||
+                cameraName.Contains(PreviewCameraNameToken))
+            {
+                return false;
+            }
+
+            return camera.CompareTag("MainCamera") || !camera.orthographic;
         }
     }
 }
