@@ -264,6 +264,9 @@ public class SnowParticleSystem : MonoBehaviour
         if (remainingBudget <= 0)
             return;
 
+        if (collisionEvents == null)
+            collisionEvents = new List<ParticleCollisionEvent>(64);
+
         int numCollisionEvents = Mathf.Min(partSystem.GetCollisionEvents(other, collisionEvents), remainingBudget);
         _processedCollisionEventsThisFrame += numCollisionEvents;
         int targetCacheKey = other.GetInstanceID();

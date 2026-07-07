@@ -42,6 +42,29 @@ public class MouseLook : MonoBehaviour
     [Header("Cursor")]
     [SerializeField] private bool autoLockCursorOnStart = true;
 
+    [Header("Audio")]
+    [SerializeField] private bool manageAudioListener = true;
+
+    [Header("Perspective")]
+    [SerializeField] private KeyCode perspectiveToggleKey = KeyCode.V;
+    [SerializeField] private bool startInThirdPerson = false;
+    [SerializeField] private float thirdPersonDistance = 6.5f;
+    [SerializeField] private float thirdPersonHeight = 1.2f;
+    [SerializeField] private float thirdPersonLookAtHeight = 1.1f;
+    [SerializeField] private float thirdPersonShoulderOffset = 0f;
+    [SerializeField] private float thirdPersonDefaultPitch = 32f;
+    [SerializeField] private float thirdPersonMinPitch = 18f;
+    [SerializeField] private float thirdPersonMaxPitch = 58f;
+    [SerializeField] private float thirdPersonPositionSharpness = 14f;
+    [SerializeField] private float thirdPersonRotationSharpness = 18f;
+    [SerializeField] private float thirdPersonCollisionRadius = 0.28f;
+    [SerializeField] private float thirdPersonCollisionPadding = 0.12f;
+    [SerializeField] private LayerMask thirdPersonCollisionMask = ~0;
+    [SerializeField] private QueryTriggerInteraction thirdPersonTriggerInteraction = QueryTriggerInteraction.Ignore;
+    [SerializeField] private bool showPlayerModelInThirdPerson = true;
+
+    public bool IsThirdPersonActive => _thirdPersonActive;
+
     public void SetupCamera(Transform newPlayer, Transform newCameraHolder)
     {
         player = newPlayer;
@@ -66,7 +89,24 @@ public class MouseLook : MonoBehaviour
 
         ResolveAttractPivot();
         InitializeAttractOrbitBaseline();
+        CachePlayerRenderers();
+        InitializeThirdPersonOrbitPitch();
+        ApplyPerspectiveImmediate();
     }
+
+    public void ForceFirstPersonView()
+    {
+        if (!_thirdPersonActive)
+        {
+            RestoreFirstPersonTransform();
+            return;
+        }
+
+        _thirdPersonActive = false;
+        RestoreFirstPersonTransform();
+        ApplyPlayerRendererVisibility();
+    }
+
     public void ResetRotation()
     {
         _pitch = transform.localEulerAngles.x;
@@ -95,6 +135,8 @@ public void SetBaseRotation(Quaternion targetRotation)
     // 如果你的 MouseLook 是直接控制 transform 的：
     transform.rotation = targetRotation;
     InvalidateAppliedLookCache();
+    _yaw = targetYAngle;
+    _pitch = 0f;
     
     // 💡 记得同时重置你脚本内部用于累加鼠标输入的 pitch 和 yaw（或 lookAngles）变量！
     // 例如：
@@ -114,10 +156,18 @@ public void SetBaseRotation(Quaternion targetRotation)
     private bool _pendingStartCursorLock;
     private Rigidbody _playerRb;
     private float _yaw;
+    private float _thirdPersonPitch;
     private float _lastAppliedPitch = float.NaN;
     private float _lastAppliedYaw = float.NaN;
     private int _inventoryModeCacheFrame = -1;
     private bool _cachedInventoryModeActive;
+    private bool _thirdPersonActive;
+    private Renderer[] _playerRenderers;
+    private readonly RaycastHit[] _thirdPersonCollisionHits = new RaycastHit[8];
+    private Camera _ownCamera;
+    private AudioListener _ownAudioListener;
+    private float _nextAudioListenerSyncTime;
+    private const float AudioListenerSyncInterval = 0.5f;
 
     private void InvalidateAppliedLookCache()
     {
@@ -140,6 +190,9 @@ public void SetBaseRotation(Quaternion targetRotation)
         if (inventoryCameraController == null)
             inventoryCameraController = FindObjectOfType<InventoryCameraController>();
 
+        _ownCamera = GetComponent<Camera>();
+        _ownAudioListener = GetComponent<AudioListener>();
+
         _pitch = transform.eulerAngles.x;
         if (_pitch > 180f) _pitch -= 360f;
 
@@ -155,6 +208,10 @@ public void SetBaseRotation(Quaternion targetRotation)
 
         ResolveAttractPivot();
         InitializeAttractOrbitBaseline();
+        CachePlayerRenderers();
+        _thirdPersonActive = startInThirdPerson;
+        InitializeThirdPersonOrbitPitch();
+        ApplyPerspectiveImmediate();
     }
 
     void Update()
@@ -170,13 +227,17 @@ public void SetBaseRotation(Quaternion targetRotation)
         }
 
         if (IsInventoryModeActive())
+        {
+            RestoreFirstPersonTransform();
             return;
+        }
 
         HandleCursorToggle();
         // 联机控制：如果网络已启动且你不是主人，则禁止旋转
         bool isNetworkActive = NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening;
         if (isNetworkActive && (_playerController != null && (!_playerController.IsSpawned || !_playerController.IsOwner))) return;
 
+        HandlePerspectiveToggle();
         ApplyMouseLook();
     }
 
@@ -185,6 +246,8 @@ public void SetBaseRotation(Quaternion targetRotation)
     {
         if (PlayerDeathFlowController.IsPlayerDead || GameMenuManager.IsMenuOpen || IsInventoryModeActive())
             return;
+
+        SyncOwnedAudioListener(false);
 
         if (cameraHolder == null) return;
 
@@ -196,6 +259,10 @@ public void SetBaseRotation(Quaternion targetRotation)
 
         if (ShouldUseAttractOrbit())
             ApplyAttractOrbit();
+        else if (_thirdPersonActive)
+            ApplyThirdPersonCamera(false);
+        else
+            RestoreFirstPersonTransform();
     }
 
 
@@ -208,13 +275,22 @@ public void SetBaseRotation(Quaternion targetRotation)
         float mouseX = (useRawMouseInput ? Input.GetAxisRaw("Mouse X") : Input.GetAxis("Mouse X")) * sensitivityX;
         float mouseY = (useRawMouseInput ? Input.GetAxisRaw("Mouse Y") : Input.GetAxis("Mouse Y")) * sensitivityY;
 
+        if (!ShouldUseAttractOrbit() && _thirdPersonActive)
+        {
+            _yaw += mouseX;
+            _thirdPersonPitch = Mathf.Clamp(
+                _thirdPersonPitch + mouseY,
+                Mathf.Min(thirdPersonMinPitch, thirdPersonMaxPitch),
+                Mathf.Max(thirdPersonMinPitch, thirdPersonMaxPitch));
+            return;
+        }
 
 
         // Vertical pitch
         _pitch -= mouseY;
         _pitch = Mathf.Clamp(_pitch, minVertical, maxVertical);
         
-        if (!ShouldUseAttractOrbit())
+        if (!ShouldUseAttractOrbit() && !_thirdPersonActive)
         {
             if (!Mathf.Approximately(_lastAppliedPitch, _pitch))
             {
@@ -312,6 +388,194 @@ public void SetBaseRotation(Quaternion targetRotation)
         Vector3 lookDir = attractPivot.position - transform.position;
         if (lookDir.sqrMagnitude > 0.0001f)
             transform.rotation = Quaternion.LookRotation(lookDir.normalized, Vector3.up);
+    }
+
+    void HandlePerspectiveToggle()
+    {
+        if (perspectiveToggleKey == KeyCode.None || !Input.GetKeyDown(perspectiveToggleKey))
+            return;
+
+        _thirdPersonActive = !_thirdPersonActive;
+        ApplyPlayerRendererVisibility();
+
+        if (_thirdPersonActive)
+        {
+            InitializeThirdPersonOrbitPitch();
+            ApplyThirdPersonCamera(true);
+        }
+        else
+            RestoreFirstPersonTransform();
+
+        SyncOwnedAudioListener(true);
+    }
+
+    void ApplyPerspectiveImmediate()
+    {
+        ApplyPlayerRendererVisibility();
+        if (_thirdPersonActive)
+        {
+            InitializeThirdPersonOrbitPitch();
+            ApplyThirdPersonCamera(true);
+        }
+        else
+            RestoreFirstPersonTransform();
+
+        SyncOwnedAudioListener(true);
+    }
+
+    void InitializeThirdPersonOrbitPitch()
+    {
+        float minPitch = Mathf.Min(thirdPersonMinPitch, thirdPersonMaxPitch);
+        float maxPitch = Mathf.Max(thirdPersonMinPitch, thirdPersonMaxPitch);
+        if (_thirdPersonPitch < minPitch || _thirdPersonPitch > maxPitch)
+            _thirdPersonPitch = Mathf.Clamp(thirdPersonDefaultPitch, minPitch, maxPitch);
+    }
+
+    void ApplyThirdPersonCamera(bool snap)
+    {
+        if (cameraHolder == null)
+            return;
+
+        Transform reference = player != null ? player : cameraHolder;
+        float minPitch = Mathf.Min(thirdPersonMinPitch, thirdPersonMaxPitch);
+        float maxPitch = Mathf.Max(thirdPersonMinPitch, thirdPersonMaxPitch);
+        float orbitPitch = Mathf.Clamp(_thirdPersonPitch, minPitch, maxPitch);
+        float distance = Mathf.Clamp(thirdPersonDistance, 4f, 9f);
+        float height = Mathf.Clamp(thirdPersonHeight, 0f, 3f);
+
+        Vector3 lookTarget = reference.position + Vector3.up * Mathf.Max(0.1f, thirdPersonLookAtHeight);
+        Quaternion orbitRotation = Quaternion.Euler(orbitPitch, _yaw, 0f);
+        Vector3 orbitOffset = orbitRotation * Vector3.back * distance;
+        Vector3 shoulder = Quaternion.Euler(0f, _yaw, 0f) * Vector3.right * thirdPersonShoulderOffset;
+        Vector3 desiredPosition = lookTarget + orbitOffset + Vector3.up * height + shoulder;
+        Vector3 correctedPosition = ResolveThirdPersonCollision(lookTarget, desiredPosition);
+        Vector3 lookDirection = lookTarget - correctedPosition;
+        if (lookDirection.sqrMagnitude < 0.001f)
+            lookDirection = reference.forward;
+
+        Quaternion desiredRotation = Quaternion.LookRotation(lookDirection.normalized, Vector3.up);
+
+        if (snap || Time.deltaTime <= 0f)
+        {
+            transform.position = correctedPosition;
+            transform.rotation = desiredRotation;
+            return;
+        }
+
+        float positionLerp = 1f - Mathf.Exp(-thirdPersonPositionSharpness * Time.deltaTime);
+        float rotationLerp = 1f - Mathf.Exp(-thirdPersonRotationSharpness * Time.deltaTime);
+        transform.position = Vector3.Lerp(transform.position, correctedPosition, positionLerp);
+        transform.rotation = Quaternion.Slerp(transform.rotation, desiredRotation, rotationLerp);
+    }
+
+    Vector3 ResolveThirdPersonCollision(Vector3 pivot, Vector3 desiredPosition)
+    {
+        Vector3 toCamera = desiredPosition - pivot;
+        float distance = toCamera.magnitude;
+        if (distance <= 0.001f)
+            return desiredPosition;
+
+        Vector3 direction = toCamera / distance;
+        int hitCount = Physics.SphereCastNonAlloc(
+            pivot,
+            Mathf.Max(0.01f, thirdPersonCollisionRadius),
+            direction,
+            _thirdPersonCollisionHits,
+            distance,
+            thirdPersonCollisionMask,
+            thirdPersonTriggerInteraction);
+
+        float nearest = distance;
+        for (int i = 0; i < hitCount; i++)
+        {
+            RaycastHit hit = _thirdPersonCollisionHits[i];
+            if (hit.collider == null || (player != null && hit.collider.transform.IsChildOf(player)))
+                continue;
+
+            nearest = Mathf.Min(nearest, hit.distance);
+        }
+
+        if (nearest >= distance)
+            return desiredPosition;
+
+        return pivot + direction * Mathf.Max(0.05f, nearest - thirdPersonCollisionPadding);
+    }
+
+    void RestoreFirstPersonTransform()
+    {
+        if (cameraHolder == null)
+            return;
+
+        transform.localPosition = Vector3.zero;
+        if (!ShouldUseAttractOrbit())
+            transform.localRotation = Quaternion.Euler(_pitch, 0f, 0f);
+    }
+
+    void CachePlayerRenderers()
+    {
+        _playerRenderers = player != null ? player.GetComponentsInChildren<Renderer>(true) : null;
+    }
+
+    void ApplyPlayerRendererVisibility()
+    {
+        if (!showPlayerModelInThirdPerson)
+            return;
+
+        if (_playerRenderers == null || _playerRenderers.Length == 0)
+            CachePlayerRenderers();
+
+        if (_playerRenderers == null)
+            return;
+
+        UnityEngine.Rendering.ShadowCastingMode mode = _thirdPersonActive
+            ? UnityEngine.Rendering.ShadowCastingMode.On
+            : UnityEngine.Rendering.ShadowCastingMode.ShadowsOnly;
+
+        for (int i = 0; i < _playerRenderers.Length; i++)
+        {
+            Renderer renderer = _playerRenderers[i];
+            if (renderer != null)
+                renderer.shadowCastingMode = mode;
+        }
+    }
+
+    void SyncOwnedAudioListener(bool force)
+    {
+        if (!manageAudioListener)
+            return;
+
+        if (!force && Time.unscaledTime < _nextAudioListenerSyncTime)
+            return;
+
+        _nextAudioListenerSyncTime = Time.unscaledTime + AudioListenerSyncInterval;
+
+        if (_ownCamera == null)
+            _ownCamera = GetComponent<Camera>();
+        if (_ownAudioListener == null)
+            _ownAudioListener = GetComponent<AudioListener>();
+
+        if (_ownCamera == null || _ownAudioListener == null || !_ownCamera.enabled || !_ownCamera.gameObject.activeInHierarchy)
+            return;
+
+        SetExclusiveAudioListener(_ownAudioListener);
+    }
+
+    public static void SetExclusiveAudioListener(AudioListener activeListener)
+    {
+        if (activeListener == null)
+            return;
+
+        AudioListener[] listeners = FindObjectsByType<AudioListener>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        for (int i = 0; i < listeners.Length; i++)
+        {
+            AudioListener listener = listeners[i];
+            if (listener == null)
+                continue;
+
+            bool shouldEnable = listener == activeListener && listener.gameObject.activeInHierarchy;
+            if (listener.enabled != shouldEnable)
+                listener.enabled = shouldEnable;
+        }
     }
 
     static Transform FindChildByName(Transform root, string childName)

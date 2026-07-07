@@ -429,6 +429,8 @@ public class FuelTank : MonoBehaviour
     private void SetDisplayAlpha(float alpha)
     {
         if (displayObject == null) return;
+        if (_propBlock == null)
+            _propBlock = new MaterialPropertyBlock();
 
         bool displayChanged = Mathf.Abs(_lastAppliedDisplayAlpha - alpha) > 0.001f
             || Mathf.Abs(_lastAppliedDisplayRatio - _currentRatio) > 0.001f;
