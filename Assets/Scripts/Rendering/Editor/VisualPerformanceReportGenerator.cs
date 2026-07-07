@@ -67,7 +67,13 @@ namespace Cementery.Rendering.Editor
                 MaxGpuFrameMs = -1f,
                 MaxGcAllocatedKb = -1f,
                 MaxMainThreadMs = -1f,
-                MaxRenderThreadMs = -1f
+                MaxRenderThreadMs = -1f,
+                MinTimeOfDay = 2f,
+                MaxTimeOfDay = -1f,
+                MaxFogDensity = -1f,
+                MinFogStartDistance = float.MaxValue,
+                MaxFogEndDistance = -1f,
+                MaxAmbientIntensity = -1f
             };
             for (int i = 1; i < lines.Length; i++)
             {
@@ -109,6 +115,28 @@ namespace Cementery.Rendering.Editor
 
                 if (TryParseOptional(columns, 12, out float renderThreadMs))
                     summary.MaxRenderThreadMs = Mathf.Max(summary.MaxRenderThreadMs, renderThreadMs);
+
+                if (TryParseOptional(columns, 13, out float timeOfDay))
+                {
+                    summary.VisualStateRows++;
+                    summary.MinTimeOfDay = Mathf.Min(summary.MinTimeOfDay, timeOfDay);
+                    summary.MaxTimeOfDay = Mathf.Max(summary.MaxTimeOfDay, timeOfDay);
+                }
+
+                if (TryParseOptional(columns, 14, out float fogEnabled) && fogEnabled > 0.5f)
+                    summary.FogEnabledRows++;
+
+                if (TryParseOptional(columns, 15, out float fogDensity))
+                    summary.MaxFogDensity = Mathf.Max(summary.MaxFogDensity, fogDensity);
+
+                if (TryParseOptional(columns, 16, out float fogStartDistance))
+                    summary.MinFogStartDistance = Mathf.Min(summary.MinFogStartDistance, fogStartDistance);
+
+                if (TryParseOptional(columns, 17, out float fogEndDistance))
+                    summary.MaxFogEndDistance = Mathf.Max(summary.MaxFogEndDistance, fogEndDistance);
+
+                if (TryParseOptional(columns, 18, out float ambientIntensity))
+                    summary.MaxAmbientIntensity = Mathf.Max(summary.MaxAmbientIntensity, ambientIntensity);
             }
 
             return summary;
@@ -147,6 +175,11 @@ namespace Cementery.Rendering.Editor
             builder.AppendLine($"| Peak main thread counter | {FormatOptionalTiming(summary.MaxMainThreadMs)} |");
             builder.AppendLine($"| Peak render thread counter | {FormatOptionalTiming(summary.MaxRenderThreadMs)} |");
             builder.AppendLine($"| Managed memory delta | {memoryDeltaMb:F2} MB |");
+            builder.AppendLine($"| Time-of-day range | {FormatTimeOfDayRange(summary)} |");
+            builder.AppendLine($"| Fog enabled samples | {FormatFogRows(summary)} |");
+            builder.AppendLine($"| Peak fog density | {FormatOptionalFloat(summary.MaxFogDensity, "F4")} |");
+            builder.AppendLine($"| Fog distance range | {FormatFogDistanceRange(summary)} |");
+            builder.AppendLine($"| Peak ambient intensity | {FormatOptionalFloat(summary.MaxAmbientIntensity, "F2")} |");
             builder.AppendLine();
             builder.AppendLine("## Budget Verdict");
             builder.AppendLine();
@@ -159,6 +192,7 @@ namespace Cementery.Rendering.Editor
             builder.AppendLine();
             builder.AppendLine("- Pair this report with a Unity Profiler capture for final merge evidence.");
             builder.AppendLine("- Re-run after render pipeline, cloud, fog, particle, UI animation, camera, or chunk-loading changes.");
+            builder.AppendLine("- Time-of-day and fog rows prove whether the run covered night/fog readability states; missing values mean the CSV was captured before visual-state sampling existed.");
             return builder.ToString();
         }
 
@@ -197,6 +231,7 @@ namespace Cementery.Rendering.Editor
             AppendCheck(builder, "Gameplay post-processing is camera-gated", ContainsAll(bootstrapper, "renderPostProcessing = true", "targetTexture != null", "CameraRenderType.Base"), BootstrapperPath, ref failures);
             AppendCheck(builder, "Sampler writes frame-time CSV", ContainsAll(sampler, "visual-performance-samples.csv", "p95", "FrameTimingManager"), SamplerPath, ref failures);
             AppendCheck(builder, "Sampler records profiling counters", ContainsAll(sampler, "ProfilerRecorder", "GC Allocated In Frame", "Main Thread", "Render Thread"), SamplerPath, ref warnings, true);
+            AppendCheck(builder, "Sampler records visual route state", ContainsAll(sampler, "time_of_day", "RenderSettings.fog", "ambientIntensity"), SamplerPath, ref failures);
             AppendCheck(builder, "Color space is Linear", Contains(projectSettings, "m_ActiveColorSpace: 1"), ProjectSettingsPath, ref failures);
             AppendCheck(builder, "Lights use linear intensity", Contains(graphicsSettings, "m_LightsUseLinearIntensity: 1"), GraphicsSettingsPath, ref failures);
 
@@ -277,6 +312,33 @@ namespace Cementery.Rendering.Editor
             return value < 0f ? "Unavailable" : $"{value:F2} KB";
         }
 
+        private static string FormatOptionalFloat(float value, string format)
+        {
+            return value < 0f || float.IsPositiveInfinity(value) ? "Unavailable" : value.ToString(format, CultureInfo.InvariantCulture);
+        }
+
+        private static string FormatTimeOfDayRange(Summary summary)
+        {
+            return summary.VisualStateRows == 0
+                ? "Unavailable"
+                : $"{summary.MinTimeOfDay:F3} to {summary.MaxTimeOfDay:F3}";
+        }
+
+        private static string FormatFogRows(Summary summary)
+        {
+            return summary.VisualStateRows == 0
+                ? "Unavailable"
+                : $"{summary.FogEnabledRows} / {summary.VisualStateRows}";
+        }
+
+        private static string FormatFogDistanceRange(Summary summary)
+        {
+            if (summary.VisualStateRows == 0 || float.IsPositiveInfinity(summary.MinFogStartDistance) || summary.MaxFogEndDistance < 0f)
+                return "Unavailable";
+
+            return $"{summary.MinFogStartDistance:F2} to {summary.MaxFogEndDistance:F2}";
+        }
+
         private static string FormatVerdict(bool pass)
         {
             return pass ? "PASS" : "NEEDS PROFILING REVIEW";
@@ -296,6 +358,14 @@ namespace Cementery.Rendering.Editor
             public float MaxGcAllocatedKb;
             public float MaxMainThreadMs;
             public float MaxRenderThreadMs;
+            public int VisualStateRows;
+            public int FogEnabledRows;
+            public float MinTimeOfDay;
+            public float MaxTimeOfDay;
+            public float MaxFogDensity;
+            public float MinFogStartDistance;
+            public float MaxFogEndDistance;
+            public float MaxAmbientIntensity;
             public float StartMemoryMb;
             public float EndMemoryMb;
         }

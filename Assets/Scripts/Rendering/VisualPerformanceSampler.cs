@@ -11,7 +11,7 @@ namespace Cementery.Rendering
         private const int MaxSamples = 4096;
         private const float ReportIntervalSeconds = 5f;
         private const string SampleFileName = "visual-performance-samples.csv";
-        private const string CsvHeader = "time,scene,average_ms,p95_ms,worst_ms,cpu_frame_ms,gpu_frame_ms,sample_count,total_memory_mb,memory_delta_mb,gc_allocated_kb,main_thread_ms,render_thread_ms";
+        private const string CsvHeader = "time,scene,average_ms,p95_ms,worst_ms,cpu_frame_ms,gpu_frame_ms,sample_count,total_memory_mb,memory_delta_mb,gc_allocated_kb,main_thread_ms,render_thread_ms,time_of_day,fog_enabled,fog_density,fog_start,fog_end,ambient_intensity";
 
         private readonly float[] _frameTimesMs = new float[MaxSamples];
         private readonly float[] _sortBuffer = new float[MaxSamples];
@@ -49,7 +49,8 @@ namespace Cementery.Rendering
             {
                 File.WriteAllText(_samplePath, CsvHeader + "\n");
             }
-            else if (!File.ReadAllText(_samplePath).Contains("gc_allocated_kb"))
+            string existingCsv = File.ReadAllText(_samplePath);
+            if (!existingCsv.Contains("time_of_day"))
             {
                 File.AppendAllText(_samplePath, CsvHeader + "\n");
             }
@@ -113,11 +114,19 @@ namespace Cementery.Rendering
             float gcAllocatedKb = ReadCounterKilobytes(_gcAllocatedRecorder);
             float mainThreadMs = ReadCounterMilliseconds(_mainThreadRecorder);
             float renderThreadMs = ReadCounterMilliseconds(_renderThreadRecorder);
+            float timeOfDay = ReadTimeOfDay();
+            float fogEnabled = RenderSettings.fog ? 1f : 0f;
 
             string sceneName = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
-            string line = $"{Time.realtimeSinceStartup:F2},{sceneName},{averageMs:F2},{p95Ms:F2},{_worstFrameMs:F2},{cpuFrameMs:F2},{gpuFrameMs:F2},{_sampleCount},{totalMemoryMb:F2},{memoryDeltaMb:F2},{gcAllocatedKb:F2},{mainThreadMs:F2},{renderThreadMs:F2}\n";
+            string line = $"{Time.realtimeSinceStartup:F2},{sceneName},{averageMs:F2},{p95Ms:F2},{_worstFrameMs:F2},{cpuFrameMs:F2},{gpuFrameMs:F2},{_sampleCount},{totalMemoryMb:F2},{memoryDeltaMb:F2},{gcAllocatedKb:F2},{mainThreadMs:F2},{renderThreadMs:F2},{timeOfDay:F3},{fogEnabled:F0},{RenderSettings.fogDensity:F4},{RenderSettings.fogStartDistance:F2},{RenderSettings.fogEndDistance:F2},{RenderSettings.ambientIntensity:F2}\n";
             File.AppendAllText(_samplePath, line);
-            Debug.Log($"VisualPerformanceSampler: avg {averageMs:F2} ms, p95 {p95Ms:F2} ms, worst {_worstFrameMs:F2} ms, CPU {cpuFrameMs:F2} ms, GPU {gpuFrameMs:F2} ms, GC {gcAllocatedKb:F2} KB, main {mainThreadMs:F2} ms, render {renderThreadMs:F2} ms, samples {_sampleCount}, csv {_samplePath}");
+            Debug.Log($"VisualPerformanceSampler: avg {averageMs:F2} ms, p95 {p95Ms:F2} ms, worst {_worstFrameMs:F2} ms, CPU {cpuFrameMs:F2} ms, GPU {gpuFrameMs:F2} ms, GC {gcAllocatedKb:F2} KB, main {mainThreadMs:F2} ms, render {renderThreadMs:F2} ms, time {timeOfDay:F3}, fog {RenderSettings.fog}, samples {_sampleCount}, csv {_samplePath}");
+        }
+
+        private static float ReadTimeOfDay()
+        {
+            DayNightSkyboxController controller = FindFirstObjectByType<DayNightSkyboxController>(FindObjectsInactive.Include);
+            return controller != null ? controller.timeOfDay : -1f;
         }
 
         private static float ReadCounterKilobytes(ProfilerRecorder recorder)

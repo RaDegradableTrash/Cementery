@@ -17,6 +17,7 @@ Generated: 2026-07-07 22:02:00
 | Gameplay post-processing is camera-gated | PASS | Assets/Scripts/Rendering/VisualPipelineBootstrapper.cs |
 | Sampler writes frame-time CSV | PASS | Assets/Scripts/Rendering/VisualPerformanceSampler.cs |
 | Sampler records profiling counters | PASS | Assets/Scripts/Rendering/VisualPerformanceSampler.cs |
+| Sampler records visual route state | PASS | Assets/Scripts/Rendering/VisualPerformanceSampler.cs |
 | Color space is Linear | PASS | ProjectSettings/ProjectSettings.asset |
 | Lights use linear intensity | PASS | ProjectSettings/GraphicsSettings.asset |
 
