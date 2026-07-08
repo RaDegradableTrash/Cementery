@@ -48,18 +48,18 @@ public class MouseLook : MonoBehaviour
     [Header("Perspective")]
     [SerializeField] private KeyCode perspectiveToggleKey = KeyCode.V;
     [SerializeField] private bool startInThirdPerson = true;
-    [SerializeField] private float thirdPersonDistance = 6.5f;
-    [SerializeField] private float thirdPersonHeight = 1.2f;
+    [SerializeField] private float thirdPersonDistance = 8.5f;
+    [SerializeField] private float thirdPersonHeight = 1.4f;
     [SerializeField] private float thirdPersonLookAtHeight = 1.1f;
     [SerializeField] private float thirdPersonShoulderOffset = 0f;
     [SerializeField] private float thirdPersonDefaultPitch = 32f;
     [SerializeField] private float thirdPersonMinPitch = 18f;
     [SerializeField] private float thirdPersonMaxPitch = 58f;
-    [SerializeField] private float thirdPersonPositionSharpness = 9f;
-    [SerializeField] private float thirdPersonRotationSharpness = 14f;
-    [SerializeField] private float thirdPersonMaxRoll = 8f;
-    [SerializeField] private float thirdPersonRollFromMouse = 0.45f;
-    [SerializeField] private float thirdPersonRollReturnSharpness = 7f;
+    [SerializeField] private float thirdPersonPositionSharpness = 7f;
+    [SerializeField] private float thirdPersonRotationSharpness = 10f;
+    [SerializeField] private float thirdPersonMaxRoll = 2.5f;
+    [SerializeField] private float thirdPersonRollFromMouse = 0.12f;
+    [SerializeField] private float thirdPersonRollReturnSharpness = 10f;
     [SerializeField] private float thirdPersonCollisionRadius = 0.28f;
     [SerializeField] private float thirdPersonCollisionPadding = 0.12f;
     [SerializeField] private LayerMask thirdPersonCollisionMask = ~0;
@@ -459,7 +459,7 @@ public void SetBaseRotation(Quaternion targetRotation)
     void NormalizeThirdPersonSettings()
     {
         if (thirdPersonDistance <= 0.01f)
-            thirdPersonDistance = 6.5f;
+            thirdPersonDistance = 8.5f;
         if (thirdPersonLookAtHeight <= 0.01f)
             thirdPersonLookAtHeight = 1.1f;
         if (thirdPersonDefaultPitch <= 0.01f)
@@ -470,15 +470,15 @@ public void SetBaseRotation(Quaternion targetRotation)
             thirdPersonMaxPitch = 58f;
         }
         if (thirdPersonPositionSharpness <= 0.01f)
-            thirdPersonPositionSharpness = 14f;
+            thirdPersonPositionSharpness = 7f;
         if (thirdPersonRotationSharpness <= 0.01f)
-            thirdPersonRotationSharpness = 18f;
+            thirdPersonRotationSharpness = 10f;
         if (thirdPersonMaxRoll <= 0.01f)
-            thirdPersonMaxRoll = 8f;
+            thirdPersonMaxRoll = 2.5f;
         if (thirdPersonRollFromMouse <= 0.01f)
-            thirdPersonRollFromMouse = 0.45f;
+            thirdPersonRollFromMouse = 0.12f;
         if (thirdPersonRollReturnSharpness <= 0.01f)
-            thirdPersonRollReturnSharpness = 7f;
+            thirdPersonRollReturnSharpness = 10f;
         if (thirdPersonCollisionRadius <= 0.01f)
             thirdPersonCollisionRadius = 0.28f;
         if (thirdPersonCollisionPadding <= 0.01f)
@@ -506,8 +506,8 @@ public void SetBaseRotation(Quaternion targetRotation)
         float minPitch = Mathf.Min(thirdPersonMinPitch, thirdPersonMaxPitch);
         float maxPitch = Mathf.Max(thirdPersonMinPitch, thirdPersonMaxPitch);
         float orbitPitch = Mathf.Clamp(_thirdPersonPitch, minPitch, maxPitch);
-        float distance = Mathf.Clamp(thirdPersonDistance, 4f, 9f);
-        float height = Mathf.Clamp(thirdPersonHeight, 0f, 3f);
+        float distance = Mathf.Clamp(thirdPersonDistance, 6f, 12f);
+        float height = Mathf.Clamp(thirdPersonHeight, 0f, 4f);
         _thirdPersonRoll = Mathf.Lerp(
             _thirdPersonRoll,
             0f,
