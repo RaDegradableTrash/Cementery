@@ -74,6 +74,7 @@ namespace Cementery.Rendering
 
             yield return new WaitForSecondsRealtime(SceneWarmupSeconds);
 
+            VisualPerformanceSampler.EnsureRunning();
             ConfigureEvidenceCamera();
             _originalAutoAdvance = _dayNightController.autoAdvance;
             _originalControlFog = _dayNightController.controlFog;

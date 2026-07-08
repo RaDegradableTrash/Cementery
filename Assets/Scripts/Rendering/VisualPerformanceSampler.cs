@@ -30,25 +30,28 @@ namespace Cementery.Rendering
 
         public static bool TryWriteImmediateSample()
         {
-            VisualPerformanceSampler sampler = FindFirstObjectByType<VisualPerformanceSampler>(FindObjectsInactive.Include);
-            if (sampler == null)
-                return false;
-
+            VisualPerformanceSampler sampler = EnsureRunning();
             bool wroteSample = sampler.WriteReport();
             sampler._elapsedSinceReport = 0f;
             sampler._worstFrameMs = 0f;
             return wroteSample;
         }
 
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
-        private static void Bootstrap()
+        public static VisualPerformanceSampler EnsureRunning()
         {
-            if (FindFirstObjectByType<VisualPerformanceSampler>(FindObjectsInactive.Include) != null)
-                return;
+            VisualPerformanceSampler sampler = FindFirstObjectByType<VisualPerformanceSampler>(FindObjectsInactive.Include);
+            if (sampler != null)
+                return sampler;
 
             GameObject go = new GameObject("VisualPerformanceSampler");
             DontDestroyOnLoad(go);
-            go.AddComponent<VisualPerformanceSampler>();
+            return go.AddComponent<VisualPerformanceSampler>();
+        }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        private static void Bootstrap()
+        {
+            EnsureRunning();
         }
 
         private void Awake()

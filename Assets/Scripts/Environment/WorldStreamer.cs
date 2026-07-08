@@ -12,7 +12,7 @@ namespace EnvironmentSystem
         public bool HasLoadedAnyChunks => _loadedChunks.Count > 0;
         public bool DistantTerrainProxyActive => _distantTerrainObject != null && _distantTerrainObject.activeInHierarchy && _distantTerrainMesh != null;
         public int DistantTerrainProxyVertexCount => _distantTerrainMesh != null ? _distantTerrainMesh.vertexCount : 0;
-        public float DistantTerrainProxyCoverageRadiusMeters => Mathf.Max(chunkSizeX, chunkSizeZ) * Mathf.Max(0, distantTerrainRange);
+        public float DistantTerrainProxyCoverageRadiusMeters => Mathf.Max(chunkSizeX, chunkSizeZ) * Mathf.Max(0, GetEffectiveDistantTerrainRange());
         public float DistantTerrainCameraFarClipTarget => distantTerrainCameraFarClip;
         private const int MinimumRuntimeLoadingRange = 3;
         private const int MinimumRuntimeConcurrentLoads = 2;
@@ -20,6 +20,7 @@ namespace EnvironmentSystem
         private const int MinimumRuntimeVisualReadyRangeBonus = 2;
         private const int MinimumRuntimeHighSpeedForwardRange = 6;
         private const int MinimumRuntimeDistantTerrainRange = 32;
+        private const float MinimumRuntimeDistantTerrainCoverageMeters = 8192f;
         private const int MinimumRuntimeDistantSamplesPerChunk = 2;
         private const float MinimumRuntimeDistantCameraFarClip = 12000f;
 
@@ -80,7 +81,7 @@ namespace EnvironmentSystem
         [Tooltip("Creates a low-cost terrain mesh under streamed chunks so very distant terrain is visible immediately while real chunks load.")]
         public bool enableDistantTerrainProxy = true;
         [Tooltip("How many chunk rings the far terrain proxy covers from the tracked target.")]
-        [Range(8, 48)] public int distantTerrainRange = 32;
+        [Range(8, 96)] public int distantTerrainRange = 64;
         [Tooltip("Low-detail mesh subdivisions per chunk for the far terrain proxy.")]
         [Range(1, 6)] public int distantTerrainSamplesPerChunk = 2;
         [Tooltip("Drops the far proxy slightly under real chunks to prevent z-fighting when detailed chunks arrive.")]
@@ -852,7 +853,7 @@ namespace EnvironmentSystem
             RefreshDistantTerrainHeightSource();
             RefreshDistantTerrainMaterial();
 
-            int range = Mathf.Max(1, distantTerrainRange);
+            int range = GetEffectiveDistantTerrainRange();
             int samplesPerChunk = Mathf.Max(1, distantTerrainSamplesPerChunk);
             bool needsRebuild =
                 _distantTerrainMesh == null ||
@@ -877,6 +878,18 @@ namespace EnvironmentSystem
             _lastDistantChunkSizeX = chunkSizeX;
             _lastDistantChunkSizeZ = chunkSizeZ;
             _lastDistantTerrainHeightSource = _distantTerrainHeightSource;
+        }
+
+        private int GetEffectiveDistantTerrainRange()
+        {
+            int range = Mathf.Max(1, distantTerrainRange);
+            float chunkSpan = Mathf.Max(chunkSizeX, chunkSizeZ);
+            if (chunkSpan > 0.1f)
+            {
+                range = Mathf.Max(range, Mathf.CeilToInt(MinimumRuntimeDistantTerrainCoverageMeters / chunkSpan));
+            }
+
+            return range;
         }
 
         private void EnsureCameraFarClip()
