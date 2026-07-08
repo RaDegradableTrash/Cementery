@@ -34,11 +34,14 @@
 *   **Center Of Mass**: 拖入 `CoM_Pivot`
 *   **Motor Torque**: 2500 - 3500
 *   **Brake Torque**: 5000
+*   **Fallback Center Of Mass**: 建议保持在 `(0, -1.1, 0)` 左右；数值越低越不容易翻车。
+*   **High Speed Steer Reduction**: 0.45 - 0.65，速度越高方向越钝，避免高速小输入导致侧翻。
+*   **Anti Roll Force**: 8000 - 12000，`RVController` 会自动按左右轮对施加防倾斜力。
+*   **Roll Angular Damping**: 2 - 3，抑制车身绕前进方向的突然滚转。
+*   **Max Driving Angular Velocity**: 3 - 4，限制驾驶时的最大旋转速度。
 
-### 2.3 AntiRollBar (防倾斜 - 关键)
-*建议前后轴各挂一个或直接在根节点挂两个：*
-*   **Anti Roll Force**: 5000 (如果转弯易翻车，请调高此值)
-*   **Wheel L/R**: 对应左右轮对。
+### 2.3 Stability Tuning (防翻车调试)
+优先调 `Fallback Center Of Mass`、`High Speed Steer Reduction` 和 `Anti Roll Force`。只有在普通中速转弯、路肩、区块边界仍会侧翻时再继续加大防倾斜数值，避免车辆像被固定在地面上一样失去重量感。
 
 ### 2.4 RVInteriorInteraction (车内交互)
 *   **Player Parent**: 拖入 `RV_Root` (确保玩家进入后随车移动)

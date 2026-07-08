@@ -39,6 +39,16 @@ namespace EnvironmentSystem
         [Tooltip("Minimum time between allowing loaded chunk scenes to activate. This smooths the heavier activation frame.")]
         [Min(0f)] public float loadActivationInterval = 0.12f;
 
+        [Header("Vision Distance")]
+        [Tooltip("Extra chunks to stream ahead of the current travel direction.")]
+        [Range(0, 4)] public int forwardExtraRange = 2;
+        [Tooltip("Half-width of the forward streaming band. 1 loads a 3-chunk-wide strip ahead.")]
+        [Range(0, 3)] public int forwardBandHalfWidth = 1;
+        [Tooltip("Movement speed in m/s before velocity controls the forward streaming direction. Below this, target forward is used.")]
+        [Min(0f)] public float predictiveStreamingMinSpeed = 3f;
+        [Tooltip("How strongly chunks ahead are prioritized over same-distance side/rear chunks.")]
+        [Range(0f, 2f)] public float forwardPriorityBias = 0.75f;
+
         private HashSet<string> _requestedChunks = new HashSet<string>();
         private HashSet<string> _loadedChunks = new HashSet<string>();
         private Dictionary<string, Coroutine> _unloadRoutines = new Dictionary<string, Coroutine>();
@@ -50,8 +60,13 @@ namespace EnvironmentSystem
         private readonly List<string> _queuedChunkBuffer = new List<string>(49);
         private readonly HashSet<string> _queuedChunkBufferSet = new HashSet<string>();
         private readonly List<Vector2Int> _streamingOffsets = new List<Vector2Int>(49);
+        private readonly HashSet<Vector2Int> _streamingOffsetSet = new HashSet<Vector2Int>();
         private int _activeLoads = 0;
         private int _cachedOffsetRange = int.MinValue;
+        private int _cachedForwardExtraRange = int.MinValue;
+        private int _cachedForwardBandHalfWidth = int.MinValue;
+        private Vector2Int _cachedForwardGrid = new Vector2Int(int.MinValue, int.MinValue);
+        private Vector2Int _lastForwardGrid = new Vector2Int(int.MinValue, int.MinValue);
         private Coroutine _drainLoadQueueRoutine;
         private float _nextLoadStartTime;
         private float _nextLoadActivationTime;
@@ -69,6 +84,8 @@ namespace EnvironmentSystem
         private int _lastGridZ = int.MinValue;
         private float _nextTargetRefreshTime = -1f;
         private const float TargetRefreshInterval = 0.75f;
+        private Vector3 _lastTargetPosition;
+        private bool _hasLastTargetPosition;
         private GameObject _cachedPlayer;
         private Renderer _cachedPlayerRenderer;
         private RVSystem.RVController _cachedRv;
@@ -123,12 +140,14 @@ namespace EnvironmentSystem
                 Vector3 pos = trackingTarget.position;
                 int gridX = Mathf.RoundToInt(pos.x / chunkSizeX);
                 int gridZ = Mathf.RoundToInt(pos.z / chunkSizeZ);
+                Vector2Int forwardGrid = ResolveForwardGridDirection(pos, shouldRunScheduledCheck);
 
-                if (gridX != _lastGridX || gridZ != _lastGridZ)
+                if (gridX != _lastGridX || gridZ != _lastGridZ || forwardGrid != _lastForwardGrid)
                 {
                     _lastGridX = gridX;
                     _lastGridZ = gridZ;
-                    UpdateGridChunks(gridX, gridZ);
+                    _lastForwardGrid = forwardGrid;
+                    UpdateGridChunks(gridX, gridZ, forwardGrid);
                 }
             }
 
@@ -210,15 +229,52 @@ namespace EnvironmentSystem
             }
         }
 
-        private void UpdateGridChunks(int centerGridX, int centerGridZ)
+        private Vector2Int ResolveForwardGridDirection(Vector3 currentPosition, bool updateVelocitySample)
+        {
+            Vector3 movement = Vector3.zero;
+            if (_hasLastTargetPosition)
+                movement = currentPosition - _lastTargetPosition;
+
+            if (updateVelocitySample || !_hasLastTargetPosition)
+            {
+                _lastTargetPosition = currentPosition;
+                _hasLastTargetPosition = true;
+            }
+
+            Vector3 direction = movement.sqrMagnitude >= predictiveStreamingMinSpeed * predictiveStreamingMinSpeed * checkInterval * checkInterval
+                ? movement
+                : trackingTarget != null ? trackingTarget.forward : Vector3.zero;
+
+            direction.y = 0f;
+            if (direction.sqrMagnitude < 0.001f)
+                return Vector2Int.zero;
+
+            direction.Normalize();
+            int x = Mathf.Abs(direction.x) > 0.35f ? (direction.x > 0f ? 1 : -1) : 0;
+            int z = Mathf.Abs(direction.z) > 0.35f ? (direction.z > 0f ? 1 : -1) : 0;
+
+            if (x == 0 && z == 0)
+            {
+                if (Mathf.Abs(direction.x) >= Mathf.Abs(direction.z))
+                    x = direction.x >= 0f ? 1 : -1;
+                else
+                    z = direction.z >= 0f ? 1 : -1;
+            }
+
+            return new Vector2Int(x, z);
+        }
+
+        private void UpdateGridChunks(int centerGridX, int centerGridZ, Vector2Int forwardGrid)
         {
             int range = loadingRange;
+            int extraRange = forwardExtraRange;
             if (Application.platform == RuntimePlatform.WebGLPlayer)
             {
                 range = Mathf.Max(1, loadingRange - 1);
+                extraRange = Mathf.Max(0, forwardExtraRange - 1);
             }
 
-            EnsureStreamingOffsets(range);
+            EnsureStreamingOffsets(range, extraRange, forwardGrid);
 
             _requiredChunks.Clear();
             for (int i = 0; i < _streamingOffsets.Count; i++)
@@ -233,29 +289,69 @@ namespace EnvironmentSystem
             int gridSizeDim = range * 2 + 1;
             if (verboseLogging)
             {
-                Debug.Log($"<color=#38bdf8><b>[WorldStreamer]</b></color> Grid updated. Center ({centerGridX}, {centerGridZ}). Loading {gridSizeDim}x{gridSizeDim} grid.");
+                Debug.Log($"<color=#38bdf8><b>[WorldStreamer]</b></color> Grid updated. Center ({centerGridX}, {centerGridZ}). Loading {gridSizeDim}x{gridSizeDim} base grid plus {extraRange} forward chunks toward {forwardGrid}.");
             }
             RequestChunks(_requiredChunks);
         }
 
-        private void EnsureStreamingOffsets(int range)
+        private void EnsureStreamingOffsets(int range, int extraRange, Vector2Int forwardGrid)
         {
-            if (_cachedOffsetRange == range)
+            int bandHalfWidth = forwardGrid == Vector2Int.zero ? 0 : forwardBandHalfWidth;
+            if (_cachedOffsetRange == range &&
+                _cachedForwardExtraRange == extraRange &&
+                _cachedForwardBandHalfWidth == bandHalfWidth &&
+                _cachedForwardGrid == forwardGrid)
+            {
                 return;
+            }
 
             _cachedOffsetRange = range;
+            _cachedForwardExtraRange = extraRange;
+            _cachedForwardBandHalfWidth = bandHalfWidth;
+            _cachedForwardGrid = forwardGrid;
             _streamingOffsets.Clear();
+            _streamingOffsetSet.Clear();
 
             for (int dx = -range; dx <= range; dx++)
             {
                 for (int dz = -range; dz <= range; dz++)
                 {
-                    _streamingOffsets.Add(new Vector2Int(dx, dz));
+                    AddStreamingOffset(new Vector2Int(dx, dz));
                 }
             }
 
-            // Closest chunks are queued first so the playable area fills in before far edges.
-            _streamingOffsets.Sort((a, b) => (a.x * a.x + a.y * a.y).CompareTo(b.x * b.x + b.y * b.y));
+            if (extraRange > 0 && forwardGrid != Vector2Int.zero)
+            {
+                Vector2Int lateral = new Vector2Int(-forwardGrid.y, forwardGrid.x);
+                for (int distance = range + 1; distance <= range + extraRange; distance++)
+                {
+                    for (int side = -bandHalfWidth; side <= bandHalfWidth; side++)
+                    {
+                        AddStreamingOffset(new Vector2Int(
+                            forwardGrid.x * distance + lateral.x * side,
+                            forwardGrid.y * distance + lateral.y * side));
+                    }
+                }
+            }
+
+            _streamingOffsets.Sort((a, b) =>
+                ScoreStreamingOffset(a, forwardGrid).CompareTo(ScoreStreamingOffset(b, forwardGrid)));
+        }
+
+        private void AddStreamingOffset(Vector2Int offset)
+        {
+            if (_streamingOffsetSet.Add(offset))
+                _streamingOffsets.Add(offset);
+        }
+
+        private float ScoreStreamingOffset(Vector2Int offset, Vector2Int forwardGrid)
+        {
+            float distanceScore = offset.x * offset.x + offset.y * offset.y;
+            if (forwardGrid == Vector2Int.zero)
+                return distanceScore;
+
+            float forwardScore = offset.x * forwardGrid.x + offset.y * forwardGrid.y;
+            return distanceScore - forwardScore * forwardPriorityBias;
         }
 
         public void RequestChunks(List<string> chunkSceneNames)

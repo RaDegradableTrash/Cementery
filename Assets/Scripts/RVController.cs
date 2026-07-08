@@ -25,6 +25,20 @@ namespace RVSystem
         public float brakeTorque = 5000f;
         public float maxSteerAngle = 35f;
 
+        [Header("Stability")]
+        [Tooltip("Fallback center of mass when no centerOfMass transform is assigned. Lower values reduce rollover risk.")]
+        public Vector3 fallbackCenterOfMass = new Vector3(0f, -1.1f, 0f);
+        [Tooltip("Reduces steering lock as speed rises so the RV cannot snap-roll from small inputs.")]
+        [Range(0f, 1f)] public float highSpeedSteerReduction = 0.55f;
+        [Tooltip("Speed in m/s where high-speed steering reduction reaches full strength.")]
+        [Min(1f)] public float steerReductionSpeed = 18f;
+        [Tooltip("Force applied across left/right wheel pairs to resist body roll.")]
+        [Min(0f)] public float antiRollForce = 9500f;
+        [Tooltip("Angular damping applied around the RV forward axis to calm sudden tilt.")]
+        [Min(0f)] public float rollAngularDamping = 2.4f;
+        [Tooltip("Maximum Rigidbody angular velocity while driving.")]
+        [Min(0.5f)] public float maxDrivingAngularVelocity = 3.5f;
+
         private Rigidbody _rb;
         private bool _hasSetupKinematic = false;
         private float _startupTime;
@@ -37,6 +51,7 @@ namespace RVSystem
             if (_rb != null)
             {
                 _rb.isKinematic = true;
+                _rb.maxAngularVelocity = maxDrivingAngularVelocity;
             }
         }
 
@@ -182,6 +197,7 @@ namespace RVSystem
         void FixedUpdate()
         {
             ConfigureCenterOfMass(false);
+            ApplyStabilityAssist();
         }
 
         private void ConfigureCenterOfMass(bool force)
@@ -190,7 +206,7 @@ namespace RVSystem
 
             Vector3 targetCenterOfMass = centerOfMass != null
                 ? centerOfMass.localPosition
-                : new Vector3(0, -0.5f, 0);
+                : fallbackCenterOfMass;
 
             if (!force &&
                 _centerOfMassConfigured &&
@@ -212,7 +228,11 @@ namespace RVSystem
         public void ApplyInputs(float throttle, float steer, bool braking)
         {
             float torque = throttle * motorTorque;
-            float angle = steer * maxSteerAngle;
+            float speed01 = _rb != null
+                ? Mathf.Clamp01(_rb.velocity.magnitude / Mathf.Max(1f, steerReductionSpeed))
+                : 0f;
+            float steerScale = Mathf.Lerp(1f, Mathf.Clamp01(1f - highSpeedSteerReduction), speed01);
+            float angle = steer * maxSteerAngle * steerScale;
 
             foreach (var pair in wheels)
             {
@@ -224,6 +244,90 @@ namespace RVSystem
 
                 pair.collider.brakeTorque = braking ? brakeTorque : 0f;
             }
+        }
+
+        private void ApplyStabilityAssist()
+        {
+            if (_rb == null || _rb.isKinematic)
+                return;
+
+            _rb.maxAngularVelocity = Mathf.Max(0.5f, maxDrivingAngularVelocity);
+
+            if (rollAngularDamping > 0f)
+            {
+                Vector3 rollAxis = transform.forward;
+                float rollRate = Vector3.Dot(_rb.angularVelocity, rollAxis);
+                _rb.AddTorque(-rollAxis * rollRate * rollAngularDamping, ForceMode.Acceleration);
+            }
+
+            if (antiRollForce <= 0f || wheels.Count < 2)
+                return;
+
+            for (int i = 0; i < wheels.Count; i++)
+            {
+                WheelPair left = wheels[i];
+                if (left == null || left.collider == null)
+                    continue;
+
+                Vector3 leftLocal = transform.InverseTransformPoint(left.collider.transform.position);
+                if (leftLocal.x >= 0f)
+                    continue;
+
+                int rightIndex = FindOppositeWheelIndex(leftLocal.z);
+                if (rightIndex < 0)
+                    continue;
+
+                ApplyAntiRollPair(left.collider, wheels[rightIndex].collider);
+            }
+        }
+
+        private int FindOppositeWheelIndex(float localZ)
+        {
+            int bestIndex = -1;
+            float bestDistance = float.MaxValue;
+
+            for (int i = 0; i < wheels.Count; i++)
+            {
+                WheelPair candidate = wheels[i];
+                if (candidate == null || candidate.collider == null)
+                    continue;
+
+                Vector3 candidateLocal = transform.InverseTransformPoint(candidate.collider.transform.position);
+                if (candidateLocal.x <= 0f)
+                    continue;
+
+                float distance = Mathf.Abs(candidateLocal.z - localZ);
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    bestIndex = i;
+                }
+            }
+
+            return bestIndex;
+        }
+
+        private void ApplyAntiRollPair(WheelCollider left, WheelCollider right)
+        {
+            float leftTravel = GetSuspensionTravel(left, out bool leftGrounded);
+            float rightTravel = GetSuspensionTravel(right, out bool rightGrounded);
+            float force = (leftTravel - rightTravel) * antiRollForce;
+
+            if (leftGrounded)
+                _rb.AddForceAtPosition(left.transform.up * -force, left.transform.position, ForceMode.Force);
+
+            if (rightGrounded)
+                _rb.AddForceAtPosition(right.transform.up * force, right.transform.position, ForceMode.Force);
+        }
+
+        private static float GetSuspensionTravel(WheelCollider wheel, out bool grounded)
+        {
+            grounded = wheel.GetGroundHit(out WheelHit hit);
+            if (!grounded || wheel.suspensionDistance <= 0.001f)
+                return 1f;
+
+            float localHitY = wheel.transform.InverseTransformPoint(hit.point).y;
+            return Mathf.Clamp01((-localHitY - wheel.radius) / wheel.suspensionDistance);
         }
 
         public void StopVehicle()
