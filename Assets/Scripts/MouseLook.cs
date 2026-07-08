@@ -50,9 +50,9 @@ public class MouseLook : MonoBehaviour
     [Header("Perspective")]
     [SerializeField] private KeyCode perspectiveToggleKey = KeyCode.V;
     [SerializeField] private bool startInThirdPerson = true;
-    [SerializeField] private float thirdPersonDistance = 6.5f;
+    [SerializeField] private float thirdPersonDistance = 8.5f;
     [SerializeField] private float thirdPersonMinDistance = 3.5f;
-    [SerializeField] private float thirdPersonMaxDistance = 10f;
+    [SerializeField] private float thirdPersonMaxDistance = 12f;
     [SerializeField] private float thirdPersonZoomSpeed = 2.5f;
     [SerializeField] private float thirdPersonHeight = 1.2f;
     [SerializeField] private float thirdPersonLookAtHeight = 1.1f;
@@ -490,7 +490,7 @@ public void SetBaseRotation(Quaternion targetRotation)
         if (thirdPersonMinDistance <= 0.01f)
             thirdPersonMinDistance = 3.5f;
         if (thirdPersonMaxDistance <= thirdPersonMinDistance)
-            thirdPersonMaxDistance = Mathf.Max(thirdPersonMinDistance + 0.5f, 10f);
+            thirdPersonMaxDistance = Mathf.Max(thirdPersonMinDistance + 0.5f, 12f);
         thirdPersonDistance = Mathf.Clamp(thirdPersonDistance, thirdPersonMinDistance, thirdPersonMaxDistance);
         if (thirdPersonZoomSpeed <= 0.01f)
             thirdPersonZoomSpeed = 2.5f;
