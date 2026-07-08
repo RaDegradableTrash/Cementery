@@ -15,6 +15,8 @@ using Unity.Netcode;
 /// </summary>
 public class MouseLook : MonoBehaviour
 {
+    private const float DefaultThirdPersonMinPitch = -35f;
+
     [Header("References")]
     [Tooltip("Root player transform (PlayerEmpty). Receives horizontal yaw.")]
     [SerializeField] private Transform player;
@@ -48,12 +50,15 @@ public class MouseLook : MonoBehaviour
     [Header("Perspective")]
     [SerializeField] private KeyCode perspectiveToggleKey = KeyCode.V;
     [SerializeField] private bool startInThirdPerson = true;
-    [SerializeField] private float thirdPersonDistance = 6.5f;
+    [SerializeField] private float thirdPersonDistance = 8.5f;
+    [SerializeField] private float thirdPersonMinDistance = 3.5f;
+    [SerializeField] private float thirdPersonMaxDistance = 12f;
+    [SerializeField] private float thirdPersonZoomSpeed = 2.5f;
     [SerializeField] private float thirdPersonHeight = 1.2f;
     [SerializeField] private float thirdPersonLookAtHeight = 1.1f;
     [SerializeField] private float thirdPersonShoulderOffset = 0f;
     [SerializeField] private float thirdPersonDefaultPitch = 32f;
-    [SerializeField] private float thirdPersonMinPitch = 18f;
+    [SerializeField] private float thirdPersonMinPitch = DefaultThirdPersonMinPitch;
     [SerializeField] private float thirdPersonMaxPitch = 58f;
     [SerializeField] private float thirdPersonPositionSharpness = 7f;
     [SerializeField] private float thirdPersonRotationSharpness = 12f;
@@ -297,6 +302,7 @@ public void SetBaseRotation(Quaternion targetRotation)
         if (!ShouldUseAttractOrbit() && _thirdPersonActive)
         {
             ApplyThirdPersonLookDelta(mouseX, mouseY);
+            ApplyThirdPersonZoom();
             return;
         }
 
@@ -465,19 +471,37 @@ public void SetBaseRotation(Quaternion targetRotation)
             Mathf.Abs(thirdPersonMaxRoll));
     }
 
+    void ApplyThirdPersonZoom()
+    {
+        float scroll = Input.mouseScrollDelta.y;
+        if (Mathf.Approximately(scroll, 0f))
+            return;
+
+        thirdPersonDistance = Mathf.Clamp(
+            thirdPersonDistance - scroll * thirdPersonZoomSpeed,
+            Mathf.Min(thirdPersonMinDistance, thirdPersonMaxDistance),
+            Mathf.Max(thirdPersonMinDistance, thirdPersonMaxDistance));
+    }
+
     void NormalizeThirdPersonSettings()
     {
         if (thirdPersonDistance <= 0.01f)
             thirdPersonDistance = 6.5f;
+        if (thirdPersonMinDistance <= 0.01f)
+            thirdPersonMinDistance = 3.5f;
+        if (thirdPersonMaxDistance <= thirdPersonMinDistance)
+            thirdPersonMaxDistance = Mathf.Max(thirdPersonMinDistance + 0.5f, 12f);
+        thirdPersonDistance = Mathf.Clamp(thirdPersonDistance, thirdPersonMinDistance, thirdPersonMaxDistance);
+        if (thirdPersonZoomSpeed <= 0.01f)
+            thirdPersonZoomSpeed = 2.5f;
         if (thirdPersonLookAtHeight <= 0.01f)
             thirdPersonLookAtHeight = 1.1f;
         if (thirdPersonDefaultPitch <= 0.01f)
             thirdPersonDefaultPitch = 32f;
-        if (thirdPersonMinPitch <= 0.01f && thirdPersonMaxPitch <= 0.01f)
-        {
-            thirdPersonMinPitch = 18f;
+        if (thirdPersonMinPitch > -0.01f)
+            thirdPersonMinPitch = DefaultThirdPersonMinPitch;
+        if (thirdPersonMaxPitch <= 0.01f)
             thirdPersonMaxPitch = 58f;
-        }
         if (thirdPersonPositionSharpness <= 0.01f)
             thirdPersonPositionSharpness = 7f;
         if (thirdPersonRotationSharpness <= 0.01f)
@@ -523,7 +547,10 @@ public void SetBaseRotation(Quaternion targetRotation)
         float minPitch = Mathf.Min(thirdPersonMinPitch, thirdPersonMaxPitch);
         float maxPitch = Mathf.Max(thirdPersonMinPitch, thirdPersonMaxPitch);
         float orbitPitch = Mathf.Clamp(_thirdPersonPitch, minPitch, maxPitch);
-        float distance = Mathf.Clamp(thirdPersonDistance, 5f, 12f);
+        float distance = Mathf.Clamp(
+            thirdPersonDistance,
+            Mathf.Min(thirdPersonMinDistance, thirdPersonMaxDistance),
+            Mathf.Max(thirdPersonMinDistance, thirdPersonMaxDistance));
         float height = Mathf.Clamp(thirdPersonHeight, 0f, 3f);
         _thirdPersonRoll = Mathf.Lerp(
             _thirdPersonRoll,
