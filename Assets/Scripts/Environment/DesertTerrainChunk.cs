@@ -20,6 +20,7 @@ namespace EnvironmentSystem
         {
             if (chunk == null) return;
             _chunks[chunk.GridCoord] = chunk;
+            WorldStreamer.Instance?.ApplyVisualReadinessToRegisteredChunk(chunk);
         }
 
         public static void Unregister(DesertTerrainChunk chunk)

@@ -31,19 +31,19 @@ namespace EnvironmentSystem
         public string sceneNamePrefix = "Desert_Chunk";
 
         [Tooltip("The grid range of chunks to load around the player (2 is a 5x5 grid, 3 is a 7x7 grid).")]
-        public int loadingRange = 2;
+        public int loadingRange = 3;
         [Tooltip("Minimum grid range kept in WebGL. Higher values make distant chunks appear sooner at the cost of more loaded scenes.")]
-        [Range(1, 4)] public int minimumWebGLLoadingRange = 2;
+        [Range(1, 4)] public int minimumWebGLLoadingRange = 3;
         [Tooltip("Maximum additive chunk scene loads running at once. Lower values reduce frame spikes.")]
-        [Min(1)] public int maxConcurrentLoads = 1;
+        [Min(1)] public int maxConcurrentLoads = 2;
         [Tooltip("Minimum time between starting additive chunk scene loads. Small spacing smooths activation spikes while moving fast.")]
-        [Min(0f)] public float loadStartInterval = 0.1f;
+        [Min(0f)] public float loadStartInterval = 0.05f;
         [Tooltip("Minimum time between allowing loaded chunk scenes to activate. This smooths the heavier activation frame.")]
-        [Min(0f)] public float loadActivationInterval = 0.12f;
+        [Min(0f)] public float loadActivationInterval = 0.06f;
 
         [Header("Vision Distance")]
         [Tooltip("Extra chunks to stream ahead of the current travel direction.")]
-        [Range(0, 4)] public int forwardExtraRange = 2;
+        [Range(0, 4)] public int forwardExtraRange = 4;
         [Tooltip("Half-width of the forward streaming band. 1 loads a 3-chunk-wide strip ahead.")]
         [Range(0, 3)] public int forwardBandHalfWidth = 1;
         [Tooltip("Movement speed in m/s before velocity controls the forward streaming direction. Below this, target forward is used.")]
@@ -51,7 +51,7 @@ namespace EnvironmentSystem
         [Tooltip("How strongly chunks ahead are prioritized over same-distance side/rear chunks.")]
         [Range(0f, 2f)] public float forwardPriorityBias = 0.75f;
         [Tooltip("Extra grid rings that may become visible once loaded. This lets preloaded distant chunks appear before the player reaches them.")]
-        [Range(0, 2)] public int visualReadyRangeBonus = 1;
+        [Range(0, 2)] public int visualReadyRangeBonus = 2;
 
         [Header("Vehicle Predictive Streaming")]
         [Tooltip("Extra nearby radius while the tracked target is moving at vehicle speed.")]
@@ -59,7 +59,7 @@ namespace EnvironmentSystem
         [Tooltip("Speed in m/s where the vehicle range bonus is applied.")]
         [Min(0f)] public float vehicleStreamingSpeed = 8f;
         [Tooltip("Forward range used once the tracked target is moving quickly enough to outrun the base radius.")]
-        [Range(0, 6)] public int highSpeedForwardExtraRange = 4;
+        [Range(0, 6)] public int highSpeedForwardExtraRange = 6;
         [Tooltip("Speed in m/s where high-speed forward prediction reaches full strength.")]
         [Min(0f)] public float highSpeedStreamingSpeed = 18f;
         [Tooltip("Maximum chunk loads started per streaming refresh. This bounds bursts when the requested range expands.")]
@@ -76,6 +76,7 @@ namespace EnvironmentSystem
         private readonly List<string> _queuedChunkBuffer = new List<string>(49);
         private readonly HashSet<string> _queuedChunkBufferSet = new HashSet<string>();
         private readonly HashSet<string> _visuallyReadyChunks = new HashSet<string>();
+        private readonly HashSet<string> _visibleRequestedChunks = new HashSet<string>();
         private readonly List<Vector2Int> _streamingOffsets = new List<Vector2Int>(49);
         private readonly HashSet<Vector2Int> _streamingOffsetSet = new HashSet<Vector2Int>();
         private int _activeLoads = 0;
@@ -439,6 +440,7 @@ namespace EnvironmentSystem
             }
 
             ReprioritizeLoadQueue(chunkSceneNames);
+            PruneVisibleRequestedChunks();
 
             // Unload chunks that are no longer requested.
             _chunksToUnload.Clear();
@@ -706,8 +708,20 @@ namespace EnvironmentSystem
                 if (chunk == null) continue;
 
                 string sceneName = $"{sceneNamePrefix}_{kv.Key.x}_{kv.Key.y}";
-                chunk.SetStreamedVisualReady(_visuallyReadyChunks.Contains(sceneName));
+                chunk.SetStreamedVisualReady(IsChunkVisuallyReady(sceneName));
             }
+        }
+
+        public void ApplyVisualReadinessToRegisteredChunk(DesertTerrainChunk chunk)
+        {
+            if (chunk == null)
+            {
+                return;
+            }
+
+            Vector2Int coord = chunk.GridCoord;
+            string sceneName = $"{sceneNamePrefix}_{coord.x}_{coord.y}";
+            chunk.SetStreamedVisualReady(IsChunkVisuallyReady(sceneName));
         }
 
         private void ApplyVisualReadinessToChunk(string sceneName)
@@ -720,8 +734,58 @@ namespace EnvironmentSystem
             DesertTerrainChunk chunk = ChunkRegistry.Get(coord);
             if (chunk != null)
             {
-                chunk.SetStreamedVisualReady(_visuallyReadyChunks.Contains(sceneName));
+                chunk.SetStreamedVisualReady(IsChunkVisuallyReady(sceneName));
             }
+        }
+
+        private bool IsChunkVisuallyReady(string sceneName)
+        {
+            if (string.IsNullOrEmpty(sceneName))
+            {
+                return false;
+            }
+
+            if (_visuallyReadyChunks.Count == 0)
+            {
+                return true;
+            }
+
+            if (_visibleRequestedChunks.Contains(sceneName))
+            {
+                return true;
+            }
+
+            bool ready = _visuallyReadyChunks.Contains(sceneName);
+            if (ready)
+            {
+                _visibleRequestedChunks.Add(sceneName);
+            }
+
+            return ready;
+        }
+
+        private void PruneVisibleRequestedChunks()
+        {
+            if (_visibleRequestedChunks.Count == 0)
+            {
+                return;
+            }
+
+            _queuedChunkBuffer.Clear();
+            foreach (string sceneName in _visibleRequestedChunks)
+            {
+                if (!_requestedChunks.Contains(sceneName))
+                {
+                    _queuedChunkBuffer.Add(sceneName);
+                }
+            }
+
+            for (int i = 0; i < _queuedChunkBuffer.Count; i++)
+            {
+                _visibleRequestedChunks.Remove(_queuedChunkBuffer[i]);
+            }
+
+            _queuedChunkBuffer.Clear();
         }
 
         private bool TryParseSceneGrid(string sceneName, out Vector2Int coord)
