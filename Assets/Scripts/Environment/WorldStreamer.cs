@@ -68,13 +68,13 @@ namespace EnvironmentSystem
         [Tooltip("Creates a low-cost terrain mesh under streamed chunks so very distant terrain is visible immediately while real chunks load.")]
         public bool enableDistantTerrainProxy = true;
         [Tooltip("How many chunk rings the far terrain proxy covers from the tracked target.")]
-        [Range(6, 24)] public int distantTerrainRange = 18;
+        [Range(8, 48)] public int distantTerrainRange = 32;
         [Tooltip("Low-detail mesh subdivisions per chunk for the far terrain proxy.")]
-        [Range(1, 6)] public int distantTerrainSamplesPerChunk = 3;
+        [Range(1, 6)] public int distantTerrainSamplesPerChunk = 2;
         [Tooltip("Drops the far proxy slightly under real chunks to prevent z-fighting when detailed chunks arrive.")]
         [Min(0f)] public float distantTerrainVerticalOffset = 1.25f;
         [Tooltip("Minimum camera far clip plane while distant terrain is enabled.")]
-        [Min(1000f)] public float distantTerrainCameraFarClip = 6000f;
+        [Min(1000f)] public float distantTerrainCameraFarClip = 12000f;
 
         private HashSet<string> _requestedChunks = new HashSet<string>();
         private HashSet<string> _loadedChunks = new HashSet<string>();
