@@ -54,6 +54,16 @@ public class CarControl : MonoBehaviour
     public float steeringRangeAtMaxSpeed = 10;
     public float centreOfGravityOffset = -1f;
 
+    [Header("Rollover Stability")]
+    [Tooltip("Force applied between left/right wheel pairs to resist body roll without pinning the RV to the road.")]
+    [Min(0f)] public float antiRollForce = 12000f;
+    [Tooltip("Angular damping around the RV forward axis. Higher values calm sudden tilt after bumps and turns.")]
+    [Min(0f)] public float rollAngularDamping = 3.2f;
+    [Tooltip("Light sideways velocity damping applied only while wheels are grounded.")]
+    [Range(0f, 3f)] public float lateralVelocityDamping = 0.7f;
+    [Tooltip("Maximum Rigidbody angular velocity while the RV is under player control.")]
+    [Min(0.5f)] public float maxDrivingAngularVelocity = 3.5f;
+
     [Header("Transmission (Auto)")]
     [SerializeField] private float finalDriveRatio = 3.42f;
     [SerializeField] private float[] forwardGearRatios = new float[] { 3.5f, 2.0f, 1.4f, 1.0f, 0.75f, 0.6f };
@@ -663,6 +673,133 @@ public class CarControl : MonoBehaviour
 
         // ★★★ 燃油消耗管理（会自动熄火）★★★
         HandleFuelConsumption(throttleInput);
+    }
+
+    private void FixedUpdate()
+    {
+        ApplyRolloverStability();
+        lastFramePosition = transform.position;
+    }
+
+    private void ApplyRolloverStability()
+    {
+        if (rigidBody == null || rigidBody.isKinematic)
+        {
+            return;
+        }
+
+        rigidBody.maxAngularVelocity = Mathf.Max(0.5f, maxDrivingAngularVelocity);
+
+        if (rollAngularDamping > 0f)
+        {
+            Vector3 rollAxis = transform.forward;
+            float rollRate = Vector3.Dot(rigidBody.angularVelocity, rollAxis);
+            rigidBody.AddTorque(-rollAxis * rollRate * rollAngularDamping, ForceMode.Acceleration);
+        }
+
+        bool hasGroundedWheel = false;
+        if (antiRollForce > 0f && wheels != null)
+        {
+            for (int i = 0; i < wheels.Length; i++)
+            {
+                WheelControl left = wheels[i];
+                if (left == null || left.WheelCollider == null)
+                {
+                    continue;
+                }
+
+                Vector3 leftLocal = transform.InverseTransformPoint(left.WheelCollider.transform.position);
+                if (leftLocal.x >= 0f)
+                {
+                    continue;
+                }
+
+                int rightIndex = FindOppositeWheelIndex(leftLocal.z);
+                if (rightIndex < 0)
+                {
+                    continue;
+                }
+
+                ApplyAntiRollPair(left.WheelCollider, wheels[rightIndex].WheelCollider, ref hasGroundedWheel);
+            }
+        }
+
+        if (hasGroundedWheel && lateralVelocityDamping > 0f)
+        {
+            Vector3 velocity = rigidBody.velocity;
+            Vector3 lateralVelocity = transform.right * Vector3.Dot(velocity, transform.right);
+            rigidBody.AddForce(-lateralVelocity * lateralVelocityDamping, ForceMode.Acceleration);
+        }
+    }
+
+    private int FindOppositeWheelIndex(float localZ)
+    {
+        int bestIndex = -1;
+        float bestDistance = float.MaxValue;
+
+        if (wheels == null)
+        {
+            return bestIndex;
+        }
+
+        for (int i = 0; i < wheels.Length; i++)
+        {
+            WheelControl candidate = wheels[i];
+            if (candidate == null || candidate.WheelCollider == null)
+            {
+                continue;
+            }
+
+            Vector3 candidateLocal = transform.InverseTransformPoint(candidate.WheelCollider.transform.position);
+            if (candidateLocal.x <= 0f)
+            {
+                continue;
+            }
+
+            float distance = Mathf.Abs(candidateLocal.z - localZ);
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                bestIndex = i;
+            }
+        }
+
+        return bestIndex;
+    }
+
+    private void ApplyAntiRollPair(WheelCollider left, WheelCollider right, ref bool hasGroundedWheel)
+    {
+        if (left == null || right == null)
+        {
+            return;
+        }
+
+        float leftTravel = GetSuspensionTravel(left, out bool leftGrounded);
+        float rightTravel = GetSuspensionTravel(right, out bool rightGrounded);
+        hasGroundedWheel |= leftGrounded || rightGrounded;
+
+        float force = (leftTravel - rightTravel) * antiRollForce;
+        if (leftGrounded)
+        {
+            rigidBody.AddForceAtPosition(left.transform.up * -force, left.transform.position, ForceMode.Force);
+        }
+
+        if (rightGrounded)
+        {
+            rigidBody.AddForceAtPosition(right.transform.up * force, right.transform.position, ForceMode.Force);
+        }
+    }
+
+    private static float GetSuspensionTravel(WheelCollider wheel, out bool grounded)
+    {
+        grounded = wheel.GetGroundHit(out WheelHit hit);
+        if (!grounded || wheel.suspensionDistance <= 0.001f)
+        {
+            return 1f;
+        }
+
+        float localHitY = wheel.transform.InverseTransformPoint(hit.point).y;
+        return Mathf.Clamp01((-localHitY - wheel.radius) / wheel.suspensionDistance);
     }
 
     private void UpdateSpeedDisplay(float displaySpeed)
