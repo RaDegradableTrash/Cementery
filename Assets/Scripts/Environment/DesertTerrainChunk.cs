@@ -171,9 +171,6 @@ namespace EnvironmentSystem
 
         private void Start()
         {
-            if (Application.isPlaying)
-                CactusRuntimeCleaner.CleanLoadedScenes();
-
             MeshFilter filter = GetComponent<MeshFilter>();
             if (filter == null || filter.sharedMesh == null)
             {
@@ -1665,11 +1662,8 @@ namespace EnvironmentSystem
                     // Do not skip this.gameObject just in case props are parented to it
                     foreach (Rigidbody rb in root.GetComponentsInChildren<Rigidbody>(true))
                     {
-                        if (CactusRuntimeCleaner.IsCactusName(rb.gameObject.name))
-                        {
-                            Destroy(rb.gameObject);
-                            continue;
-                        }
+                        // Leave Cacti alone
+                        if (rb.gameObject.name.Contains("Cactus")) continue;
 
                         WorldObject wo = rb.GetComponent<WorldObject>();
                         
