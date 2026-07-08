@@ -46,21 +46,19 @@ public class CockpitCam : MonoBehaviour
 
 	[Header("Vehicle Third-Person")]
 	[SerializeField] private KeyCode switchPerspectiveKey = KeyCode.V;
-	[SerializeField] private float vehicleThirdPersonDistance = 17f;
-	[SerializeField] private float vehicleThirdPersonHeight = 8.5f;
-	[SerializeField] private float vehicleThirdPersonLookAhead = 3f;
-	[SerializeField] private float vehicleThirdPersonPitch = 28f;
+	[SerializeField] private float vehicleThirdPersonDistance = 12f;
+	[SerializeField] private float vehicleThirdPersonHeight = 7f;
+	[SerializeField] private float vehicleThirdPersonLookAhead = 1.5f;
+	[SerializeField] private float vehicleThirdPersonPitch = 22f;
 	[SerializeField] private float vehicleThirdPersonMinPitch = -10f;
 	[SerializeField] private float vehicleThirdPersonMaxPitch = 45f;
-	[SerializeField] private float vehicleThirdPersonPositionSharpness = 6.5f;
-	[SerializeField] private float vehicleThirdPersonRotationSharpness = 11f;
+	[SerializeField] private float vehicleThirdPersonPositionSharpness = 10f;
+	[SerializeField] private float vehicleThirdPersonRotationSharpness = 14f;
 	[SerializeField] private float vehicleThirdPersonTargetSharpness = 12f;
-	[SerializeField] private float vehicleThirdPersonRecenterSpeed = 2.1f;
+	[SerializeField] private float vehicleThirdPersonRecenterSpeed = 1.5f;
 	[SerializeField] private float vehicleThirdPersonRecenterDelay = 0.65f;
-	[SerializeField] private float vehicleThirdPersonForwardYawOffset = 180f;
 	[SerializeField] private float vehicleThirdPersonCollisionRadius = 0.45f;
 	[SerializeField] private float vehicleThirdPersonCollisionPadding = 0.2f;
-	[SerializeField] private float vehicleThirdPersonVehicleClearance = 3f;
 	[SerializeField] private LayerMask vehicleThirdPersonCollisionMask = ~0;
 	[SerializeField] private QueryTriggerInteraction vehicleThirdPersonTriggerInteraction = QueryTriggerInteraction.Ignore;
 
@@ -311,7 +309,7 @@ public class CockpitCam : MonoBehaviour
 			vehicleThirdPersonYaw = 0f;
 			if (cockpitCamera != null)
 				cockpitCamera.transform.SetParent(null, true);
-			UpdateVehicleThirdPersonCamera(false);
+			UpdateVehicleThirdPersonCamera(snap);
 			return;
 		}
 
@@ -326,13 +324,13 @@ public class CockpitCam : MonoBehaviour
 	private void NormalizeVehicleThirdPersonSettings()
 	{
 		if (vehicleThirdPersonDistance <= 0.01f)
-			vehicleThirdPersonDistance = 17f;
+			vehicleThirdPersonDistance = 12f;
 		if (vehicleThirdPersonHeight <= 0.01f)
-			vehicleThirdPersonHeight = 8.5f;
+			vehicleThirdPersonHeight = 7f;
 		if (vehicleThirdPersonLookAhead <= 0.01f)
-			vehicleThirdPersonLookAhead = 3f;
+			vehicleThirdPersonLookAhead = 1.5f;
 		if (vehicleThirdPersonPitch <= 0.01f)
-			vehicleThirdPersonPitch = 28f;
+			vehicleThirdPersonPitch = 22f;
 		if (vehicleThirdPersonMinPitch <= -0.01f && vehicleThirdPersonMaxPitch <= 0.01f)
 			vehicleThirdPersonMaxPitch = 45f;
 		else if (Mathf.Approximately(vehicleThirdPersonMinPitch, vehicleThirdPersonMaxPitch))
@@ -341,21 +339,19 @@ public class CockpitCam : MonoBehaviour
 			vehicleThirdPersonMaxPitch = 45f;
 		}
 		if (vehicleThirdPersonPositionSharpness <= 0.01f)
-			vehicleThirdPersonPositionSharpness = 6.5f;
+			vehicleThirdPersonPositionSharpness = 10f;
 		if (vehicleThirdPersonRotationSharpness <= 0.01f)
-			vehicleThirdPersonRotationSharpness = 11f;
+			vehicleThirdPersonRotationSharpness = 14f;
 		if (vehicleThirdPersonTargetSharpness <= 0.01f)
 			vehicleThirdPersonTargetSharpness = 12f;
 		if (vehicleThirdPersonRecenterSpeed <= 0.01f)
-			vehicleThirdPersonRecenterSpeed = 2.1f;
+			vehicleThirdPersonRecenterSpeed = 1.5f;
 		if (vehicleThirdPersonRecenterDelay < 0f)
 			vehicleThirdPersonRecenterDelay = 0.65f;
 		if (vehicleThirdPersonCollisionRadius <= 0.01f)
 			vehicleThirdPersonCollisionRadius = 0.45f;
 		if (vehicleThirdPersonCollisionPadding <= 0.01f)
 			vehicleThirdPersonCollisionPadding = 0.2f;
-		if (vehicleThirdPersonVehicleClearance <= 0.01f)
-			vehicleThirdPersonVehicleClearance = 3f;
 	}
 
 	private void RestoreCockpitCameraTransform()
@@ -404,18 +400,7 @@ public class CockpitCam : MonoBehaviour
 			vehicleRoot = transform;
 
 		RecenterVehicleCameraBehindMovement(vehicleRoot);
-
-		Quaternion forwardBasis = Quaternion.Euler(0f, vehicleThirdPersonForwardYawOffset, 0f);
-		Vector3 vehicleForward = (vehicleRoot.rotation * forwardBasis) * Vector3.forward;
-		if (vehicleForward.sqrMagnitude < 0.001f)
-			vehicleForward = vehicleRoot.forward;
-		vehicleForward = Vector3.ProjectOnPlane(vehicleForward, Vector3.up);
-		if (vehicleForward.sqrMagnitude < 0.001f)
-			vehicleForward = Vector3.forward;
-		else
-			vehicleForward.Normalize();
-
-		float orbitYaw = Quaternion.LookRotation(vehicleForward, Vector3.up).eulerAngles.y + vehicleThirdPersonYaw;
+		float orbitYaw = vehicleRoot.eulerAngles.y + vehicleThirdPersonYaw;
 		float orbitPitch = Mathf.Clamp(
 			vehicleThirdPersonPitch,
 			Mathf.Min(vehicleThirdPersonMinPitch, vehicleThirdPersonMaxPitch),
@@ -423,7 +408,7 @@ public class CockpitCam : MonoBehaviour
 		Quaternion orbitRotation = Quaternion.Euler(orbitPitch, orbitYaw, 0f);
 		Vector3 rawLookTarget = vehicleRoot.position
 			+ Vector3.up * 2.2f
-			+ vehicleForward * vehicleThirdPersonLookAhead;
+			+ vehicleRoot.forward * vehicleThirdPersonLookAhead;
 		if (snap || !hasSmoothedVehicleThirdPersonLookTarget || Time.deltaTime <= 0f)
 		{
 			smoothedVehicleThirdPersonLookTarget = rawLookTarget;
@@ -434,16 +419,15 @@ public class CockpitCam : MonoBehaviour
 			float targetLerp = 1f - Mathf.Exp(-vehicleThirdPersonTargetSharpness * Time.deltaTime);
 			smoothedVehicleThirdPersonLookTarget = Vector3.Lerp(smoothedVehicleThirdPersonLookTarget, rawLookTarget, targetLerp);
 		}
-
 		Vector3 lookTarget = smoothedVehicleThirdPersonLookTarget;
 		Vector3 desiredPosition = lookTarget
-			+ orbitRotation * Vector3.back * Mathf.Clamp(vehicleThirdPersonDistance, 12f, 36f)
+		Vector3 desiredPosition = lookTarget
+			+ orbitRotation * Vector3.back * Mathf.Clamp(vehicleThirdPersonDistance, 8f, 32f)
 			+ Vector3.up * Mathf.Max(0.1f, vehicleThirdPersonHeight);
 		Vector3 correctedPosition = ResolveVehicleCameraCollision(lookTarget, desiredPosition, vehicleRoot);
-		correctedPosition = PushCameraOutsideVehicleBounds(correctedPosition, vehicleRoot);
 		Vector3 lookDirection = lookTarget - correctedPosition;
 		if (lookDirection.sqrMagnitude < 0.001f)
-			lookDirection = vehicleForward;
+			lookDirection = vehicleRoot.forward;
 
 		Quaternion desiredRotation = Quaternion.LookRotation(lookDirection.normalized, Vector3.up);
 		if (snap || Time.deltaTime <= 0f)
@@ -474,7 +458,6 @@ public class CockpitCam : MonoBehaviour
 		float recenter = 1f - Mathf.Exp(-vehicleThirdPersonRecenterSpeed * Time.deltaTime);
 		vehicleThirdPersonYaw = Mathf.LerpAngle(vehicleThirdPersonYaw, 0f, recenter);
 	}
-
 	private Vector3 ResolveVehicleCameraCollision(Vector3 pivot, Vector3 desiredPosition, Transform vehicleRoot)
 	{
 		Vector3 toCamera = desiredPosition - pivot;
@@ -506,47 +489,6 @@ public class CockpitCam : MonoBehaviour
 			return desiredPosition;
 
 		return pivot + direction * Mathf.Max(0.05f, nearest - vehicleThirdPersonCollisionPadding);
-	}
-
-	private Vector3 PushCameraOutsideVehicleBounds(Vector3 cameraPosition, Transform vehicleRoot)
-	{
-		if (vehicleRoot == null)
-			return cameraPosition;
-
-		Bounds bounds = new Bounds(vehicleRoot.position, Vector3.one * 6f);
-		bool hasBounds = false;
-		Renderer[] renderers = vehicleRoot.GetComponentsInChildren<Renderer>(true);
-		for (int i = 0; i < renderers.Length; i++)
-		{
-			Renderer renderer = renderers[i];
-			if (renderer == null)
-				continue;
-
-			if (!hasBounds)
-			{
-				bounds = renderer.bounds;
-				hasBounds = true;
-			}
-			else
-			{
-				bounds.Encapsulate(renderer.bounds);
-			}
-		}
-
-		float clearance = Mathf.Max(0.5f, vehicleThirdPersonVehicleClearance);
-		bounds.Expand(clearance * 2f);
-		if (!bounds.Contains(cameraPosition))
-			return cameraPosition;
-
-		Vector3 away = cameraPosition - bounds.center;
-		if (away.sqrMagnitude < 0.001f)
-			away = -vehicleRoot.forward + Vector3.up * 0.35f;
-
-		Ray ray = new Ray(bounds.center, away.normalized);
-		if (bounds.IntersectRay(ray, out float distance))
-			return ray.GetPoint(distance + clearance);
-
-		return bounds.ClosestPoint(cameraPosition + away.normalized * clearance);
 	}
 
 	private void SyncCockpitAudioListener()

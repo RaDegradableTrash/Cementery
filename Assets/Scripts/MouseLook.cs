@@ -50,9 +50,9 @@ public class MouseLook : MonoBehaviour
     [Header("Perspective")]
     [SerializeField] private KeyCode perspectiveToggleKey = KeyCode.V;
     [SerializeField] private bool startInThirdPerson = true;
-    [SerializeField] private float thirdPersonDistance = 8.5f;
+    [SerializeField] private float thirdPersonDistance = 6.5f;
     [SerializeField] private float thirdPersonMinDistance = 3.5f;
-    [SerializeField] private float thirdPersonMaxDistance = 12f;
+    [SerializeField] private float thirdPersonMaxDistance = 10f;
     [SerializeField] private float thirdPersonZoomSpeed = 2.5f;
     [SerializeField] private float thirdPersonHeight = 1.2f;
     [SerializeField] private float thirdPersonLookAtHeight = 1.1f;
@@ -60,8 +60,8 @@ public class MouseLook : MonoBehaviour
     [SerializeField] private float thirdPersonDefaultPitch = 32f;
     [SerializeField] private float thirdPersonMinPitch = DefaultThirdPersonMinPitch;
     [SerializeField] private float thirdPersonMaxPitch = 58f;
-    [SerializeField] private float thirdPersonPositionSharpness = 7f;
-    [SerializeField] private float thirdPersonRotationSharpness = 12f;
+    [SerializeField] private float thirdPersonPositionSharpness = 9f;
+    [SerializeField] private float thirdPersonRotationSharpness = 14f;
     [SerializeField] private float thirdPersonTargetSharpness = 18f;
     [SerializeField] private float thirdPersonMovementRecenterSpeed = 2.4f;
     [SerializeField] private float thirdPersonRecenterDelay = 0.55f;
@@ -423,7 +423,7 @@ public void SetBaseRotation(Quaternion targetRotation)
         if (_thirdPersonActive)
         {
             InitializeThirdPersonOrbitPitch();
-            ApplyThirdPersonCamera(false);
+            ApplyThirdPersonCamera(true);
         }
         else
         {
@@ -482,7 +482,6 @@ public void SetBaseRotation(Quaternion targetRotation)
             Mathf.Min(thirdPersonMinDistance, thirdPersonMaxDistance),
             Mathf.Max(thirdPersonMinDistance, thirdPersonMaxDistance));
     }
-
     void NormalizeThirdPersonSettings()
     {
         if (thirdPersonDistance <= 0.01f)
@@ -490,7 +489,7 @@ public void SetBaseRotation(Quaternion targetRotation)
         if (thirdPersonMinDistance <= 0.01f)
             thirdPersonMinDistance = 3.5f;
         if (thirdPersonMaxDistance <= thirdPersonMinDistance)
-            thirdPersonMaxDistance = Mathf.Max(thirdPersonMinDistance + 0.5f, 12f);
+            thirdPersonMaxDistance = Mathf.Max(thirdPersonMinDistance + 0.5f, 10f);
         thirdPersonDistance = Mathf.Clamp(thirdPersonDistance, thirdPersonMinDistance, thirdPersonMaxDistance);
         if (thirdPersonZoomSpeed <= 0.01f)
             thirdPersonZoomSpeed = 2.5f;
@@ -501,11 +500,13 @@ public void SetBaseRotation(Quaternion targetRotation)
         if (thirdPersonMinPitch > -0.01f)
             thirdPersonMinPitch = DefaultThirdPersonMinPitch;
         if (thirdPersonMaxPitch <= 0.01f)
+        {
             thirdPersonMaxPitch = 58f;
+        }
         if (thirdPersonPositionSharpness <= 0.01f)
-            thirdPersonPositionSharpness = 7f;
+            thirdPersonPositionSharpness = 9f;
         if (thirdPersonRotationSharpness <= 0.01f)
-            thirdPersonRotationSharpness = 12f;
+            thirdPersonRotationSharpness = 14f;
         if (thirdPersonTargetSharpness <= 0.01f)
             thirdPersonTargetSharpness = 18f;
         if (thirdPersonMovementRecenterSpeed <= 0.01f)
@@ -611,7 +612,6 @@ public void SetBaseRotation(Quaternion targetRotation)
         float recenter = 1f - Mathf.Exp(-thirdPersonMovementRecenterSpeed * Time.deltaTime);
         _yaw = Mathf.LerpAngle(_yaw, reference.eulerAngles.y, recenter);
     }
-
     Vector3 ResolveThirdPersonCollision(Vector3 pivot, Vector3 desiredPosition)
     {
         Vector3 toCamera = desiredPosition - pivot;
