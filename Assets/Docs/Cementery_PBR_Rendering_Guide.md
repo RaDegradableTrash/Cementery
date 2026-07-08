@@ -5,6 +5,7 @@ This project uses a PBR-oriented lighting workflow with built-in fallback and HD
 ## 1. Core Rules
 
 - Keep color space in Linear.
+- Keep light intensity evaluation linear so PBR materials, post-processing, and day-night lighting respond consistently.
 - Keep one physically plausible sun as the primary directional light.
 - Use Light Probes for dynamic objects crossing indoor/outdoor or shadow boundaries.
 - Use Reflection Probes for stable metal/specular behavior in shadow.
@@ -70,3 +71,6 @@ At startup or via context menu "Validate PBR Setup Now", warnings are produced f
 - Previous non-physical shadow override logic was removed.
 - Lighting now relies on standard lit shading, probes, reflections, and shadow settings.
 - If a dynamic object still shades incorrectly in shadow transitions, increase LightProbeGroup density in that area first.
+- Use `Assets/New Volume Profile.asset` as the reusable vibrant gameplay post-processing baseline: ACES tonemapping, modest exposure, stronger contrast/saturation, warm bloom, and a light vignette.
+- Keep bloom in quarter-resolution mode with four iterations unless profiling proves there is enough GPU headroom to raise quality.
+- The URP renderer cloud feature is tuned for gameplay cost first: reduced cloud density, half-resolution rendering, eight near steps, and three far steps.
