@@ -53,7 +53,7 @@ public class MouseLook : MonoBehaviour
     [SerializeField] private float thirdPersonLookAtHeight = 1.1f;
     [SerializeField] private float thirdPersonShoulderOffset = 0f;
     [SerializeField] private float thirdPersonDefaultPitch = 32f;
-    [SerializeField] private float thirdPersonMinPitch = 18f;
+    [SerializeField] private float thirdPersonMinPitch = -35f;
     [SerializeField] private float thirdPersonMaxPitch = 58f;
     [SerializeField] private float thirdPersonPositionSharpness = 9f;
     [SerializeField] private float thirdPersonRotationSharpness = 14f;
@@ -466,7 +466,7 @@ public void SetBaseRotation(Quaternion targetRotation)
             thirdPersonDefaultPitch = 32f;
         if (thirdPersonMinPitch <= 0.01f && thirdPersonMaxPitch <= 0.01f)
         {
-            thirdPersonMinPitch = 18f;
+            thirdPersonMinPitch = -35f;
             thirdPersonMaxPitch = 58f;
         }
         if (thirdPersonPositionSharpness <= 0.01f)
