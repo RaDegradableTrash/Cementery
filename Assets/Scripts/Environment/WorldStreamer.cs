@@ -32,6 +32,8 @@ namespace EnvironmentSystem
 
         [Tooltip("The grid range of chunks to load around the player (2 is a 5x5 grid, 3 is a 7x7 grid).")]
         public int loadingRange = 2;
+        [Tooltip("Minimum grid range kept in WebGL. Higher values make distant chunks appear sooner at the cost of more loaded scenes.")]
+        [Range(1, 4)] public int minimumWebGLLoadingRange = 2;
         [Tooltip("Maximum additive chunk scene loads running at once. Lower values reduce frame spikes.")]
         [Min(1)] public int maxConcurrentLoads = 1;
         [Tooltip("Minimum time between starting additive chunk scene loads. Small spacing smooths activation spikes while moving fast.")]
@@ -48,6 +50,8 @@ namespace EnvironmentSystem
         [Min(0f)] public float predictiveStreamingMinSpeed = 3f;
         [Tooltip("How strongly chunks ahead are prioritized over same-distance side/rear chunks.")]
         [Range(0f, 2f)] public float forwardPriorityBias = 0.75f;
+        [Tooltip("Extra grid rings that may become visible once loaded. This lets preloaded distant chunks appear before the player reaches them.")]
+        [Range(0, 2)] public int visualReadyRangeBonus = 1;
 
         [Header("Vehicle Predictive Streaming")]
         [Tooltip("Extra nearby radius while the tracked target is moving at vehicle speed.")]
@@ -290,14 +294,15 @@ namespace EnvironmentSystem
             int extraRange = ResolveEffectiveForwardRange(forwardGrid);
             if (Application.platform == RuntimePlatform.WebGLPlayer)
             {
-                range = Mathf.Max(1, loadingRange - 1);
-                extraRange = Mathf.Max(0, forwardExtraRange - 1);
+                range = Mathf.Max(1, minimumWebGLLoadingRange, loadingRange);
+                extraRange = Mathf.Max(0, forwardExtraRange);
             }
 
             EnsureStreamingOffsets(range, extraRange, forwardGrid);
 
             _requiredChunks.Clear();
             _visuallyReadyChunks.Clear();
+            int visualReadyRange = range + Mathf.Max(0, visualReadyRangeBonus);
             for (int i = 0; i < _streamingOffsets.Count; i++)
             {
                 Vector2Int offset = _streamingOffsets[i];
@@ -306,7 +311,7 @@ namespace EnvironmentSystem
                 string sceneName = $"{sceneNamePrefix}_{gx}_{gz}";
                 _requiredChunks.Add(sceneName);
 
-                if (Mathf.Abs(offset.x) <= range && Mathf.Abs(offset.y) <= range)
+                if (Mathf.Abs(offset.x) <= visualReadyRange && Mathf.Abs(offset.y) <= visualReadyRange)
                 {
                     _visuallyReadyChunks.Add(sceneName);
                 }
