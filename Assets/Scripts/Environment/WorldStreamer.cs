@@ -46,8 +46,6 @@ namespace EnvironmentSystem
         [Range(0, 4)] public int forwardExtraRange = 4;
         [Tooltip("Half-width of the forward streaming band. 1 loads a 3-chunk-wide strip ahead.")]
         [Range(0, 3)] public int forwardBandHalfWidth = 1;
-        [Tooltip("Movement speed in m/s before velocity controls the forward streaming direction. Below this, target forward is used.")]
-        [Min(0f)] public float predictiveStreamingMinSpeed = 3f;
         [Tooltip("How strongly chunks ahead are prioritized over same-distance side/rear chunks.")]
         [Range(0f, 2f)] public float forwardPriorityBias = 0.75f;
         [Tooltip("Extra grid rings that may become visible once loaded. This lets preloaded distant chunks appear before the player reaches them.")]
@@ -266,9 +264,11 @@ namespace EnvironmentSystem
                 _hasLastTargetPosition = true;
             }
 
-            Vector3 direction = movement.sqrMagnitude >= predictiveStreamingMinSpeed * predictiveStreamingMinSpeed * checkInterval * checkInterval
-                ? movement
-                : trackingTarget != null ? trackingTarget.forward : Vector3.zero;
+            Vector3 direction = ResolveCameraForward();
+            if (direction.sqrMagnitude < 0.001f && trackingTarget != null)
+            {
+                direction = trackingTarget.forward;
+            }
 
             direction.y = 0f;
             if (direction.sqrMagnitude < 0.001f)
@@ -287,6 +287,18 @@ namespace EnvironmentSystem
             }
 
             return new Vector2Int(x, z);
+        }
+
+        private Vector3 ResolveCameraForward()
+        {
+            if (_cachedCamera == null || !_cachedCamera.gameObject.activeInHierarchy)
+            {
+                _cachedCamera = Camera.main;
+            }
+
+            return _cachedCamera != null
+                ? Vector3.ProjectOnPlane(_cachedCamera.transform.forward, Vector3.up)
+                : Vector3.zero;
         }
 
         private void UpdateGridChunks(int centerGridX, int centerGridZ, Vector2Int forwardGrid)
