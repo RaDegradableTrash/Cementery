@@ -2,7 +2,6 @@ using System.Collections;
 using System.IO;
 using UnityEngine;
 using UnityEngine.Profiling;
-using UnityEngine.Rendering.Universal;
 using UnityEngine.SceneManagement;
 
 namespace Cementery.Rendering
@@ -10,7 +9,7 @@ namespace Cementery.Rendering
     public sealed class VisualEvidenceRouteDriver : MonoBehaviour
     {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-        private const float DefaultPhaseDurationSeconds = 7.5f;
+        private const float DefaultPhaseDurationSeconds = 10f;
         private const float SceneWarmupSeconds = 2.5f;
         private const string ScreenshotDirectoryName = "visual-evidence-route";
         private const string ProfilerCaptureFileName = "visual-evidence-route.raw";
@@ -42,7 +41,6 @@ namespace Cementery.Rendering
         private string _screenshotDirectory;
         private string _profilerCapturePath;
         private Camera _evidenceCamera;
-        private bool _finishedNormally;
 
         private void Awake()
         {
@@ -106,9 +104,6 @@ namespace Cementery.Rendering
 
         private void OnDestroy()
         {
-            if (!_finishedNormally)
-                Debug.LogWarning("VisualEvidenceRouteDriver: route ended before all evidence phases completed.");
-
             EndProfilerCapture();
             if (_evidenceCamera != null)
                 Destroy(_evidenceCamera.gameObject);
@@ -144,7 +139,6 @@ namespace Cementery.Rendering
 
         private void FinishRoute()
         {
-            _finishedNormally = true;
             VisualPerformanceSampler.TryWriteImmediateSample();
             EndProfilerCapture();
 
@@ -192,38 +186,8 @@ namespace Cementery.Rendering
             ConfigureEvidenceCamera();
             string filename = $"visual-evidence-{_phaseIndex + 1:00}-{SanitizeFilename(phaseName)}.png";
             string screenshotPath = Path.Combine(_screenshotDirectory, filename);
-            CaptureEvidenceCamera(screenshotPath);
+            ScreenCapture.CaptureScreenshot(screenshotPath);
             return screenshotPath;
-        }
-
-        private void CaptureEvidenceCamera(string screenshotPath)
-        {
-            const int width = 1920;
-            const int height = 1080;
-
-            RenderTexture previousTarget = _evidenceCamera.targetTexture;
-            RenderTexture previousActive = RenderTexture.active;
-            RenderTexture target = RenderTexture.GetTemporary(width, height, 24, RenderTextureFormat.ARGB32);
-            Texture2D texture = null;
-
-            try
-            {
-                _evidenceCamera.targetTexture = target;
-                _evidenceCamera.Render();
-                RenderTexture.active = target;
-                texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
-                texture.ReadPixels(new Rect(0f, 0f, width, height), 0, 0);
-                texture.Apply(false);
-                File.WriteAllBytes(screenshotPath, texture.EncodeToPNG());
-            }
-            finally
-            {
-                _evidenceCamera.targetTexture = previousTarget;
-                RenderTexture.active = previousActive;
-                RenderTexture.ReleaseTemporary(target);
-                if (texture != null)
-                    Destroy(texture);
-            }
         }
 
         private void ConfigureEvidenceCamera()
@@ -240,13 +204,7 @@ namespace Cementery.Rendering
                 _evidenceCamera.farClipPlane = 1200f;
                 _evidenceCamera.clearFlags = CameraClearFlags.Skybox;
                 _evidenceCamera.cullingMask = source != null ? source.cullingMask : ~0;
-
-                UniversalAdditionalCameraData cameraData = _evidenceCamera.GetUniversalAdditionalCameraData();
-                cameraData.renderPostProcessing = true;
             }
-
-            if (TryConfigureCameraFromNamedAnchor())
-                return;
 
             Vector3 forward = source != null ? Vector3.ProjectOnPlane(source.transform.forward, Vector3.up).normalized : Vector3.forward;
             if (forward.sqrMagnitude < 0.01f)
@@ -260,29 +218,6 @@ namespace Cementery.Rendering
             float distance = Mathf.Clamp(bounds.extents.magnitude * 0.45f, 22f, 55f);
             Vector3 position = target - forward * distance + Vector3.up * Mathf.Clamp(distance * 0.35f, 8f, 18f);
             _evidenceCamera.transform.SetPositionAndRotation(position, Quaternion.LookRotation(target - position, Vector3.up));
-        }
-
-        private bool TryConfigureCameraFromNamedAnchor()
-        {
-            Transform anchor = FindAnchor("RV1.0") ?? FindAnchor("PlayerEmpty");
-            if (anchor == null)
-                return false;
-
-            Vector3 forward = Vector3.ProjectOnPlane(anchor.forward, Vector3.up).normalized;
-            if (forward.sqrMagnitude < 0.01f)
-                forward = Vector3.forward;
-
-            Vector3 right = Vector3.Cross(Vector3.up, forward).normalized;
-            Vector3 target = anchor.position + Vector3.up * 1.35f;
-            Vector3 position = anchor.position + forward * 8f + right * 18f + Vector3.up * 2.6f;
-            _evidenceCamera.transform.SetPositionAndRotation(position, Quaternion.LookRotation(target - position, Vector3.up));
-            return true;
-        }
-
-        private static Transform FindAnchor(string name)
-        {
-            GameObject go = GameObject.Find(name);
-            return go != null && go.activeInHierarchy ? go.transform : null;
         }
 
         private static bool TryFindNearbyRendererBounds(Vector3 origin, float radius, out Bounds bounds)
