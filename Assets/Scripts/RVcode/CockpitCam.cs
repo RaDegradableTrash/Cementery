@@ -421,7 +421,6 @@ public class CockpitCam : MonoBehaviour
 		}
 		Vector3 lookTarget = smoothedVehicleThirdPersonLookTarget;
 		Vector3 desiredPosition = lookTarget
-		Vector3 desiredPosition = lookTarget
 			+ orbitRotation * Vector3.back * Mathf.Clamp(vehicleThirdPersonDistance, 8f, 32f)
 			+ Vector3.up * Mathf.Max(0.1f, vehicleThirdPersonHeight);
 		Vector3 correctedPosition = ResolveVehicleCameraCollision(lookTarget, desiredPosition, vehicleRoot);
