@@ -173,6 +173,12 @@ public class InteractionSystem : MonoBehaviour
     private PremodeledContainer _cachedScanContainer;
     private FuelTank _cachedScanFuelTank;
     private bool _cachedScanColliderIsFuelTankPart;
+    private InteractionFeedback _hoverFeedback;
+    private InteractionFeedback _activeFeedback;
+    private WorldObject _lastFeedbackLookedAt;
+    private WorldObject _lastFeedbackCarried;
+    private bool _lastFeedbackPlacementMode;
+    private bool _lastFeedbackPlacementValid;
 
     public static InteractionSystem Instance { get; private set; }
 
@@ -282,12 +288,14 @@ public class InteractionSystem : MonoBehaviour
             _lookedAt = null;
             _carryCandidateRb = null;
             _carryCandidateWo = null;
+            UpdateInteractionFeedback();
             UpdatePrompt();
             return;
         }
 
         Scan();
         HandleInput();
+        UpdateInteractionFeedback();
         UpdatePrompt();
         
         if (_isPlacementMode && _carriedRb != null)
@@ -1023,6 +1031,7 @@ public class InteractionSystem : MonoBehaviour
             _lookedAtContainer = null; // 🌟 新增：未射中时清空盒子引用
             _lookedAtFuelTank = null;
             ClearLastFuelTankFocus();
+            ClearHoverFeedback();
             return;
         }
 
@@ -1179,6 +1188,7 @@ public class InteractionSystem : MonoBehaviour
 
                     if (_lookedAtContainer.TryInsert(matchedPrefab, itemSize, originalScale, currentWorldPos, currentWorldRot))
                     {
+                        SetFeedbackState(_lookedAtContainer, InteractionFeedbackState.Completed, "Stored");
                         GameObject objToDestroy = _carriedRb.gameObject;
                         Drop(); // 释放物理手部连接
                         if (Application.isPlaying) Destroy(objToDestroy);
@@ -1215,6 +1225,7 @@ public class InteractionSystem : MonoBehaviour
                         {
                             spawnRb.isKinematic = false;
                             spawnRb.gameObject.SetActive(true);
+                            SetFeedbackState(_lookedAtContainer, InteractionFeedbackState.Completed, "Retrieved");
                             PickUp(spawnRb, spawnWo); // 直接吸附在手心里
                         }
                         ClearPrompts();
@@ -1349,6 +1360,7 @@ public class InteractionSystem : MonoBehaviour
                         }
                         else
                         {
+                            SetFeedbackState(_lookedAtFuelTank, InteractionFeedbackState.Cooldown, "Fuel tank full");
                             ShowInfo("Fuel Tank is already full!");
                         }
                         // 已确认是叶片，无论成功与否都不再进行通用燃料检查
@@ -1373,6 +1385,7 @@ public class InteractionSystem : MonoBehaviour
                         }
                         else
                         {
+                            SetFeedbackState(_lookedAtFuelTank, InteractionFeedbackState.Cooldown, "Fuel tank full");
                             ShowInfo("Fuel Tank is already full!");
                         }
                         return;
@@ -1406,24 +1419,29 @@ public class InteractionSystem : MonoBehaviour
                         }
                         else
                         {
+                            SetFeedbackState(_lookedAtFuelTank, InteractionFeedbackState.Cooldown, "Fuel tank full");
                             ShowInfo("Fuel Tank is already full!");
                         }
                     }
                     else
                     {
+                        SetFeedbackState(_lookedAtFuelTank, InteractionFeedbackState.Invalid, "Invalid fuel");
                         ShowInfo("This item cannot be used as fuel.");
                     }
                 }
                 else
                 {
+                    SetFeedbackState(_lookedAtFuelTank, InteractionFeedbackState.Invalid, "Need fuel");
                     ShowInfo("Need to hold fuel to refuel!");
                 }
             }
             else if (_lookedAt != null && _lookedAt.interactable)
             {
+                SetFeedbackState(_lookedAt, InteractionFeedbackState.Active, _lookedAt.interactMessage);
                 _lookedAt.TriggerInteract(gameObject);
                 _lookedAt.PlayInteractAnim();
                 ShowInfo(_lookedAt.interactMessage);
+                SetFeedbackState(_lookedAt, InteractionFeedbackState.Completed, _lookedAt.interactMessage);
             }
         }
     }
@@ -1537,6 +1555,7 @@ public class InteractionSystem : MonoBehaviour
     void Collect(WorldObject obj)
     {
         ShowInfo(obj.collectMessage);
+        SetFeedbackState(obj, InteractionFeedbackState.Completed, obj.collectMessage);
         obj.TriggerCollect(gameObject);
 
 #if UNITY_EDITOR
@@ -1573,6 +1592,7 @@ public class InteractionSystem : MonoBehaviour
         }
 
         _lookedAt = null;
+        ClearHoverFeedback();
         if (Application.isPlaying) Destroy(obj.gameObject);
         else UnityEngine.Object.DestroyImmediate(obj.gameObject);
     }
@@ -1767,6 +1787,7 @@ public class InteractionSystem : MonoBehaviour
 
         _carriedWo?.SetCarriedState(true);
         _carriedWo?.TriggerPickUp(gameObject);
+        SetActiveFeedback(_carriedWo, InteractionFeedbackState.Active, "Carrying");
 
         if (_playerController != null && _carriedWo != null && _carriedWo.isHeavy)
             _playerController.SpeedMultiplier = 0.4f;
@@ -1839,6 +1860,7 @@ public class InteractionSystem : MonoBehaviour
             _carriedRb.angularVelocity = Vector3.zero;
         }
 
+        WorldObject droppedWo = _carriedWo;
         _carriedWo?.SetCarriedState(false);
         _carriedWo?.TriggerDrop(gameObject);
 
@@ -1858,6 +1880,9 @@ public class InteractionSystem : MonoBehaviour
         _carryRayDistance = 0f;
         _carryPitchRollOffset = Quaternion.identity;
         _carriedRadius = 0f;
+        _activeFeedback = null;
+        _lastFeedbackCarried = null;
+        SetFeedbackState(droppedWo, InteractionFeedbackState.Completed, "Released");
 
         Physics.SyncTransforms(); // 让物理世界在松手完毕后强行保持冷静并刷新
     }
@@ -1932,6 +1957,113 @@ public class InteractionSystem : MonoBehaviour
         cachedText = text;
     }
 
+    void UpdateInteractionFeedback()
+    {
+        if (_carriedWo != null)
+        {
+            InteractionFeedbackState carryState = _isPlacementMode
+                ? (_isPlacementValid ? InteractionFeedbackState.Valid : InteractionFeedbackState.Invalid)
+                : InteractionFeedbackState.Active;
+
+            string message = _isPlacementMode
+                ? (_isPlacementValid ? "Place" : "Blocked")
+                : "Carrying";
+
+            if (_lastFeedbackCarried != _carriedWo ||
+                _lastFeedbackPlacementMode != _isPlacementMode ||
+                _lastFeedbackPlacementValid != _isPlacementValid)
+            {
+                SetActiveFeedback(_carriedWo, carryState, message);
+                _lastFeedbackCarried = _carriedWo;
+                _lastFeedbackPlacementMode = _isPlacementMode;
+                _lastFeedbackPlacementValid = _isPlacementValid;
+            }
+
+            ClearHoverFeedback();
+            return;
+        }
+
+        ClearActiveFeedback();
+
+        WorldObject target = _lookedAt != null ? _lookedAt : _carryCandidateWo;
+        if (target == null)
+        {
+            ClearHoverFeedback();
+            return;
+        }
+
+        InteractionFeedbackState state = InteractionFeedbackState.Hover;
+        string feedbackMessage = string.Empty;
+        if (_carryCandidateWo == target)
+        {
+            state = InteractionFeedbackState.Valid;
+            feedbackMessage = "Pick up";
+        }
+        else if (target.interactable)
+        {
+            state = InteractionFeedbackState.Focus;
+            feedbackMessage = target.interactMessage;
+        }
+        else if (target.collectable)
+        {
+            state = InteractionFeedbackState.Hover;
+            feedbackMessage = target.collectMessage;
+        }
+
+        if (_lastFeedbackLookedAt == target && _hoverFeedback != null && _hoverFeedback.State == state)
+            return;
+
+        ClearHoverFeedback();
+        _hoverFeedback = InteractionFeedback.GetOrCreate(target);
+        if (_hoverFeedback != null)
+            _hoverFeedback.SetState(state, feedbackMessage);
+        _lastFeedbackLookedAt = target;
+    }
+
+    void SetActiveFeedback(WorldObject target, InteractionFeedbackState state, string message)
+    {
+        if (target == null)
+            return;
+
+        InteractionFeedback feedback = InteractionFeedback.GetOrCreate(target);
+        if (feedback == null)
+            return;
+
+        if (_activeFeedback != null && _activeFeedback != feedback)
+            _activeFeedback.Clear();
+
+        _activeFeedback = feedback;
+        _activeFeedback.SetState(state, message);
+    }
+
+    void SetFeedbackState(Component target, InteractionFeedbackState state, string message)
+    {
+        if (target == null)
+            return;
+
+        InteractionFeedback feedback = InteractionFeedback.GetOrCreate(target);
+        if (feedback != null)
+            feedback.SetState(state, message);
+    }
+
+    void ClearHoverFeedback()
+    {
+        if (_hoverFeedback != null)
+            _hoverFeedback.Clear();
+        _hoverFeedback = null;
+        _lastFeedbackLookedAt = null;
+    }
+
+    void ClearActiveFeedback()
+    {
+        if (_activeFeedback != null)
+            _activeFeedback.Clear();
+        _activeFeedback = null;
+        _lastFeedbackCarried = null;
+        _lastFeedbackPlacementMode = false;
+        _lastFeedbackPlacementValid = false;
+    }
+
     public void ClearPrompts()
     {
         SetLabel(carryLabel, false, ref _carryLabelActive);
@@ -1939,6 +2071,7 @@ public class InteractionSystem : MonoBehaviour
         SetLabel(collectLabel, false, ref _collectLabelActive);
         SetLabel(infoLabel, false, ref _infoLabelActive);
         SetLabel(carryDistanceLimitLabel, false, ref _carryDistanceLimitLabelActive);
+        ClearHoverFeedback();
     }
 
     // 🌟 外界专属接口：支持车内或其它外部模块强行设置交互提示文字并显示/隐藏它！
@@ -1954,6 +2087,7 @@ public class InteractionSystem : MonoBehaviour
     private void OnDisable()
     {
         ClearPrompts();
+        ClearActiveFeedback();
     }
 
     public GameObject GetLookedAtTarget()
@@ -2076,6 +2210,7 @@ public class InteractionSystem : MonoBehaviour
         if (_carriedRb == null || _isPlacementMode) return;
         _isPlacementMode = true;
         _isThrowCharging = false;
+        SetActiveFeedback(_carriedWo, InteractionFeedbackState.Valid, "Placement");
         
         _placementGhost = Instantiate(_carriedRb.gameObject);
         _placementGhost.name = "PlacementGhost";
@@ -2132,6 +2267,8 @@ public class InteractionSystem : MonoBehaviour
         _placementGhostRenderers = null;
         _placementGhostActive = false;
         _hasPlacementMaterialState = false;
+        if (_carriedWo != null)
+            SetActiveFeedback(_carriedWo, InteractionFeedbackState.Active, "Carrying");
     }
 
     void CachePlacementGhostComponents()
@@ -2594,6 +2731,8 @@ public class InteractionSystem : MonoBehaviour
                 wo.isPlacedAndAttached = true;
                 rb.isKinematic = true;
             }
+
+            SetFeedbackState(wo, InteractionFeedbackState.Completed, "Placed");
         }
     }
 

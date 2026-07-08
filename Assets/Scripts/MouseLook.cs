@@ -55,8 +55,12 @@ public class MouseLook : MonoBehaviour
     [SerializeField] private float thirdPersonDefaultPitch = 32f;
     [SerializeField] private float thirdPersonMinPitch = 18f;
     [SerializeField] private float thirdPersonMaxPitch = 58f;
-    [SerializeField] private float thirdPersonPositionSharpness = 9f;
-    [SerializeField] private float thirdPersonRotationSharpness = 14f;
+    [SerializeField] private float thirdPersonPositionSharpness = 7f;
+    [SerializeField] private float thirdPersonRotationSharpness = 12f;
+    [SerializeField] private float thirdPersonTargetSharpness = 18f;
+    [SerializeField] private float thirdPersonMovementRecenterSpeed = 2.4f;
+    [SerializeField] private float thirdPersonRecenterDelay = 0.55f;
+    [SerializeField] private float thirdPersonMouseDeadZone = 0.015f;
     [SerializeField] private float thirdPersonMaxRoll = 8f;
     [SerializeField] private float thirdPersonRollFromMouse = 0.45f;
     [SerializeField] private float thirdPersonRollReturnSharpness = 7f;
@@ -165,6 +169,9 @@ public void SetBaseRotation(Quaternion targetRotation)
     private float _yaw;
     private float _thirdPersonPitch;
     private float _thirdPersonRoll;
+    private float _lastThirdPersonMouseInputTime;
+    private Vector3 _smoothedThirdPersonLookTarget;
+    private bool _hasSmoothedThirdPersonLookTarget;
     private float _lastAppliedPitch = float.NaN;
     private float _lastAppliedYaw = float.NaN;
     private int _inventoryModeCacheFrame = -1;
@@ -410,7 +417,7 @@ public void SetBaseRotation(Quaternion targetRotation)
         if (_thirdPersonActive)
         {
             InitializeThirdPersonOrbitPitch();
-            ApplyThirdPersonCamera(true);
+            ApplyThirdPersonCamera(false);
         }
         else
         {
@@ -446,6 +453,8 @@ public void SetBaseRotation(Quaternion targetRotation)
     void ApplyThirdPersonLookDelta(float mouseX, float mouseY)
     {
         _yaw += mouseX;
+        if (Mathf.Abs(mouseX) > thirdPersonMouseDeadZone || Mathf.Abs(mouseY) > thirdPersonMouseDeadZone)
+            _lastThirdPersonMouseInputTime = Time.unscaledTime;
         _thirdPersonPitch = Mathf.Clamp(
             _thirdPersonPitch - mouseY,
             Mathf.Min(thirdPersonMinPitch, thirdPersonMaxPitch),
@@ -470,9 +479,15 @@ public void SetBaseRotation(Quaternion targetRotation)
             thirdPersonMaxPitch = 58f;
         }
         if (thirdPersonPositionSharpness <= 0.01f)
-            thirdPersonPositionSharpness = 14f;
+            thirdPersonPositionSharpness = 7f;
         if (thirdPersonRotationSharpness <= 0.01f)
-            thirdPersonRotationSharpness = 18f;
+            thirdPersonRotationSharpness = 12f;
+        if (thirdPersonTargetSharpness <= 0.01f)
+            thirdPersonTargetSharpness = 18f;
+        if (thirdPersonMovementRecenterSpeed <= 0.01f)
+            thirdPersonMovementRecenterSpeed = 2.4f;
+        if (thirdPersonRecenterDelay < 0f)
+            thirdPersonRecenterDelay = 0.55f;
         if (thirdPersonMaxRoll <= 0.01f)
             thirdPersonMaxRoll = 8f;
         if (thirdPersonRollFromMouse <= 0.01f)
@@ -503,17 +518,31 @@ public void SetBaseRotation(Quaternion targetRotation)
             transform.SetParent(null, true);
 
         Transform reference = player;
+        RecenterThirdPersonBehindMovement(reference);
+
         float minPitch = Mathf.Min(thirdPersonMinPitch, thirdPersonMaxPitch);
         float maxPitch = Mathf.Max(thirdPersonMinPitch, thirdPersonMaxPitch);
         float orbitPitch = Mathf.Clamp(_thirdPersonPitch, minPitch, maxPitch);
-        float distance = Mathf.Clamp(thirdPersonDistance, 4f, 9f);
+        float distance = Mathf.Clamp(thirdPersonDistance, 5f, 12f);
         float height = Mathf.Clamp(thirdPersonHeight, 0f, 3f);
         _thirdPersonRoll = Mathf.Lerp(
             _thirdPersonRoll,
             0f,
             1f - Mathf.Exp(-thirdPersonRollReturnSharpness * Mathf.Max(0f, Time.deltaTime)));
 
-        Vector3 lookTarget = reference.position + Vector3.up * Mathf.Max(0.1f, thirdPersonLookAtHeight);
+        Vector3 rawLookTarget = reference.position + Vector3.up * Mathf.Max(0.1f, thirdPersonLookAtHeight);
+        if (snap || !_hasSmoothedThirdPersonLookTarget || Time.deltaTime <= 0f)
+        {
+            _smoothedThirdPersonLookTarget = rawLookTarget;
+            _hasSmoothedThirdPersonLookTarget = true;
+        }
+        else
+        {
+            float targetLerp = 1f - Mathf.Exp(-thirdPersonTargetSharpness * Time.deltaTime);
+            _smoothedThirdPersonLookTarget = Vector3.Lerp(_smoothedThirdPersonLookTarget, rawLookTarget, targetLerp);
+        }
+
+        Vector3 lookTarget = _smoothedThirdPersonLookTarget;
         Quaternion orbitRotation = Quaternion.Euler(orbitPitch, _yaw, 0f);
         Vector3 orbitOffset = orbitRotation * Vector3.back * distance;
         Vector3 shoulder = Quaternion.Euler(0f, _yaw, 0f) * Vector3.right * thirdPersonShoulderOffset;
@@ -537,6 +566,23 @@ public void SetBaseRotation(Quaternion targetRotation)
         float rotationLerp = 1f - Mathf.Exp(-thirdPersonRotationSharpness * Time.deltaTime);
         transform.position = Vector3.Lerp(transform.position, correctedPosition, positionLerp);
         transform.rotation = Quaternion.Slerp(transform.rotation, desiredRotation, rotationLerp);
+    }
+
+    void RecenterThirdPersonBehindMovement(Transform reference)
+    {
+        if (reference == null)
+            return;
+
+        if (Time.unscaledTime - _lastThirdPersonMouseInputTime < thirdPersonRecenterDelay)
+            return;
+
+        bool hasInput = Mathf.Abs(Input.GetAxisRaw("Horizontal")) > 0.1f || Mathf.Abs(Input.GetAxisRaw("Vertical")) > 0.1f;
+        bool hasVelocity = _playerRb != null && new Vector2(_playerRb.velocity.x, _playerRb.velocity.z).sqrMagnitude > 0.04f;
+        if (!hasInput && !hasVelocity)
+            return;
+
+        float recenter = 1f - Mathf.Exp(-thirdPersonMovementRecenterSpeed * Time.deltaTime);
+        _yaw = Mathf.LerpAngle(_yaw, reference.eulerAngles.y, recenter);
     }
 
     Vector3 ResolveThirdPersonCollision(Vector3 pivot, Vector3 desiredPosition)
