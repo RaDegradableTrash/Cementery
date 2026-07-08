@@ -25,9 +25,16 @@ public class SimpleLight : MonoBehaviour
     [SerializeField] private float offIntensity = 0f;
     [SerializeField] private float onIntensity = 35f;
 
+    [Header("Day/Night Response")]
+    [SerializeField] private bool respondToDayNightCycle = true;
+    [SerializeField, Min(0.02f)] private float dayNightRefreshInterval = 0.1f;
+
     private bool desiredOn;
     private bool lastEffectiveOn;
     private bool hasAppliedState;
+    private float lastDayNightMultiplier = 1f;
+    private float nextDayNightRefreshTime;
+    private DayNightSkyboxController dayNightController;
     private Color[] baseEmissionColors;
     private bool[] hasEmission;
     private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
@@ -80,6 +87,7 @@ public class SimpleLight : MonoBehaviour
         }
 
         PruneLightControlTargets();
+        CacheDayNightController();
 
         desiredOn = defaultOn;
         CacheEmissionColor();
@@ -95,6 +103,7 @@ public class SimpleLight : MonoBehaviour
         }
 
         RefreshState(!hasAppliedState);
+        CacheDayNightController();
     }
 
     private void OnDisable()
@@ -108,6 +117,32 @@ public class SimpleLight : MonoBehaviour
     private void HandlePowerStateChanged()
     {
         RefreshState(false);
+    }
+
+    private void Update()
+    {
+        if (!respondToDayNightCycle || !Application.isPlaying)
+        {
+            return;
+        }
+
+        if (Time.unscaledTime < nextDayNightRefreshTime)
+        {
+            return;
+        }
+
+        nextDayNightRefreshTime = Time.unscaledTime + Mathf.Max(0.02f, dayNightRefreshInterval);
+        if (dayNightController == null)
+        {
+            CacheDayNightController();
+        }
+
+        float multiplier = GetDayNightMultiplier();
+        if (Mathf.Abs(multiplier - lastDayNightMultiplier) > 0.01f)
+        {
+            lastDayNightMultiplier = multiplier;
+            RefreshState(true);
+        }
     }
 
     private void PruneLightControlTargets()
@@ -372,7 +407,9 @@ public class SimpleLight : MonoBehaviour
     private void ApplyState(bool on)
     {
         float hdr = on ? onEmissionHdr : offEmissionHdr;
-        float intensity = Mathf.Pow(2f, hdr);
+        float dayNightMultiplier = on ? GetDayNightMultiplier() : 1f;
+        lastDayNightMultiplier = dayNightMultiplier;
+        float intensity = Mathf.Pow(2f, hdr) * dayNightMultiplier;
 
         if (targetRenderers != null && hasEmission != null)
         {
@@ -391,7 +428,7 @@ public class SimpleLight : MonoBehaviour
 
         if (targetLights != null)
         {
-            float targetIntensity = on ? onIntensity : offIntensity;
+            float targetIntensity = on ? onIntensity * dayNightMultiplier : offIntensity;
             for (int i = 0; i < targetLights.Length; i++)
             {
                 if (targetLights[i] != null)
@@ -406,6 +443,26 @@ public class SimpleLight : MonoBehaviour
     {
         bool hasPower = !requiresPower || startProcedure == null || startProcedure.HasAnyBatteryOn();
         return desiredOn && hasPower;
+    }
+
+    private void CacheDayNightController()
+    {
+        if (!respondToDayNightCycle || dayNightController != null)
+        {
+            return;
+        }
+
+        dayNightController = FindFirstObjectByType<DayNightSkyboxController>(FindObjectsInactive.Include);
+    }
+
+    private float GetDayNightMultiplier()
+    {
+        if (!respondToDayNightCycle || dayNightController == null)
+        {
+            return 1f;
+        }
+
+        return Mathf.Max(0f, dayNightController.GetEmissionBoost());
     }
 
     private static Color NormalizeColor(Color color)

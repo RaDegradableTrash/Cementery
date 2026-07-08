@@ -28,6 +28,19 @@ public class DayNightSkyboxController : MonoBehaviour
     public Color sunriseSunColor = new Color(0.98f, 0.72f, 0.52f, 1f);
     public Color nightSunColor = new Color(0.38f, 0.46f, 0.62f, 1f);
 
+    [Header("World Feedback")]
+    [Tooltip("Applies low-cost world readability feedback beyond the skybox.")]
+    public bool enableWorldFeedback = true;
+    [Tooltip("Creates a soft runtime moon fill in play mode when no moon light is assigned.")]
+    public bool autoCreateMoonLight = true;
+    public Light moonLight;
+    [Range(0f, 2f)] public float moonMaxIntensity = 0.18f;
+    [Range(0f, 2f)] public float moonDawnDuskIntensity = 0.05f;
+    public Color moonColor = new Color(0.45f, 0.56f, 0.78f, 1f);
+    [Range(0f, 2f)] public float nightVisibilityAmbientBoost = 0.18f;
+    [Range(0f, 3f)] public float duskEmissionBoost = 1.18f;
+    [Range(0f, 3f)] public float nightEmissionBoost = 1.45f;
+
     [Header("Sunrise / Sunset Shaping")]
     [Tooltip("Reduce direct sun intensity near the horizon so sunrise/sunset appears as a clearer red disk.")]
     public bool shapeSunIntensityByElevation = true;
@@ -115,6 +128,19 @@ public class DayNightSkyboxController : MonoBehaviour
     public bool controlFog = true;
     public Color dayFog = new Color(0.54f, 0.6f, 0.68f, 1f);
     public Color nightFog = new Color(0.015f, 0.02f, 0.035f, 1f);
+    public bool controlFogShape = true;
+    [Range(0f, 0.03f)] public float dayFogDensity = 0.0005f;
+    [Range(0f, 0.03f)] public float duskFogDensity = 0.0045f;
+    [Range(0f, 0.03f)] public float nightFogDensity = 0.012f;
+    [Range(0f, 0.03f)] public float dawnFogDensity = 0.006f;
+    [Min(0f)] public float dayFogStartDistance = 35f;
+    [Min(0f)] public float duskFogStartDistance = 18f;
+    [Min(0f)] public float nightFogStartDistance = 8f;
+    [Min(0f)] public float dawnFogStartDistance = 14f;
+    [Min(10f)] public float dayFogEndDistance = 260f;
+    [Min(10f)] public float duskFogEndDistance = 170f;
+    [Min(10f)] public float nightFogEndDistance = 95f;
+    [Min(10f)] public float dawnFogEndDistance = 145f;
 
     [Header("Reflections")]
     public bool controlReflection = true;
@@ -147,6 +173,13 @@ public class DayNightSkyboxController : MonoBehaviour
     private static readonly int AlbedoColorId = Shader.PropertyToID("_Color");
     private static readonly int CloudThresholdId = Shader.PropertyToID("_CloudThreshold");
     private static readonly int CloudDensityScaleId = Shader.PropertyToID("_CloudDensityScale");
+    private static readonly int DayNightDaylightId = Shader.PropertyToID("_DayNightDaylight");
+    private static readonly int DayNightNightId = Shader.PropertyToID("_DayNightNight");
+    private static readonly int DayNightTwilightId = Shader.PropertyToID("_DayNightTwilight");
+    private static readonly int DayNightDawnId = Shader.PropertyToID("_DayNightDawn");
+    private static readonly int DayNightDuskId = Shader.PropertyToID("_DayNightDusk");
+    private static readonly int DayNightVisibilityBoostId = Shader.PropertyToID("_DayNightVisibilityBoost");
+    private static readonly int DayNightEmissionBoostId = Shader.PropertyToID("_DayNightEmissionBoost");
 
     private Material _runtimeSkybox;
     private bool _ownsSkyboxMaterial;
@@ -178,6 +211,7 @@ public class DayNightSkyboxController : MonoBehaviour
     private readonly List<Renderer> _cachedDynamicRenderers = new List<Renderer>(256);
     private readonly HashSet<Renderer> _dynamicRendererScratch = new HashSet<Renderer>();
     private readonly List<Renderer> _rendererChildBuffer = new List<Renderer>(16);
+    private GameObject _runtimeMoonLightObject;
 
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -307,6 +341,11 @@ public class DayNightSkyboxController : MonoBehaviour
         shadowNormalBias = Mathf.Clamp(shadowNormalBias, 0f, 1f);
         shadowNearPlane = Mathf.Clamp(shadowNearPlane, 0.01f, 1f);
         shadowCustomResolution = Mathf.Clamp(shadowCustomResolution, 0, 8192);
+        moonMaxIntensity = Mathf.Clamp(moonMaxIntensity, 0f, 2f);
+        moonDawnDuskIntensity = Mathf.Clamp(moonDawnDuskIntensity, 0f, 2f);
+        nightVisibilityAmbientBoost = Mathf.Clamp(nightVisibilityAmbientBoost, 0f, 2f);
+        duskEmissionBoost = Mathf.Clamp(duskEmissionBoost, 0f, 3f);
+        nightEmissionBoost = Mathf.Clamp(nightEmissionBoost, 0f, 3f);
 
         qualityShadowDistance = Mathf.Clamp(qualityShadowDistance, 10f, 300f);
         qualityShadowNearPlaneOffset = Mathf.Clamp(qualityShadowNearPlaneOffset, 0f, 3f);
@@ -324,6 +363,18 @@ public class DayNightSkyboxController : MonoBehaviour
         sunDiskSoftness = Mathf.Clamp(sunDiskSoftness, 0.0005f, 0.1f);
 
         ambientIntensity = Mathf.Clamp(ambientIntensity, 0f, 2f);
+        dayFogDensity = Mathf.Clamp(dayFogDensity, 0f, 0.03f);
+        duskFogDensity = Mathf.Clamp(duskFogDensity, 0f, 0.03f);
+        nightFogDensity = Mathf.Clamp(nightFogDensity, 0f, 0.03f);
+        dawnFogDensity = Mathf.Clamp(dawnFogDensity, 0f, 0.03f);
+        dayFogStartDistance = Mathf.Max(0f, dayFogStartDistance);
+        duskFogStartDistance = Mathf.Max(0f, duskFogStartDistance);
+        nightFogStartDistance = Mathf.Max(0f, nightFogStartDistance);
+        dawnFogStartDistance = Mathf.Max(0f, dawnFogStartDistance);
+        dayFogEndDistance = Mathf.Max(10f, dayFogEndDistance);
+        duskFogEndDistance = Mathf.Max(10f, duskFogEndDistance);
+        nightFogEndDistance = Mathf.Max(10f, nightFogEndDistance);
+        dawnFogEndDistance = Mathf.Max(10f, dawnFogEndDistance);
         dayReflectionIntensity = Mathf.Clamp(dayReflectionIntensity, 0f, 2f);
         nightReflectionIntensity = Mathf.Clamp(nightReflectionIntensity, 0f, 2f);
         reflectionBounces = Mathf.Max(1, reflectionBounces);
@@ -358,6 +409,23 @@ public class DayNightSkyboxController : MonoBehaviour
             Destroy(_runtimeSkybox);
 #endif
             _runtimeSkybox = null;
+        }
+
+        if (_runtimeMoonLightObject != null)
+        {
+            GameObject objectToDestroy = _runtimeMoonLightObject;
+            _runtimeMoonLightObject = null;
+            if (moonLight != null && moonLight.gameObject == objectToDestroy)
+                moonLight = null;
+
+#if UNITY_EDITOR
+            if (!Application.isPlaying)
+                UnityEngine.Object.DestroyImmediate(objectToDestroy);
+            else
+                Destroy(objectToDestroy);
+#else
+            Destroy(objectToDestroy);
+#endif
         }
     }
 
@@ -409,7 +477,7 @@ public class DayNightSkyboxController : MonoBehaviour
             for (int i = 0; i < lights.Length; i++)
             {
                 Light l = lights[i];
-                if (l != null && l.type == LightType.Directional && l != sunLight && l.enabled)
+                if (l != null && l.type == LightType.Directional && l != sunLight && l != moonLight && l.enabled)
                 {
                     Debug.LogWarning($"[DayNightSkyboxController] Auto-disabled duplicate Directional Light '{l.name}' to prevent lighting conflict.");
                     l.enabled = false;
@@ -472,10 +540,18 @@ public class DayNightSkyboxController : MonoBehaviour
         float daylight = Mathf.Clamp01((sunElevation + 0.08f) / 1.08f);
         daylight = Mathf.SmoothStep(0f, 1f, daylight);
         float twilight = 1f - Mathf.Clamp01(Mathf.Abs(sunElevation) / 0.28f);
+        twilight = Mathf.SmoothStep(0f, 1f, twilight);
+        float night = 1f - Mathf.Clamp01((sunElevation + 0.12f) / 0.42f);
+        night = Mathf.SmoothStep(0f, 1f, night);
+        float dawn = timeOfDay < 0.5f ? twilight : 0f;
+        float dusk = timeOfDay >= 0.5f ? twilight : 0f;
         float sunAngle = timeOfDay * 360f - 90f;
 
         if (sunLight != null)
             ApplySunLighting(daylight, twilight, sunAngle, sunElevation);
+
+        if (enableWorldFeedback)
+            ApplyWorldFeedback(daylight, night, twilight, dawn, dusk, sunAngle);
 
         float godrayBlend = EvaluateGodrayBlend(daylight, twilight);
 
@@ -486,6 +562,64 @@ public class DayNightSkyboxController : MonoBehaviour
 
         if (controlReflection)
             ApplyReflections(daylight, deltaTime, forceReflectionUpdate);
+    }
+
+    public float GetNightVisibilityFactor()
+    {
+        float sunElevation = Mathf.Sin((timeOfDay - 0.25f) * Mathf.PI * 2f);
+        float night = 1f - Mathf.Clamp01((sunElevation + 0.12f) / 0.42f);
+        night = Mathf.SmoothStep(0f, 1f, night);
+        float twilight = 1f - Mathf.Clamp01(Mathf.Abs(sunElevation) / 0.28f);
+        twilight = Mathf.SmoothStep(0f, 1f, twilight);
+        return enableWorldFeedback ? Mathf.Clamp01(night + twilight * 0.35f) : 0f;
+    }
+
+    public float GetEmissionBoost()
+    {
+        if (!enableWorldFeedback)
+            return 1f;
+
+        float sunElevation = Mathf.Sin((timeOfDay - 0.25f) * Mathf.PI * 2f);
+        float night = 1f - Mathf.Clamp01((sunElevation + 0.12f) / 0.42f);
+        night = Mathf.SmoothStep(0f, 1f, night);
+        float twilight = 1f - Mathf.Clamp01(Mathf.Abs(sunElevation) / 0.28f);
+        twilight = Mathf.SmoothStep(0f, 1f, twilight);
+        float phaseBoost = Mathf.Lerp(1f, duskEmissionBoost, twilight);
+        return Mathf.Max(phaseBoost, Mathf.Lerp(1f, nightEmissionBoost, night));
+    }
+
+    private void ApplyWorldFeedback(float daylight, float night, float twilight, float dawn, float dusk, float sunAngle)
+    {
+        EnsureMoonLight();
+        if (moonLight != null)
+        {
+            moonLight.transform.rotation = Quaternion.Euler(sunAngle + 180f, sunAzimuth + 180f, 0f);
+            moonLight.color = moonColor;
+            moonLight.intensity = Mathf.Lerp(0f, moonMaxIntensity, night)
+                                  + Mathf.Lerp(0f, moonDawnDuskIntensity, twilight);
+            moonLight.shadows = LightShadows.None;
+            moonLight.enabled = moonLight.intensity > 0.001f;
+        }
+
+        Shader.SetGlobalFloat(DayNightDaylightId, daylight);
+        Shader.SetGlobalFloat(DayNightNightId, night);
+        Shader.SetGlobalFloat(DayNightTwilightId, twilight);
+        Shader.SetGlobalFloat(DayNightDawnId, dawn);
+        Shader.SetGlobalFloat(DayNightDuskId, dusk);
+        Shader.SetGlobalFloat(DayNightVisibilityBoostId, GetNightVisibilityFactor());
+        Shader.SetGlobalFloat(DayNightEmissionBoostId, GetEmissionBoost());
+    }
+
+    private void EnsureMoonLight()
+    {
+        if (moonLight != null || !autoCreateMoonLight || !Application.isPlaying)
+            return;
+
+        _runtimeMoonLightObject = new GameObject("Runtime_MoonFillLight");
+        _runtimeMoonLightObject.transform.SetParent(transform, false);
+        moonLight = _runtimeMoonLightObject.AddComponent<Light>();
+        moonLight.type = LightType.Directional;
+        moonLight.shadows = LightShadows.None;
     }
 
     private void ApplySunLighting(float daylight, float twilight, float sunAngle, float sunElevation)
@@ -683,6 +817,13 @@ public class DayNightSkyboxController : MonoBehaviour
 
     private void ApplyAmbientAndFog(float daylight)
     {
+        float sunElevation = Mathf.Sin((timeOfDay - 0.25f) * Mathf.PI * 2f);
+        float night = 1f - Mathf.Clamp01((sunElevation + 0.12f) / 0.42f);
+        night = Mathf.SmoothStep(0f, 1f, night);
+        float twilight = 1f - Mathf.Clamp01(Mathf.Abs(sunElevation) / 0.28f);
+        twilight = Mathf.SmoothStep(0f, 1f, twilight);
+        bool isDawn = timeOfDay < 0.5f;
+
         // Query global cloud parameters for dynamic ambient/shadow adjustments
         float globalThreshold = Shader.GetGlobalFloat(CloudThresholdId);
         float globalDensityScale = Shader.GetGlobalFloat(CloudDensityScaleId);
@@ -729,19 +870,37 @@ public class DayNightSkyboxController : MonoBehaviour
                 RenderSettings.ambientLight = flatAmbient;
             }
 
-            RenderSettings.ambientIntensity = ambientIntensity;
+            RenderSettings.ambientIntensity = ambientIntensity + (enableWorldFeedback ? night * nightVisibilityAmbientBoost : 0f);
         }
 
         if (controlFog)
         {
             Color fogCol = Color.Lerp(nightFog, dayFog, daylight);
+            Color transitionFog = isDawn ? Color.Lerp(nightFog, dayFog, 0.65f) : Color.Lerp(dayFog, nightFog, 0.45f);
+            fogCol = Color.Lerp(fogCol, transitionFog, twilight * 0.35f);
             if (cloudCoverageFactor > 0.01f)
             {
                 Color coolFog = new Color(0.55f, 0.62f, 0.75f, 1.0f);
                 fogCol = Color.Lerp(fogCol, coolFog * fogCol * 1.2f, cloudCoverageFactor * 0.4f);
             }
             RenderSettings.fogColor = fogCol;
+
+            if (controlFogShape)
+            {
+                RenderSettings.fog = true;
+                RenderSettings.fogMode = FogMode.ExponentialSquared;
+                RenderSettings.fogDensity = BlendDayNightPhase(dayFogDensity, nightFogDensity, dawnFogDensity, duskFogDensity, daylight, night, twilight, isDawn);
+                RenderSettings.fogStartDistance = BlendDayNightPhase(dayFogStartDistance, nightFogStartDistance, dawnFogStartDistance, duskFogStartDistance, daylight, night, twilight, isDawn);
+                RenderSettings.fogEndDistance = BlendDayNightPhase(dayFogEndDistance, nightFogEndDistance, dawnFogEndDistance, duskFogEndDistance, daylight, night, twilight, isDawn);
+            }
         }
+    }
+
+    private static float BlendDayNightPhase(float dayValue, float nightValue, float dawnValue, float duskValue, float daylight, float night, float twilight, bool isDawn)
+    {
+        float value = Mathf.Lerp(nightValue, dayValue, daylight);
+        value = Mathf.Lerp(value, nightValue, night);
+        return Mathf.Lerp(value, isDawn ? dawnValue : duskValue, twilight);
     }
 
     private void ApplyReflections(float daylight, float deltaTime, bool forceReflectionUpdate)
