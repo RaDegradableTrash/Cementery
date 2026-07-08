@@ -10,6 +10,14 @@ namespace EnvironmentSystem
     {
         public static WorldStreamer Instance { get; private set; }
         public bool HasLoadedAnyChunks => _loadedChunks.Count > 0;
+        private const int MinimumRuntimeLoadingRange = 3;
+        private const int MinimumRuntimeConcurrentLoads = 2;
+        private const int MinimumRuntimeForwardExtraRange = 4;
+        private const int MinimumRuntimeVisualReadyRangeBonus = 2;
+        private const int MinimumRuntimeHighSpeedForwardRange = 6;
+        private const int MinimumRuntimeDistantTerrainRange = 32;
+        private const int MinimumRuntimeDistantSamplesPerChunk = 2;
+        private const float MinimumRuntimeDistantCameraFarClip = 12000f;
 
         [Header("General Settings")]
         [Tooltip("Delay in seconds before unloading a chunk to prevent thrashing at boundaries.")]
@@ -147,6 +155,7 @@ namespace EnvironmentSystem
 
         private void Start()
         {
+            ApplyRuntimeVisibilityMinimums();
             // Initial trigger will be fired automatically in the first Update frame
             _nextCheckTime = 0f;
         }
@@ -220,6 +229,25 @@ namespace EnvironmentSystem
                 }
             }
 
+        }
+
+        private void ApplyRuntimeVisibilityMinimums()
+        {
+            if (!useGridStreaming)
+            {
+                return;
+            }
+
+            loadingRange = Mathf.Max(loadingRange, MinimumRuntimeLoadingRange);
+            minimumWebGLLoadingRange = Mathf.Max(minimumWebGLLoadingRange, MinimumRuntimeLoadingRange);
+            maxConcurrentLoads = Mathf.Max(maxConcurrentLoads, MinimumRuntimeConcurrentLoads);
+            forwardExtraRange = Mathf.Max(forwardExtraRange, MinimumRuntimeForwardExtraRange);
+            visualReadyRangeBonus = Mathf.Max(visualReadyRangeBonus, MinimumRuntimeVisualReadyRangeBonus);
+            highSpeedForwardExtraRange = Mathf.Max(highSpeedForwardExtraRange, MinimumRuntimeHighSpeedForwardRange);
+            enableDistantTerrainProxy = true;
+            distantTerrainRange = Mathf.Max(distantTerrainRange, MinimumRuntimeDistantTerrainRange);
+            distantTerrainSamplesPerChunk = Mathf.Max(distantTerrainSamplesPerChunk, MinimumRuntimeDistantSamplesPerChunk);
+            distantTerrainCameraFarClip = Mathf.Max(distantTerrainCameraFarClip, MinimumRuntimeDistantCameraFarClip);
         }
 
         private void RefreshTrackingTarget()
