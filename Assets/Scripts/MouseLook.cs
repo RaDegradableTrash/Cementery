@@ -15,6 +15,8 @@ using Unity.Netcode;
 /// </summary>
 public class MouseLook : MonoBehaviour
 {
+    private const float DefaultThirdPersonMinPitch = -35f;
+
     [Header("References")]
     [Tooltip("Root player transform (PlayerEmpty). Receives horizontal yaw.")]
     [SerializeField] private Transform player;
@@ -53,7 +55,7 @@ public class MouseLook : MonoBehaviour
     [SerializeField] private float thirdPersonLookAtHeight = 1.1f;
     [SerializeField] private float thirdPersonShoulderOffset = 0f;
     [SerializeField] private float thirdPersonDefaultPitch = 32f;
-    [SerializeField] private float thirdPersonMinPitch = -35f;
+    [SerializeField] private float thirdPersonMinPitch = DefaultThirdPersonMinPitch;
     [SerializeField] private float thirdPersonMaxPitch = 58f;
     [SerializeField] private float thirdPersonPositionSharpness = 9f;
     [SerializeField] private float thirdPersonRotationSharpness = 14f;
@@ -464,9 +466,10 @@ public void SetBaseRotation(Quaternion targetRotation)
             thirdPersonLookAtHeight = 1.1f;
         if (thirdPersonDefaultPitch <= 0.01f)
             thirdPersonDefaultPitch = 32f;
-        if (thirdPersonMinPitch <= 0.01f && thirdPersonMaxPitch <= 0.01f)
+        if (thirdPersonMinPitch > -0.01f)
+            thirdPersonMinPitch = DefaultThirdPersonMinPitch;
+        if (thirdPersonMaxPitch <= 0.01f)
         {
-            thirdPersonMinPitch = -35f;
             thirdPersonMaxPitch = 58f;
         }
         if (thirdPersonPositionSharpness <= 0.01f)
