@@ -98,6 +98,9 @@ namespace EnvironmentSystem
 
         [Header("Materials & Physics")]
         public Material terrainMaterial;
+        [SerializeField]
+        [Tooltip("Optional distant material swap. Disabled by default because mismatched LOD materials make neighboring chunks visibly change color.")]
+        private bool useTerrainLodMaterial = false;
 
         // ── Lifecycle ──────────────────────────────────────────────────────────
 
@@ -204,7 +207,9 @@ namespace EnvironmentSystem
                 _highQualityMaterial = Resources.Load<Material>("GravelTerrain");
                 terrainMaterial = _highQualityMaterial;
             }
-            _lodMaterial = Resources.Load<Material>("GravelTerrain_LOD");
+            _lodMaterial = useTerrainLodMaterial
+                ? Resources.Load<Material>("GravelTerrain_LOD")
+                : _highQualityMaterial;
 
             if (TryGetComponent<MeshRenderer>(out var mr))
             {
@@ -225,6 +230,8 @@ namespace EnvironmentSystem
             var wait = new WaitForSeconds(1.5f + Random.Range(0f, 0.5f)); // staggered to prevent spikes
             MeshRenderer mr = GetComponent<MeshRenderer>();
             if (mr == null) yield break;
+            if (!useTerrainLodMaterial || _lodMaterial == null || _lodMaterial == _highQualityMaterial)
+                yield break;
 
             _lodCenter = transform.position + new Vector3(width * cellSize * 0.5f, 0f, depth * cellSize * 0.5f);
 

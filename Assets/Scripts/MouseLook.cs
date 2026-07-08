@@ -63,6 +63,7 @@ public class MouseLook : MonoBehaviour
     [SerializeField] private float thirdPersonPositionSharpness = 9f;
     [SerializeField] private float thirdPersonRotationSharpness = 14f;
     [SerializeField] private float thirdPersonTargetSharpness = 18f;
+    [SerializeField] private bool thirdPersonAutoRecenterOnMove = false;
     [SerializeField] private float thirdPersonMovementRecenterSpeed = 2.4f;
     [SerializeField] private float thirdPersonRecenterDelay = 0.55f;
     [SerializeField] private float thirdPersonMouseDeadZone = 0.015f;
@@ -599,6 +600,8 @@ public void SetBaseRotation(Quaternion targetRotation)
     void RecenterThirdPersonBehindMovement(Transform reference)
     {
         if (reference == null)
+            return;
+        if (!thirdPersonAutoRecenterOnMove)
             return;
 
         if (Time.unscaledTime - _lastThirdPersonMouseInputTime < thirdPersonRecenterDelay)
