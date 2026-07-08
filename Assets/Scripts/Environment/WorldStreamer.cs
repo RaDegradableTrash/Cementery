@@ -71,6 +71,7 @@ namespace EnvironmentSystem
         private readonly List<string> _chunksToUnload = new List<string>(49);
         private readonly List<string> _queuedChunkBuffer = new List<string>(49);
         private readonly HashSet<string> _queuedChunkBufferSet = new HashSet<string>();
+        private readonly HashSet<string> _visuallyReadyChunks = new HashSet<string>();
         private readonly List<Vector2Int> _streamingOffsets = new List<Vector2Int>(49);
         private readonly HashSet<Vector2Int> _streamingOffsetSet = new HashSet<Vector2Int>();
         private int _activeLoads = 0;
@@ -296,6 +297,7 @@ namespace EnvironmentSystem
             EnsureStreamingOffsets(range, extraRange, forwardGrid);
 
             _requiredChunks.Clear();
+            _visuallyReadyChunks.Clear();
             for (int i = 0; i < _streamingOffsets.Count; i++)
             {
                 Vector2Int offset = _streamingOffsets[i];
@@ -303,6 +305,11 @@ namespace EnvironmentSystem
                 int gz = centerGridZ + offset.y;
                 string sceneName = $"{sceneNamePrefix}_{gx}_{gz}";
                 _requiredChunks.Add(sceneName);
+
+                if (Mathf.Abs(offset.x) <= range && Mathf.Abs(offset.y) <= range)
+                {
+                    _visuallyReadyChunks.Add(sceneName);
+                }
             }
 
             int gridSizeDim = range * 2 + 1;
@@ -311,6 +318,7 @@ namespace EnvironmentSystem
                 Debug.Log($"<color=#38bdf8><b>[WorldStreamer]</b></color> Grid updated. Center ({centerGridX}, {centerGridZ}). Loading {gridSizeDim}x{gridSizeDim} base grid plus {extraRange} forward chunks toward {forwardGrid}.");
             }
             RequestChunks(_requiredChunks);
+            ApplyVisualReadinessToLoadedChunks();
         }
 
         private int ResolveEffectiveLoadingRange()
@@ -616,6 +624,8 @@ namespace EnvironmentSystem
                 Debug.Log($"[WorldStreamer] Loaded chunk: {sceneName}");
             }
 
+            ApplyVisualReadinessToChunk(sceneName);
+
             if (!_requestedChunks.Contains(sceneName))
             {
                 UnloadChunk(sceneName);
@@ -681,6 +691,58 @@ namespace EnvironmentSystem
             }
 
             return _cachedUnloadWait;
+        }
+
+        private void ApplyVisualReadinessToLoadedChunks()
+        {
+            foreach (var kv in ChunkRegistry.All)
+            {
+                DesertTerrainChunk chunk = kv.Value;
+                if (chunk == null) continue;
+
+                string sceneName = $"{sceneNamePrefix}_{kv.Key.x}_{kv.Key.y}";
+                chunk.SetStreamedVisualReady(_visuallyReadyChunks.Contains(sceneName));
+            }
+        }
+
+        private void ApplyVisualReadinessToChunk(string sceneName)
+        {
+            if (!TryParseSceneGrid(sceneName, out Vector2Int coord))
+            {
+                return;
+            }
+
+            DesertTerrainChunk chunk = ChunkRegistry.Get(coord);
+            if (chunk != null)
+            {
+                chunk.SetStreamedVisualReady(_visuallyReadyChunks.Contains(sceneName));
+            }
+        }
+
+        private bool TryParseSceneGrid(string sceneName, out Vector2Int coord)
+        {
+            coord = Vector2Int.zero;
+            if (string.IsNullOrEmpty(sceneName))
+            {
+                return false;
+            }
+
+            string prefix = sceneNamePrefix + "_";
+            if (!sceneName.StartsWith(prefix))
+            {
+                return false;
+            }
+
+            string[] parts = sceneName.Substring(prefix.Length).Split('_');
+            if (parts.Length != 2 ||
+                !int.TryParse(parts[0], out int x) ||
+                !int.TryParse(parts[1], out int z))
+            {
+                return false;
+            }
+
+            coord = new Vector2Int(x, z);
+            return true;
         }
     }
 }

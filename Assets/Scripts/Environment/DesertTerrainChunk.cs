@@ -127,6 +127,12 @@ namespace EnvironmentSystem
         private Material _highQualityMaterial = null;
         private bool _isUsingLOD = false;
         private Vector3 _lodCenter;
+        private Renderer[] _streamedRenderers;
+        private Collider[] _streamedColliders;
+        private bool[] _streamedRendererDefaults;
+        private bool[] _streamedColliderDefaults;
+        private bool _streamedVisualReady = true;
+        private bool _streamedVisualStateCached;
         private static Camera s_lodCamera;
         private static float s_nextLodCameraRefreshTime;
         private const float LodCameraRefreshInterval = 0.75f;
@@ -339,6 +345,60 @@ namespace EnvironmentSystem
                     }
                 }
             }
+        }
+
+        public void SetStreamedVisualReady(bool ready)
+        {
+            if (_streamedVisualReady == ready && _streamedVisualStateCached)
+            {
+                return;
+            }
+
+            CacheStreamedVisualState();
+            _streamedVisualReady = ready;
+
+            for (int i = 0; i < _streamedRenderers.Length; i++)
+            {
+                Renderer renderer = _streamedRenderers[i];
+                if (renderer != null)
+                {
+                    renderer.enabled = ready && _streamedRendererDefaults[i];
+                }
+            }
+
+            for (int i = 0; i < _streamedColliders.Length; i++)
+            {
+                Collider collider = _streamedColliders[i];
+                if (collider != null)
+                {
+                    collider.enabled = ready && _streamedColliderDefaults[i];
+                }
+            }
+        }
+
+        private void CacheStreamedVisualState()
+        {
+            if (_streamedVisualStateCached)
+            {
+                return;
+            }
+
+            _streamedRenderers = GetComponentsInChildren<Renderer>(true);
+            _streamedColliders = GetComponentsInChildren<Collider>(true);
+            _streamedRendererDefaults = new bool[_streamedRenderers.Length];
+            _streamedColliderDefaults = new bool[_streamedColliders.Length];
+
+            for (int i = 0; i < _streamedRenderers.Length; i++)
+            {
+                _streamedRendererDefaults[i] = _streamedRenderers[i] != null && _streamedRenderers[i].enabled;
+            }
+
+            for (int i = 0; i < _streamedColliders.Length; i++)
+            {
+                _streamedColliderDefaults[i] = _streamedColliders[i] != null && _streamedColliders[i].enabled;
+            }
+
+            _streamedVisualStateCached = true;
         }
 
         public List<DesertTerrainChunk> FindLoadedNeighbors(
