@@ -10,6 +10,10 @@ namespace EnvironmentSystem
     {
         public static WorldStreamer Instance { get; private set; }
         public bool HasLoadedAnyChunks => _loadedChunks.Count > 0;
+        public bool DistantTerrainProxyActive => _distantTerrainObject != null && _distantTerrainObject.activeInHierarchy && _distantTerrainMesh != null;
+        public int DistantTerrainProxyVertexCount => _distantTerrainMesh != null ? _distantTerrainMesh.vertexCount : 0;
+        public float DistantTerrainProxyCoverageRadiusMeters => Mathf.Max(chunkSizeX, chunkSizeZ) * Mathf.Max(0, distantTerrainRange);
+        public float DistantTerrainCameraFarClipTarget => distantTerrainCameraFarClip;
         private const int MinimumRuntimeLoadingRange = 3;
         private const int MinimumRuntimeConcurrentLoads = 2;
         private const int MinimumRuntimeForwardExtraRange = 4;

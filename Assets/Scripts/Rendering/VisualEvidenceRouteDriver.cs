@@ -201,10 +201,12 @@ namespace Cementery.Rendering
                 _evidenceCamera.depth = 1000f;
                 _evidenceCamera.fieldOfView = source != null ? source.fieldOfView : 60f;
                 _evidenceCamera.nearClipPlane = 0.1f;
-                _evidenceCamera.farClipPlane = 1200f;
+                _evidenceCamera.farClipPlane = Mathf.Max(source != null ? source.farClipPlane : 0f, 12000f);
                 _evidenceCamera.clearFlags = CameraClearFlags.Skybox;
                 _evidenceCamera.cullingMask = source != null ? source.cullingMask : ~0;
             }
+
+            _evidenceCamera.farClipPlane = Mathf.Max(_evidenceCamera.farClipPlane, source != null ? source.farClipPlane : 0f, 12000f);
 
             Vector3 forward = source != null ? Vector3.ProjectOnPlane(source.transform.forward, Vector3.up).normalized : Vector3.forward;
             if (forward.sqrMagnitude < 0.01f)

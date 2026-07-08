@@ -165,7 +165,10 @@ namespace Cementery.Rendering.Editor
                 MaxFogDensity = -1f,
                 MinFogStartDistance = float.MaxValue,
                 MaxFogEndDistance = -1f,
-                MaxAmbientIntensity = -1f
+                MaxAmbientIntensity = -1f,
+                MaxDistantProxyRadiusMeters = -1f,
+                MaxDistantProxyVertices = -1f,
+                MaxDistantProxyFarClip = -1f
             };
             int startLine = FindLatestHeaderLine(lines) + 1;
             summary.SessionStartLine = startLine + 1;
@@ -239,6 +242,18 @@ namespace Cementery.Rendering.Editor
 
                 if (TryParseOptional(columns, 18, out float ambientIntensity))
                     summary.MaxAmbientIntensity = Mathf.Max(summary.MaxAmbientIntensity, ambientIntensity);
+
+                if (TryParseOptional(columns, 19, out float distantProxyActive) && distantProxyActive > 0.5f)
+                    summary.DistantProxyActiveRows++;
+
+                if (TryParseOptional(columns, 20, out float distantProxyRadius))
+                    summary.MaxDistantProxyRadiusMeters = Mathf.Max(summary.MaxDistantProxyRadiusMeters, distantProxyRadius);
+
+                if (TryParseOptional(columns, 21, out float distantProxyVertices))
+                    summary.MaxDistantProxyVertices = Mathf.Max(summary.MaxDistantProxyVertices, distantProxyVertices);
+
+                if (TryParseOptional(columns, 22, out float distantProxyFarClip))
+                    summary.MaxDistantProxyFarClip = Mathf.Max(summary.MaxDistantProxyFarClip, distantProxyFarClip);
             }
 
             return summary;
@@ -308,6 +323,10 @@ namespace Cementery.Rendering.Editor
             builder.AppendLine($"| Peak fog density | {FormatOptionalFloat(summary.MaxFogDensity, "F4")} |");
             builder.AppendLine($"| Fog distance range | {FormatFogDistanceRange(summary)} |");
             builder.AppendLine($"| Peak ambient intensity | {FormatOptionalFloat(summary.MaxAmbientIntensity, "F2")} |");
+            builder.AppendLine($"| Distant terrain proxy active samples | {FormatDistantProxyRows(summary)} |");
+            builder.AppendLine($"| Distant terrain proxy radius | {FormatOptionalMeters(summary.MaxDistantProxyRadiusMeters)} |");
+            builder.AppendLine($"| Distant terrain proxy vertices | {FormatOptionalFloat(summary.MaxDistantProxyVertices, "F0")} |");
+            builder.AppendLine($"| Distant terrain far clip target | {FormatOptionalMeters(summary.MaxDistantProxyFarClip)} |");
             builder.AppendLine($"| Route screenshots | {screenshotCount} / {RequiredScreenshotNames.Length} |");
             builder.AppendLine($"| Profiler capture size | {FormatBytes(profilerCaptureBytes)} |");
             builder.AppendLine();
@@ -321,6 +340,7 @@ namespace Cementery.Rendering.Editor
             builder.AppendLine($"| Evidence duration | {FormatVerdict(durationSeconds >= MinimumEvidenceDurationSeconds)} |");
             builder.AppendLine($"| Day/night route coverage | {FormatCoverageVerdict(HasDayNightCoverage(summary))} |");
             builder.AppendLine($"| Fog route coverage | {FormatCoverageVerdict(HasFogCoverage(summary))} |");
+            builder.AppendLine($"| Distant terrain proxy coverage | {FormatCoverageVerdict(HasDistantTerrainCoverage(summary))} |");
             builder.AppendLine($"| Screenshot route coverage | {FormatCoverageVerdict(hasScreenshotCoverage)} |");
             builder.AppendLine($"| Profiler capture | {FormatCoverageVerdict(hasProfilerCapture)} |");
             builder.AppendLine();
@@ -384,6 +404,7 @@ namespace Cementery.Rendering.Editor
             AppendCheck(builder, "Sampler delimits each profiling session", ContainsAll(sampler, "EnsureSessionHeader", "File.AppendAllText(_samplePath, CsvHeader"), SamplerPath, ref failures);
             AppendCheck(builder, "Sampler records profiling counters", ContainsAll(sampler, "ProfilerRecorder", "GC Allocated In Frame", "Main Thread", "Render Thread"), SamplerPath, ref warnings, true);
             AppendCheck(builder, "Sampler records visual route state", ContainsAll(sampler, "time_of_day", "RenderSettings.fog", "ambientIntensity"), SamplerPath, ref failures);
+            AppendCheck(builder, "Sampler records distant terrain proxy state", ContainsAll(sampler, "distant_proxy_active", "DistantTerrainProxyCoverageRadiusMeters", "DistantTerrainProxyVertexCount"), SamplerPath, ref failures);
             AppendCheck(builder, "Evidence route driver is available", ContainsAll(evidenceRouteDriver, "VisualEvidenceRouteDriver", "day clear", "night fog"), EvidenceRouteDriverPath, ref failures);
             AppendCheck(builder, "Evidence route requests phase samples", ContainsAll(evidenceRouteDriver, "TryWriteImmediateSample", "evidence sample for"), EvidenceRouteDriverPath, ref failures);
             AppendCheck(builder, "Evidence route captures phase screenshots", ContainsAll(evidenceRouteDriver, "ScreenCapture.CaptureScreenshot", "visual-evidence-route", "visual-evidence-"), EvidenceRouteDriverPath, ref failures);
@@ -511,6 +532,20 @@ namespace Cementery.Rendering.Editor
             return $"{summary.MinFogStartDistance:F2} to {summary.MaxFogEndDistance:F2}";
         }
 
+        private static string FormatDistantProxyRows(Summary summary)
+        {
+            return summary.SampleRows == 0
+                ? "Unavailable"
+                : $"{summary.DistantProxyActiveRows} / {summary.SampleRows}";
+        }
+
+        private static string FormatOptionalMeters(float value)
+        {
+            return value < 0f || float.IsPositiveInfinity(value)
+                ? "Unavailable"
+                : $"{value:F2} m";
+        }
+
         private static string FormatVerdict(bool pass)
         {
             return pass ? "PASS" : "NEEDS PROFILING REVIEW";
@@ -529,6 +564,13 @@ namespace Cementery.Rendering.Editor
         private static bool HasFogCoverage(Summary summary)
         {
             return summary.VisualStateRows > 0 && summary.FogEnabledRows > 0 && summary.MaxFogDensity >= 0.004f;
+        }
+
+        private static bool HasDistantTerrainCoverage(Summary summary)
+        {
+            return summary.DistantProxyActiveRows > 0 &&
+                summary.MaxDistantProxyRadiusMeters >= 8192f &&
+                summary.MaxDistantProxyFarClip >= 12000f;
         }
 
         private static int CountExistingRequiredScreenshots(string screenshotDirectory)
@@ -580,6 +622,10 @@ namespace Cementery.Rendering.Editor
             public float MinFogStartDistance;
             public float MaxFogEndDistance;
             public float MaxAmbientIntensity;
+            public int DistantProxyActiveRows;
+            public float MaxDistantProxyRadiusMeters;
+            public float MaxDistantProxyVertices;
+            public float MaxDistantProxyFarClip;
             public float StartMemoryMb;
             public float EndMemoryMb;
         }
