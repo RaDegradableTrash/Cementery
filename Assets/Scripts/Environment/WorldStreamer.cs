@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
 
 namespace EnvironmentSystem
@@ -63,6 +64,18 @@ namespace EnvironmentSystem
         [Tooltip("Maximum chunk loads started per streaming refresh. This bounds bursts when the requested range expands.")]
         [Min(1)] public int maxChunkQueueAddsPerRefresh = 18;
 
+        [Header("Distant Terrain Proxy")]
+        [Tooltip("Creates a low-cost terrain mesh under streamed chunks so very distant terrain is visible immediately while real chunks load.")]
+        public bool enableDistantTerrainProxy = true;
+        [Tooltip("How many chunk rings the far terrain proxy covers from the tracked target.")]
+        [Range(6, 24)] public int distantTerrainRange = 18;
+        [Tooltip("Low-detail mesh subdivisions per chunk for the far terrain proxy.")]
+        [Range(1, 6)] public int distantTerrainSamplesPerChunk = 3;
+        [Tooltip("Drops the far proxy slightly under real chunks to prevent z-fighting when detailed chunks arrive.")]
+        [Min(0f)] public float distantTerrainVerticalOffset = 1.25f;
+        [Tooltip("Minimum camera far clip plane while distant terrain is enabled.")]
+        [Min(1000f)] public float distantTerrainCameraFarClip = 6000f;
+
         private HashSet<string> _requestedChunks = new HashSet<string>();
         private HashSet<string> _loadedChunks = new HashSet<string>();
         private Dictionary<string, Coroutine> _unloadRoutines = new Dictionary<string, Coroutine>();
@@ -109,6 +122,18 @@ namespace EnvironmentSystem
         private RVSystem.RVController _cachedRv;
         private RVSystem.RVStateMachine _cachedRvStateMachine;
         private Camera _cachedCamera;
+        private GameObject _distantTerrainObject;
+        private MeshFilter _distantTerrainFilter;
+        private MeshRenderer _distantTerrainRenderer;
+        private Mesh _distantTerrainMesh;
+        private DesertTerrainChunk _distantTerrainHeightSource;
+        private int _lastDistantGridX = int.MinValue;
+        private int _lastDistantGridZ = int.MinValue;
+        private int _lastDistantTerrainRange = int.MinValue;
+        private int _lastDistantTerrainSamplesPerChunk = int.MinValue;
+        private float _lastDistantChunkSizeX = -1f;
+        private float _lastDistantChunkSizeZ = -1f;
+        private DesertTerrainChunk _lastDistantTerrainHeightSource;
 
         private void Awake()
         {
@@ -124,6 +149,28 @@ namespace EnvironmentSystem
         {
             // Initial trigger will be fired automatically in the first Update frame
             _nextCheckTime = 0f;
+        }
+
+        private void OnDestroy()
+        {
+            if (Instance == this)
+            {
+                Instance = null;
+            }
+
+            if (_distantTerrainObject != null)
+            {
+                if (Application.isPlaying)
+                {
+                    Destroy(_distantTerrainObject);
+                }
+                else
+                {
+                    DestroyImmediate(_distantTerrainObject);
+                }
+
+                _distantTerrainObject = null;
+            }
         }
 
         private void Update()
@@ -159,6 +206,7 @@ namespace EnvironmentSystem
                 int gridX = Mathf.RoundToInt(pos.x / chunkSizeX);
                 int gridZ = Mathf.RoundToInt(pos.z / chunkSizeZ);
                 Vector2Int forwardGrid = ResolveForwardGridDirection(pos, shouldRunScheduledCheck);
+                EnsureDistantTerrainProxy(gridX, gridZ);
 
                 if (gridX != _lastGridX ||
                     gridZ != _lastGridZ ||
@@ -748,6 +796,210 @@ namespace EnvironmentSystem
             {
                 chunk.SetStreamedVisualReady(IsChunkVisuallyReady(sceneName));
             }
+        }
+
+        private void EnsureDistantTerrainProxy(int centerGridX, int centerGridZ)
+        {
+            if (!enableDistantTerrainProxy)
+            {
+                if (_distantTerrainObject != null)
+                {
+                    _distantTerrainObject.SetActive(false);
+                }
+                return;
+            }
+
+            EnsureCameraFarClip();
+            EnsureDistantTerrainComponents();
+            if (_distantTerrainObject == null || _distantTerrainFilter == null || _distantTerrainRenderer == null)
+            {
+                return;
+            }
+
+            _distantTerrainObject.SetActive(true);
+            RefreshDistantTerrainHeightSource();
+            RefreshDistantTerrainMaterial();
+
+            int range = Mathf.Max(1, distantTerrainRange);
+            int samplesPerChunk = Mathf.Max(1, distantTerrainSamplesPerChunk);
+            bool needsRebuild =
+                _distantTerrainMesh == null ||
+                centerGridX != _lastDistantGridX ||
+                centerGridZ != _lastDistantGridZ ||
+                range != _lastDistantTerrainRange ||
+                samplesPerChunk != _lastDistantTerrainSamplesPerChunk ||
+                !Mathf.Approximately(chunkSizeX, _lastDistantChunkSizeX) ||
+                !Mathf.Approximately(chunkSizeZ, _lastDistantChunkSizeZ) ||
+                _distantTerrainHeightSource != _lastDistantTerrainHeightSource;
+
+            if (!needsRebuild)
+            {
+                return;
+            }
+
+            BuildDistantTerrainMesh(centerGridX, centerGridZ, range, samplesPerChunk);
+            _lastDistantGridX = centerGridX;
+            _lastDistantGridZ = centerGridZ;
+            _lastDistantTerrainRange = range;
+            _lastDistantTerrainSamplesPerChunk = samplesPerChunk;
+            _lastDistantChunkSizeX = chunkSizeX;
+            _lastDistantChunkSizeZ = chunkSizeZ;
+            _lastDistantTerrainHeightSource = _distantTerrainHeightSource;
+        }
+
+        private void EnsureCameraFarClip()
+        {
+            if (_cachedCamera == null || !_cachedCamera.gameObject.activeInHierarchy)
+            {
+                _cachedCamera = Camera.main;
+            }
+
+            if (_cachedCamera != null && _cachedCamera.farClipPlane < distantTerrainCameraFarClip)
+            {
+                _cachedCamera.farClipPlane = distantTerrainCameraFarClip;
+            }
+        }
+
+        private void EnsureDistantTerrainComponents()
+        {
+            if (_distantTerrainObject != null)
+            {
+                return;
+            }
+
+            _distantTerrainObject = new GameObject("DistantTerrainProxy");
+            _distantTerrainObject.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+            _distantTerrainObject.transform.localScale = Vector3.one;
+            _distantTerrainFilter = _distantTerrainObject.AddComponent<MeshFilter>();
+            _distantTerrainRenderer = _distantTerrainObject.AddComponent<MeshRenderer>();
+            _distantTerrainRenderer.shadowCastingMode = ShadowCastingMode.Off;
+            _distantTerrainRenderer.receiveShadows = false;
+            _distantTerrainRenderer.motionVectorGenerationMode = MotionVectorGenerationMode.ForceNoMotion;
+        }
+
+        private void RefreshDistantTerrainHeightSource()
+        {
+            if (_distantTerrainHeightSource != null && _distantTerrainHeightSource.gameObject.activeInHierarchy)
+            {
+                return;
+            }
+
+            _distantTerrainHeightSource = null;
+            foreach (var kv in ChunkRegistry.All)
+            {
+                DesertTerrainChunk chunk = kv.Value;
+                if (chunk == null || !chunk.gameObject.activeInHierarchy)
+                {
+                    continue;
+                }
+
+                _distantTerrainHeightSource = chunk;
+                return;
+            }
+        }
+
+        private void RefreshDistantTerrainMaterial()
+        {
+            if (_distantTerrainRenderer == null)
+            {
+                return;
+            }
+
+            Material material = _distantTerrainHeightSource != null
+                ? _distantTerrainHeightSource.terrainMaterial
+                : null;
+            if (material == null)
+            {
+                material = Resources.Load<Material>("GravelTerrain");
+            }
+
+            if (material != null && _distantTerrainRenderer.sharedMaterial != material)
+            {
+                _distantTerrainRenderer.sharedMaterial = material;
+            }
+        }
+
+        private void BuildDistantTerrainMesh(int centerGridX, int centerGridZ, int range, int samplesPerChunk)
+        {
+            int chunksWide = range * 2;
+            int quadsX = Mathf.Max(2, chunksWide * samplesPerChunk);
+            int quadsZ = Mathf.Max(2, chunksWide * samplesPerChunk);
+            int vertsX = quadsX + 1;
+            int vertsZ = quadsZ + 1;
+            int vertexCount = vertsX * vertsZ;
+
+            Vector3[] vertices = new Vector3[vertexCount];
+            Vector2[] uvs = new Vector2[vertexCount];
+            int[] triangles = new int[quadsX * quadsZ * 6];
+
+            float startX = (centerGridX - range) * chunkSizeX;
+            float startZ = (centerGridZ - range) * chunkSizeZ;
+            float stepX = chunkSizeX / samplesPerChunk;
+            float stepZ = chunkSizeZ / samplesPerChunk;
+
+            for (int z = 0; z < vertsZ; z++)
+            {
+                float worldZ = startZ + z * stepZ;
+                for (int x = 0; x < vertsX; x++)
+                {
+                    float worldX = startX + x * stepX;
+                    float height = SampleDistantTerrainHeight(worldX, worldZ) - distantTerrainVerticalOffset;
+                    int index = z * vertsX + x;
+                    vertices[index] = new Vector3(worldX, height, worldZ);
+                    uvs[index] = new Vector2((float)x / quadsX, (float)z / quadsZ);
+                }
+            }
+
+            int t = 0;
+            for (int z = 0; z < quadsZ; z++)
+            {
+                for (int x = 0; x < quadsX; x++)
+                {
+                    int bl = z * vertsX + x;
+                    int br = bl + 1;
+                    int tl = bl + vertsX;
+                    int tr = tl + 1;
+
+                    triangles[t++] = bl;
+                    triangles[t++] = tl;
+                    triangles[t++] = tr;
+                    triangles[t++] = bl;
+                    triangles[t++] = tr;
+                    triangles[t++] = br;
+                }
+            }
+
+            if (_distantTerrainMesh == null)
+            {
+                _distantTerrainMesh = new Mesh { name = "DistantTerrainProxyMesh" };
+            }
+            else
+            {
+                _distantTerrainMesh.Clear();
+            }
+
+            if (vertexCount > 65535)
+            {
+                _distantTerrainMesh.indexFormat = IndexFormat.UInt32;
+            }
+
+            _distantTerrainMesh.vertices = vertices;
+            _distantTerrainMesh.uv = uvs;
+            _distantTerrainMesh.triangles = triangles;
+            _distantTerrainMesh.RecalculateNormals();
+            _distantTerrainMesh.RecalculateBounds();
+            _distantTerrainFilter.sharedMesh = _distantTerrainMesh;
+        }
+
+        private float SampleDistantTerrainHeight(float worldX, float worldZ)
+        {
+            if (_distantTerrainHeightSource != null)
+            {
+                return _distantTerrainHeightSource.transform.position.y +
+                    _distantTerrainHeightSource.SampleHeight(worldX, worldZ);
+            }
+
+            return Mathf.PerlinNoise(worldX / 220f, worldZ / 220f) * 10f;
         }
 
         private bool IsChunkVisuallyReady(string sceneName)
