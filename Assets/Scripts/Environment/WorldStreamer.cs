@@ -1064,6 +1064,11 @@ namespace EnvironmentSystem
                 return true;
             }
 
+            if (_unloadRoutines.ContainsKey(sceneName))
+            {
+                return true;
+            }
+
             bool ready = _visuallyReadyChunks.Contains(sceneName);
             if (ready)
             {
