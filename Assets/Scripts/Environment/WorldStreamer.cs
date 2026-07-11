@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.SceneManagement;
 
 namespace EnvironmentSystem
@@ -89,6 +90,14 @@ namespace EnvironmentSystem
         [Tooltip("Minimum camera far clip plane while distant terrain is enabled.")]
         [Min(1000f)] public float distantTerrainCameraFarClip = 12000f;
 
+        [Header("Distant Terrain Camera Stack")]
+        [Tooltip("Render the far terrain proxy with a dedicated URP overlay camera so the gameplay camera can keep a shorter far clip.")]
+        public bool useDistantTerrainCameraStack = true;
+        [Tooltip("Unnamed runtime layer used only by the generated distant terrain proxy and far camera.")]
+        [Range(8, 31)] public int distantTerrainLayer = 28;
+        [Tooltip("Gameplay camera far clip while the far terrain overlay camera is active.")]
+        [Min(250f)] public float stackedMainCameraFarClip = 2500f;
+
         private HashSet<string> _requestedChunks = new HashSet<string>();
         private HashSet<string> _loadedChunks = new HashSet<string>();
         private Dictionary<string, Coroutine> _unloadRoutines = new Dictionary<string, Coroutine>();
@@ -139,7 +148,11 @@ namespace EnvironmentSystem
         private MeshFilter _distantTerrainFilter;
         private MeshRenderer _distantTerrainRenderer;
         private Mesh _distantTerrainMesh;
+        private Camera _distantTerrainCamera;
         private DesertTerrainChunk _distantTerrainHeightSource;
+        private Camera _stackedBaseCamera;
+        private float _stackedBaseCameraOriginalFarClip = -1f;
+        private int _stackedBaseCameraOriginalCullingMask;
         private int _lastDistantGridX = int.MinValue;
         private int _lastDistantGridZ = int.MinValue;
         private int _lastDistantTerrainRange = int.MinValue;
@@ -170,6 +183,22 @@ namespace EnvironmentSystem
             if (Instance == this)
             {
                 Instance = null;
+            }
+
+            RestoreStackedBaseCamera();
+
+            if (_distantTerrainCamera != null)
+            {
+                if (Application.isPlaying)
+                {
+                    Destroy(_distantTerrainCamera.gameObject);
+                }
+                else
+                {
+                    DestroyImmediate(_distantTerrainCamera.gameObject);
+                }
+
+                _distantTerrainCamera = null;
             }
 
             if (_distantTerrainObject != null)
@@ -850,6 +879,8 @@ namespace EnvironmentSystem
             }
 
             _distantTerrainObject.SetActive(true);
+            ConfigureDistantTerrainLayer();
+            ConfigureDistantTerrainCameraStack();
             RefreshDistantTerrainHeightSource();
             RefreshDistantTerrainMaterial();
 
@@ -899,9 +930,166 @@ namespace EnvironmentSystem
                 _cachedCamera = Camera.main;
             }
 
-            if (_cachedCamera != null && _cachedCamera.farClipPlane < distantTerrainCameraFarClip)
+            if (_cachedCamera != null && !useDistantTerrainCameraStack && _cachedCamera.farClipPlane < distantTerrainCameraFarClip)
             {
                 _cachedCamera.farClipPlane = distantTerrainCameraFarClip;
+            }
+        }
+
+        private void ConfigureDistantTerrainLayer()
+        {
+            if (_distantTerrainObject == null)
+            {
+                return;
+            }
+
+            int layer = Mathf.Clamp(distantTerrainLayer, 0, 31);
+            if (_distantTerrainObject.layer == layer)
+            {
+                return;
+            }
+
+            SetLayerRecursively(_distantTerrainObject.transform, layer);
+        }
+
+        private void ConfigureDistantTerrainCameraStack()
+        {
+            if (!useDistantTerrainCameraStack)
+            {
+                RestoreStackedBaseCamera();
+                if (_distantTerrainCamera != null)
+                {
+                    _distantTerrainCamera.enabled = false;
+                }
+                return;
+            }
+
+            Camera baseCamera = GetActiveDistantBaseCamera();
+            if (baseCamera == null)
+            {
+                return;
+            }
+
+            EnsureDistantTerrainCamera();
+            if (_distantTerrainCamera == null)
+            {
+                return;
+            }
+
+            if (_stackedBaseCamera != baseCamera)
+            {
+                RestoreStackedBaseCamera();
+                _stackedBaseCamera = baseCamera;
+                _stackedBaseCameraOriginalFarClip = baseCamera.farClipPlane;
+                _stackedBaseCameraOriginalCullingMask = baseCamera.cullingMask;
+            }
+
+            int layerMask = 1 << Mathf.Clamp(distantTerrainLayer, 0, 31);
+            baseCamera.cullingMask = _stackedBaseCameraOriginalCullingMask & ~layerMask;
+            if (stackedMainCameraFarClip > 0f)
+            {
+                baseCamera.farClipPlane = Mathf.Min(_stackedBaseCameraOriginalFarClip, stackedMainCameraFarClip);
+            }
+
+            CopyDistantCameraSettings(baseCamera, layerMask);
+            UniversalAdditionalCameraData baseData = baseCamera.GetUniversalAdditionalCameraData();
+            UniversalAdditionalCameraData distantData = _distantTerrainCamera.GetUniversalAdditionalCameraData();
+            baseData.renderType = CameraRenderType.Base;
+            distantData.renderType = CameraRenderType.Overlay;
+            distantData.renderPostProcessing = false;
+            distantData.renderShadows = false;
+            distantData.requiresDepthOption = CameraOverrideOption.Off;
+            distantData.requiresColorOption = CameraOverrideOption.Off;
+            distantData.antialiasing = AntialiasingMode.None;
+
+            List<Camera> cameraStack = baseData.cameraStack;
+            if (cameraStack == null)
+            {
+                RestoreStackedBaseCamera();
+                _distantTerrainCamera.enabled = false;
+                return;
+            }
+
+            if (!cameraStack.Contains(_distantTerrainCamera))
+            {
+                cameraStack.Add(_distantTerrainCamera);
+            }
+        }
+
+        private Camera GetActiveDistantBaseCamera()
+        {
+            if (_cachedCamera == null || !_cachedCamera.gameObject.activeInHierarchy)
+            {
+                _cachedCamera = Camera.main;
+            }
+
+            return _cachedCamera;
+        }
+
+        private void EnsureDistantTerrainCamera()
+        {
+            if (_distantTerrainCamera != null)
+            {
+                return;
+            }
+
+            GameObject cameraObject = new GameObject("DistantTerrainOverlayCamera");
+            _distantTerrainCamera = cameraObject.AddComponent<Camera>();
+            _distantTerrainCamera.enabled = true;
+            _distantTerrainCamera.depth = 999f;
+            _distantTerrainCamera.clearFlags = CameraClearFlags.Nothing;
+            cameraObject.AddComponent<UniversalAdditionalCameraData>();
+        }
+
+        private void CopyDistantCameraSettings(Camera source, int layerMask)
+        {
+            _distantTerrainCamera.enabled = true;
+            _distantTerrainCamera.transform.SetPositionAndRotation(source.transform.position, source.transform.rotation);
+            _distantTerrainCamera.fieldOfView = source.fieldOfView;
+            _distantTerrainCamera.orthographic = source.orthographic;
+            _distantTerrainCamera.orthographicSize = source.orthographicSize;
+            _distantTerrainCamera.aspect = source.aspect;
+            _distantTerrainCamera.nearClipPlane = Mathf.Max(source.farClipPlane * 0.5f, 10f);
+            _distantTerrainCamera.farClipPlane = Mathf.Max(distantTerrainCameraFarClip, source.farClipPlane);
+            _distantTerrainCamera.cullingMask = layerMask;
+            _distantTerrainCamera.allowHDR = false;
+            _distantTerrainCamera.allowMSAA = false;
+            _distantTerrainCamera.useOcclusionCulling = false;
+        }
+
+        private void RestoreStackedBaseCamera()
+        {
+            if (_stackedBaseCamera == null)
+            {
+                return;
+            }
+
+            _stackedBaseCamera.cullingMask = _stackedBaseCameraOriginalCullingMask;
+            if (_stackedBaseCameraOriginalFarClip > 0f)
+            {
+                _stackedBaseCamera.farClipPlane = _stackedBaseCameraOriginalFarClip;
+            }
+
+            UniversalAdditionalCameraData baseData = _stackedBaseCamera.GetUniversalAdditionalCameraData();
+            if (_distantTerrainCamera != null)
+            {
+                List<Camera> cameraStack = baseData.cameraStack;
+                if (cameraStack != null)
+                {
+                    cameraStack.Remove(_distantTerrainCamera);
+                }
+            }
+
+            _stackedBaseCamera = null;
+            _stackedBaseCameraOriginalFarClip = -1f;
+        }
+
+        private static void SetLayerRecursively(Transform root, int layer)
+        {
+            root.gameObject.layer = layer;
+            for (int i = 0; i < root.childCount; i++)
+            {
+                SetLayerRecursively(root.GetChild(i), layer);
             }
         }
 
